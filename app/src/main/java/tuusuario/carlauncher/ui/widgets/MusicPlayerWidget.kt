@@ -16,13 +16,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tuusuario.carlauncher.services.MusicState
+// IMPORTANTE: Ahora llamamos al GlobalState, no al MusicState
+import com.tuusuario.carlauncher.services.GlobalState
 
 @Composable
 fun MusicPlayerWidget() {
-    // Leemos los valores en tiempo real del Servicio
-    val songTitle = MusicState.title.value
-    val songArtist = MusicState.artist.value
+    // Leemos los valores en tiempo real del nuevo GlobalState
+    val songTitle = GlobalState.songTitle.value
+    val songArtist = GlobalState.songArtist.value
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
