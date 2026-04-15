@@ -16,7 +16,10 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
         
-    - name: Dar permisos y compilar APK
+    - name: Reparar Motor Gradle (Solución Windows a Linux)
+      run: gradle wrapper --gradle-version 8.7
+        
+    - name: Compilar APK
       env:
         MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
       run: |
