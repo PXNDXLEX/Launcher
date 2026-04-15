@@ -1,106 +1,77 @@
-package com.tuusuario.carlauncher
+package com.tuusuario.carlauncher.ui
 
-import android.Manifest
-import android.content.ComponentName
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Bundle
-import android.provider.Settings
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
-import com.tuusuario.carlauncher.ui.DashboardScreen
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    MainAppFlow()
-                }
-            }
-        }
-    }
-}
+// Importamos tus widgets
+import com.tuusuario.carlauncher.ui.map.NavigationMap
+import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
+import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 
 @Composable
-fun MainAppFlow() {
-    val context = LocalContext.current
+fun DashboardScreen() {
+    var isMapFullScreen by remember { mutableStateOf(false) }
     
-    // Estados de permisos
-    var locationGranted by remember { 
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) 
-    }
-    
-    var notificationsGranted by remember {
-        mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName))
-    }
-
-    // Lanzador para pedir permiso de GPS
-    val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted -> locationGranted = isGranted }
+    val backgroundBrush = Brush.linearGradient(
+        colors = listOf(Color(0xFF121212), Color(0xFF1E1E24))
     )
 
-    if (!locationGranted || !notificationsGranted) {
-        WelcomeAndPermissionsScreen(
-            locationGranted = locationGranted,
-            notificationsGranted = notificationsGranted,
-            onRequestLocation = { locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-            onRequestNotifications = {
-                // Abre la pantalla del sistema para habilitar la lectura de notificaciones
-                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            },
-            onCheckAgain = {
-                // Botón para refrescar el estado tras dar el permiso
-                notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
-            }
-        )
-    } else {
-        DashboardScreen()
-    }
-}
-
-@Composable
-fun WelcomeAndPermissionsScreen(
-    locationGranted: Boolean,
-    notificationsGranted: Boolean,
-    onRequestLocation: () -> Unit,
-    onRequestNotifications: () -> Unit,
-    onCheckAgain: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundBrush)
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Configuración de tu Kia Rio", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        if (!locationGranted) {
-            Text("1. Necesitamos acceso al GPS para que el velocímetro cobre vida.", textAlign = TextAlign.Center)
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onRequestLocation) { Text("Permitir GPS") }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        if (!isMapFullScreen) {
+            Box(
+                modifier = Modifier
+                    .weight(0.6f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xFF25252D))
+                    .clickable { isMapFullScreen = true }
+            ) {
+                NavigationMap(isFullScreen = false)
+            }
 
-        if (locationGranted && !notificationsGranted) {
-            Text("2. Para mostrar la música (Spotify/YouTube), necesitamos acceso a las notificaciones.", textAlign = TextAlign.Center)
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onRequestNotifications) { Text("Abrir Ajustes de Música") }
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = onCheckAgain) { Text("Ya lo activé, continuar") }
+            Column(
+                modifier = Modifier
+                    .weight(0.4f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0xFF25252D))) {
+                    SpeedometerWidget()
+                }
+                Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0xFF25252D))) {
+                    MusicPlayerWidget()
+                }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                NavigationMap(isFullScreen = true)
+                Button(
+                    onClick = { isMapFullScreen = false },
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+                ) {
+                    Icon(Icons.Default.ArrowBack, "Volver")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Volver al Dashboard")
+                }
+            }
         }
     }
 }
