@@ -1,40 +1,40 @@
+package com.tuusuario.carlauncher.ui.widgets
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
 @Composable
 fun MusicPlayerWidget() {
     Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.MusicNote, contentDescription = "Música", tint = Color(0xFF03A9F4))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Reproduciendo ahora", color = Color.Gray, fontSize = 14.sp)
-        }
-
-        Column {
-            Text(
-                text = "Mix Especial para Amola", 
-                color = Color.White, 
-                fontSize = 22.sp, 
-                fontWeight = FontWeight.Bold,
-                maxLines = 1
-            )
-            Text("Spotify", color = Color(0xFF1DB954), fontSize = 16.sp)
-        }
-
+        Text("Reproductor Activo", color = Color.Gray, fontSize = 14.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Esperando conexión...", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { /* Acción anterior */ }) {
-                Icon(Icons.Default.SkipPrevious, contentDescription = "Anterior", tint = Color.White, modifier = Modifier.size(36.dp))
-            }
-            IconButton(onClick = { /* Acción Play/Pause */ }) {
-                Icon(Icons.Default.PlayCircleFilled, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(56.dp))
-            }
-            IconButton(onClick = { /* Acción siguiente */ }) {
-                Icon(Icons.Default.SkipNext, contentDescription = "Siguiente", tint = Color.White, modifier = Modifier.size(36.dp))
-            }
+            IconButton(onClick = { }) { Icon(Icons.Default.SkipPrevious, "Anterior", tint = Color.White) }
+            IconButton(onClick = { }) { Icon(Icons.Default.PlayArrow, "Play/Pausa", tint = Color.White, modifier = Modifier.size(48.dp)) }
+            IconButton(onClick = { }) { Icon(Icons.Default.SkipNext, "Siguiente", tint = Color.White) }
         }
     }
 }

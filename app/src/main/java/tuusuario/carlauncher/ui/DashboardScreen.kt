@@ -15,8 +15,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.tuusuario.carlauncher.ui.map.NavigationMap
-import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
+import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 
 @Composable
 fun DashboardScreen() {
