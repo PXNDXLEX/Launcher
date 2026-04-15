@@ -1,6 +1,7 @@
 package com.tuusuario.carlauncher.ui.widgets
 
-import android.annotation.SuppressLint
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Looper
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -21,30 +22,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
-import kotlin.math.cos
-import kotlin.math.sin
 
 @Composable
 fun SpeedometerWidget() {
-    // 1. Obtenemos la velocidad real del GPS
     val currentSpeedKmH = rememberGpsSpeed()
-
-    // 2. Animamos la aguja para que el movimiento sea ultra fluido
     val animatedSpeed by animateFloatAsState(
         targetValue = currentSpeedKmH,
         animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
-        label = "SpeedNeedleAnimation"
+        label = "SpeedAnimation"
     )
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        // 3. Dibujamos el diseño analógico (Arco y Aguja)
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         SpeedometerDial(speed = animatedSpeed, maxSpeed = 220f)
 
-        // 4. Texto digital en el centro
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = currentSpeedKmH.toInt().toString(),
@@ -52,23 +44,17 @@ fun SpeedometerWidget() {
                 fontSize = 64.sp,
                 fontWeight = FontWeight.ExtraBold
             )
-            Text(
-                text = "KM/H",
-                color = Color.Gray,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text("KM/H", color = Color.Gray, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
 fun SpeedometerDial(speed: Float, maxSpeed: Float) {
-    Canvas(modifier = Modifier.size(200.dp)) {
-        val sweepAngle = 240f // El arco no es un círculo completo
-        val startAngle = 150f // Empieza desde abajo a la izquierda
+    Canvas(modifier = Modifier.size(180.dp)) {
+        val sweepAngle = 240f
+        val startAngle = 150f
 
-        // Dibujar el fondo del arco (Gris oscuro)
         drawArc(
             color = Color(0xFF3E3E46),
             startAngle = startAngle,
@@ -78,11 +64,9 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float) {
             size = Size(size.width, size.height)
         )
 
-        // Calcular cuánto se ha llenado el arco basado en la velocidad
         val speedProgress = (speed / maxSpeed).coerceIn(0f, 1f)
         val activeSweepAngle = sweepAngle * speedProgress
 
-        // Dibujar el arco activo (Rojo/Naranja estilo deportivo)
         drawArc(
             color = Color(0xFFE53935),
             startAngle = startAngle,
@@ -92,13 +76,12 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float) {
             size = Size(size.width, size.height)
         )
 
-        // Dibujar la Aguja
         val needleAngle = startAngle + activeSweepAngle
-        rotate(degrees = needleAngle + 90f) { // +90 por la orientación del Canvas
+        rotate(degrees = needleAngle + 90f) {
             drawLine(
                 color = Color.White,
                 start = Offset(center.x, center.y),
-                end = Offset(center.x, 20.dp.toPx()), // Longitud de la aguja
+                end = Offset(center.x, 20.dp.toPx()),
                 strokeWidth = 6.dp.toPx(),
                 cap = StrokeCap.Round
             )
@@ -106,8 +89,6 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float) {
     }
 }
 
-// --- LÓGICA DEL GPS EN SEGUNDO PLANO ---
-@SuppressLint("MissingPermission") // Asumimos que pedimos permisos en la pantalla de bienvenida
 @Composable
 fun rememberGpsSpeed(): Float {
     val context = LocalContext.current
@@ -115,33 +96,28 @@ fun rememberGpsSpeed(): Float {
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(500) // Actualizar cada medio segundo para mayor fluidez
+            .setMinUpdateIntervalMillis(500)
             .build()
 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 for (location in result.locations) {
                     if (location.hasSpeed()) {
-                        // El GPS devuelve metros por segundo. Multiplicamos por 3.6 para KM/H
-                        speed = location.speed * 3.6f 
+                        speed = location.speed * 3.6f // metros/segundo a KM/H
                     }
                 }
             }
         }
 
-        fusedLocationClient.requestLocationUpdates(
-            locationRequest,
-            locationCallback,
-            Looper.getMainLooper()
-        )
+        // Validación de seguridad obligatoria antes de iniciar el GPS
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+        }
 
         onDispose {
-            // Limpiar el sensor cuando el widget no esté en pantalla
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
-
     return speed
 }

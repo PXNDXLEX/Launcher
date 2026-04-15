@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Permisos de Ubicación para el Velocímetro -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    
+    <!-- Permisos futuros para la Dashcam -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
@@ -14,6 +17,8 @@
         android:icon="@android:drawable/sym_def_app_icon" 
         android:label="Auto Launcher"
         android:theme="@android:style/Theme.Material.NoActionBar"> 
+        
+        <!-- ACTIVITY PRINCIPAL -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -21,14 +26,18 @@
             android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+                <!-- Esto la convierte en Launcher predeterminado -->
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <!-- ESTA LÍNEA ES LA MAGIA PARA QUE APAREZCA EN EL MENÚ NORMAL -->
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- SERVICIO REAL DE MÚSICA -->
         <service
             android:name=".services.MusicNotificationService"
-            android:label="Lector de Música"
+            android:label="Car Launcher Música"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
