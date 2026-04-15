@@ -1,34 +1,28 @@
-name: Android CI/CD Build
+name: Compilar Car Launcher
 
 on:
   push:
     branches: [ "main" ]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout del código
-      uses: actions/checkout@v4
-
+    - uses: actions/checkout@v4
+    
     - name: Configurar Java 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
-
-    - name: Generar archivos Gradle (El truco maestro)
-      run: gradle wrapper --gradle-version 8.7
-
-    - name: Dar permisos de ejecución a Gradle
-      run: chmod +x gradlew
-
-    - name: Compilar APK Debug
-      run: ./gradlew :app:assembleDebug
-
+        
+    - name: Dar permisos y compilar APK
+      env:
+        MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+      run: |
+        chmod +x gradlew
+        ./gradlew :app:assembleDebug
+        
     - name: Subir APK
       uses: actions/upload-artifact@v4
       with:

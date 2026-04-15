@@ -5,11 +5,15 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.runtime.mutableStateOf
 
-// Objeto global para compartir la música con la Interfaz (Jetpack Compose)
-object MusicState {
-    val title = mutableStateOf("Música detenida")
-    val artist = mutableStateOf("")
-    val isPlaying = mutableStateOf(false)
+object GlobalState {
+    // Estado de Música
+    val songTitle = mutableStateOf("Música detenida")
+    val songArtist = mutableStateOf("")
+    
+    // Estado de Popups (WhatsApp, Mensajes, etc)
+    val showPopup = mutableStateOf(false)
+    val popupMessage = mutableStateOf("")
+    val popupApp = mutableStateOf("")
 }
 
 class MusicNotificationService : NotificationListenerService() {
@@ -18,20 +22,24 @@ class MusicNotificationService : NotificationListenerService() {
         val notification = sbn?.notification ?: return
         val extras = notification.extras
 
-        // Verificamos si la notificación tiene una sesión multimedia (Spotify, YT Music, etc.)
-        if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION) || extras.containsKey(Notification.EXTRA_TITLE)) {
+        // ¿Es un reproductor de música? (Tiene Media Session)
+        if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
             val title = extras.getString(Notification.EXTRA_TITLE)
             val artist = extras.getString(Notification.EXTRA_TEXT)
-
             if (!title.isNullOrEmpty()) {
-                MusicState.title.value = title
-                MusicState.artist.value = artist ?: "Desconocido"
-                MusicState.isPlaying.value = true
+                GlobalState.songTitle.value = title
+                GlobalState.songArtist.value = artist ?: "Desconocido"
+            }
+        } 
+        // Si NO es música, pero es un mensaje importante (ej. WhatsApp)
+        else {
+            val title = extras.getString(Notification.EXTRA_TITLE)
+            val text = extras.getString(Notification.EXTRA_TEXT)
+            if (!title.isNullOrEmpty() && !text.isNullOrEmpty() && sbn.packageName != packageName) {
+                GlobalState.popupApp.value = title // Suele ser el nombre del contacto
+                GlobalState.popupMessage.value = text
+                GlobalState.showPopup.value = true
             }
         }
-    }
-
-    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // Opcional: Podríamos limpiar la información aquí si se cierra la app de música
     }
 }
