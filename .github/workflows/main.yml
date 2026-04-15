@@ -21,7 +21,7 @@ jobs:
         java-version: '17'
 
     - name: Generar archivos Gradle (El truco maestro)
-      run: gradle wrapper --gradle-version 8.2
+      run: gradle wrapper --gradle-version 8.7
 
     - name: Dar permisos de ejecución a Gradle
       run: chmod +x gradlew
