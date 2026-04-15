@@ -6,20 +6,20 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+// IMPORTANTE: Importamos el Dashboard real que creamos en la otra carpeta
+import com.tuusuario.carlauncher.ui.DashboardScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // Manejador de estado para Modo Oscuro/Claro
-            var isDarkMode by remember { mutableStateOf(true) }
-            
-            MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()) {
+            // Por defecto iniciamos en modo oscuro (ideal para el coche)
+            MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    MainAppFlow(
-                        toggleTheme = { isDarkMode = !isDarkMode }
-                    )
+                    MainAppFlow()
                 }
             }
         }
@@ -27,44 +27,38 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainAppFlow(toggleTheme: () -> Unit) {
+fun MainAppFlow() {
     // Lógica simple: Si no hay permisos, mostrar Welcome, si los hay, Dashboard.
     var permissionsGranted by remember { mutableStateOf(false) }
 
     if (!permissionsGranted) {
         WelcomeAndPermissionsScreen(onPermissionsGranted = { permissionsGranted = true })
     } else {
-        DashboardScreen(toggleTheme = toggleTheme)
-    }
-}
-
-@Composable
-fun DashboardScreen(toggleTheme: () -> Unit) {
-    // Aquí iría tu barra de navegación lateral o inferior
-    Row(modifier = Modifier.fillMaxSize()) {
-        // Área del Mapa GPS (Izquierda/Centro)
-        Box(modifier = Modifier.weight(2f)) {
-            Text("Mapa de Navegación (Mapbox/Google Maps) con Coche 3D")
-        }
-        
-        // Área de Widgets (Derecha)
-        Column(modifier = Modifier.weight(1f)) {
-            Text("Velocímetro (Aguja + Digital)")
-            Text("Reproductor de Música (NotificationListener)")
-            Button(onClick = toggleTheme) {
-                Text("Cambiar Tema Oscuro/Claro")
-            }
-        }
+        // Llamamos al Dashboard increíble que diseñamos en DashboardScreen.kt
+        DashboardScreen()
     }
 }
 
 @Composable
 fun WelcomeAndPermissionsScreen(onPermissionsGranted: () -> Unit) {
-    Column {
-        Text("Bienvenido al Auto Launcher")
-        Text("Por favor, concédenos los permisos de GPS, Cámara y Notificaciones.")
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Bienvenido al Auto Launcher", 
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Para que la navegación y el velocímetro funcionen correctamente, necesitamos permisos de GPS.",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Spacer(modifier = Modifier.height(32.dp))
         Button(onClick = onPermissionsGranted) {
-            Text("Aceptar Permisos")
+            Text("Aceptar Permisos y Arrancar")
         }
     }
 }
