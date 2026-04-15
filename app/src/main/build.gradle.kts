@@ -1,11 +1,10 @@
-// Archivo app/build.gradle.kts (NIVEL APP)
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
 android {
-    namespace = "com.tuusuario.carlauncher" // Debe coincidir con el package de tu AndroidManifest
+    namespace = "com.tuusuario.carlauncher"
     compileSdk = 34
 
     defaultConfig {
@@ -16,23 +15,21 @@ android {
         versionName = "1.0"
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
+    buildFeatures {
+        compose = true
     }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.10"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
-    }
-    buildFeatures {
-        compose = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.10"
     }
 }
 
@@ -48,9 +45,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     
-    // GPS para el velocímetro
+    // GPS para el Velocímetro
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
-    // MAPBOX (Nota: Solo descomenta esta línea si ya pusiste el MAPBOX_DOWNLOADS_TOKEN en GitHub Secrets)
+    // Mapbox está comentado temporalmente hasta que configuremos tu Token Secreto
     implementation("com.mapbox.maps:android:11.2.0")
 }

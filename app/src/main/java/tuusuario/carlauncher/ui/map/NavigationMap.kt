@@ -3,46 +3,68 @@ package com.tuusuario.carlauncher.ui.map
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
-import com.mapbox.maps.plugin.animation.camera
+import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck // Importante para el indicador base
+import com.mapbox.maps.plugin.locationcomponent.LocationPuck3D      // Importante para el coche 3D
 import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.maps.plugin.gestures.gestures
 
 @Composable
 fun NavigationMap(
     modifier: Modifier = Modifier,
-    carIconRes: Int, // Aquí pasaremos el ID del icono (Sedán, Moto, etc.)
-    isFullScreen: Boolean = false
+    isFullScreen: Boolean = false,
+    carModelPath: String = "asset://kia_rio_2009.glb"
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    
-    // Recordamos la instancia del MapView para no recrearla innecesariamente
     val mapView = remember { MapView(context) }
 
     AndroidView(
         factory = { mapView },
         modifier = modifier,
         update = { view ->
-            view.mapboxMap.loadStyle(Style.DARK) { // Modo oscuro por defecto
-                // Configuración de la cámara tipo Navegación
+            view.mapboxMap.loadStyle(Style.DARK) {
+                
+                // 1. Inclinación de la cámara estilo GPS
                 view.mapboxMap.setCamera(
                     CameraOptions.Builder()
-                        .zoom(17.0)
-                        .pitch(45.0) // Inclinación para ver el horizonte
+                        .zoom(17.5)
+                        .pitch(60.0)
+                        .bearing(0.0)
                         .build()
                 )
-                
-                // Activamos el componente de ubicación (el "auto")
+
+                // 2. Configuración del Rastreo GPS
                 view.location.updateSettings {
                     enabled = true
                     pulsingEnabled = false
-                    // Aquí es donde personalizas el icono según tu preferencia
-                    // Por ahora usamos un marcador, pero se vincula al recurso 3D
-                    locationPuck = com.mapbox.maps.plugin.locationcomponent.generated.DefaultLocationPuck2D(
-                        bearingImage = context.getDrawable(carIconRes)
+                    puckBearingEnabled = true
+                    puckBearing = PuckBearing.HEADING
+                    
+                    // ==========================================
+                    // AQUÍ ESTÁ EL LOCATION PUCK
+                    // ==========================================
+                    
+                    // OPCIÓN 1: El coche 3D (Descomenta esto cuando subas el archivo .glb a la carpeta assets)
+                    /*
+                    locationPuck = LocationPuck3D(
+                        modelUri = carModelPath,
+                        modelScale = listOf(1.5f, 1.5f, 1.5f)
                     )
+                    */
+
+                    // OPCIÓN 2: El cursor genérico de Mapbox (Usa este HOY para que la app compile sin errores)
+                    locationPuck = createDefault2DPuck(withBearing = true)
+                    
+                    // ==========================================
+                }
+
+                // 3. Control de la pantalla táctil
+                view.gestures.updateSettings {
+                    rotateEnabled = isFullScreen
+                    pinchToZoomEnabled = isFullScreen
                 }
             }
         }
