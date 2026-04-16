@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.view.WindowManager // Importación necesaria para el manejo de la pantalla
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,7 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner // <-- ¡ESTA ES LA RUTA CORREGIDA!
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -31,6 +32,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // --- FUNCIÓN DE PANTALLA SIEMPRE ENCENDIDA ---
+        // Esto evita que el teléfono se bloquee o atenúe la luz mientras usas el Launcher
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).let { controller ->
             controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -41,6 +46,7 @@ class MainActivity : ComponentActivity() {
             var isDarkMode by remember { mutableStateOf(true) }
             var isLandscape by remember { mutableStateOf(true) }
 
+            // Bloqueamos la orientación para que se mantenga en horizontal como una radio de coche real
             requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 
             MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()) {
@@ -65,13 +71,11 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boo
     var locationGranted by remember { mutableStateOf(false) }
     var notificationsGranted by remember { mutableStateOf(false) }
 
-    // Función que revisa ambos permisos a la vez
     val checkPermissions = {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
     }
 
-    // Escáner activo que vigila cuando vuelves de los ajustes de Android
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) checkPermissions()
