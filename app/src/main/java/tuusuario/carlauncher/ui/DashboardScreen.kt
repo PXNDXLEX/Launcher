@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,18 +16,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import com.tuusuario.carlauncher.services.GlobalState
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
+
+// Estado Global para los ajustes del Vehículo
+object AppSettings {
+    val vehicleType = mutableStateOf("FLECHA")
+    val vehicleColor = mutableStateOf(Color.Blue.toArgb())
+}
 
 @Composable
 fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, isDarkMode: Boolean, isLandscape: Boolean) {
@@ -34,8 +46,12 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
     var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
     
-    // Sistema de Pestañas Principales: "DASHBOARD", "MAPA_FULL", "YOUTUBE"
     var currentScreen by remember { mutableStateOf("DASHBOARD") } 
+    var showYoutubeInDashboard by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
+    // Esta es la MAGIA que evita que YouTube se pause. Lo movemos de lugar en lugar de destruirlo.
+    val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -48,70 +64,56 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
 
     if (GlobalState.showPopup.value) {
         LaunchedEffect(GlobalState.showPopup.value) {
-            delay(6000)
+            delay(7000)
             GlobalState.showPopup.value = false
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        
         Row(modifier = Modifier.fillMaxSize()) {
             
-            // SIDEBAR LATERAL (Siempre visible para facilitar la navegación)
+            // SIDEBAR LATERAL
             NavigationRail(
                 modifier = Modifier.width(80.dp).fillMaxHeight(),
                 containerColor = MaterialTheme.colorScheme.surfaceVariant
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                Text(currentDate, fontSize = 12.sp, color = Color.Gray)
+                Text(currentDate, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 
                 Spacer(modifier = Modifier.weight(1f))
                 
-                // Botones de Navegación del Sistema
                 IconButton(
                     onClick = { currentScreen = "DASHBOARD" },
                     colors = IconButtonDefaults.iconButtonColors(contentColor = if (currentScreen == "DASHBOARD") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                ) {
-                    Icon(Icons.Default.Dashboard, "Dashboard Principal")
-                }
+                ) { Icon(Icons.Default.Dashboard, "Dashboard Principal") }
                 
                 IconButton(
                     onClick = { currentScreen = "MAPA_FULL" },
                     colors = IconButtonDefaults.iconButtonColors(contentColor = if (currentScreen == "MAPA_FULL") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                ) {
-                    Icon(Icons.Default.Map, "Navegación GPS")
-                }
+                ) { Icon(Icons.Default.Map, "Navegación GPS") }
                 
                 IconButton(
                     onClick = { currentScreen = "YOUTUBE" },
                     colors = IconButtonDefaults.iconButtonColors(contentColor = if (currentScreen == "YOUTUBE") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                ) {
-                    Icon(Icons.Default.OndemandVideo, "YouTube")
-                }
+                ) { Icon(Icons.Default.OndemandVideo, "YouTube Full") }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                IconButton(onClick = onToggleOrientation) { Icon(Icons.Default.ScreenRotation, "Rotar Pantalla") }
-                IconButton(onClick = onToggleTheme) { 
-                    Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Alternar Tema") 
-                }
+                IconButton(onClick = { showSettingsDialog = true }) { Icon(Icons.Default.Settings, "Ajustes del Auto") }
+                IconButton(onClick = onToggleTheme) { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema") }
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // ÁREA PRINCIPAL DINÁMICA
+            // ÁREA PRINCIPAL
             Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                 Crossfade(targetState = currentScreen, label = "ScreenTransition") { screen ->
                     when (screen) {
-                        
                         "MAPA_FULL" -> {
-                            Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                            Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
                                 NavigationMap(isFullScreen = true)
-                                
-                                // Botón inteligente que lanza la app nativa de Google Maps para calcular rutas offline
                                 ExtendedFloatingActionButton(
                                     onClick = {
-                                        val gmmIntentUri = Uri.parse("google.navigation:q=")
-                                        val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                                        val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q="))
                                         mapIntent.setPackage("com.google.android.apps.maps")
                                         context.startActivity(mapIntent)
                                     },
@@ -122,29 +124,35 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                                 )
                             }
                         }
-                        
                         "YOUTUBE" -> {
-                            // YouTube ahora tiene toda la pantalla para él solo, con buscador y reproductor completo
                             Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) {
-                                YouTubeWidget()
+                                youtubeContent() // YouTube en grande
                             }
                         }
-                        
                         "DASHBOARD" -> {
                             Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                
-                                // Mapa (Ocupa el 60%)
-                                Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                                Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
                                     NavigationMap()
                                 }
-
-                                // Widgets Fijos (Ocupan el 40%) - El reproductor de música ya no se cambia por YouTube aquí
                                 Column(modifier = Modifier.weight(0.4f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
                                         SpeedometerWidget()
                                     }
-                                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                                        MusicPlayerWidget()
+                                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                                        // Aquí intercalamos YouTube y Música sin destruir el video
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            if (showYoutubeInDashboard) {
+                                                youtubeContent()
+                                                IconButton(onClick = { showYoutubeInDashboard = false }, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha=0.6f), RoundedCornerShape(50))) {
+                                                    Icon(Icons.Default.MusicNote, "Volver a Música", tint = Color.White)
+                                                }
+                                            } else {
+                                                MusicPlayerWidget()
+                                                IconButton(onClick = { showYoutubeInDashboard = true }, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))) {
+                                                    Icon(Icons.Default.OndemandVideo, "Ver YouTube", tint = MaterialTheme.colorScheme.onSurface)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -154,7 +162,8 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
             }
         }
 
-        // POPUP ANIMADO DE NOTIFICACIONES (Ej: WhatsApp)
+        // POPUP DE NOTIFICACIONES (Con gesto para deslizar y cerrar)
+        var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -165,7 +174,20 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                 elevation = CardDefaults.cardElevation(8.dp),
-                modifier = Modifier.width(350.dp)
+                modifier = Modifier
+                    .width(350.dp)
+                    .offset { IntOffset(offsetX.roundToInt(), 0) }
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (abs(offsetX) > 150f) GlobalState.showPopup.value = false // Desaparece si deslizas mucho
+                                offsetX = 0f // Restaura posición oculta
+                            }
+                        ) { change, dragAmount ->
+                            change.consume()
+                            offsetX += dragAmount
+                        }
+                    }
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(GlobalState.popupApp.value, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -173,6 +195,38 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                     Text(GlobalState.popupMessage.value, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha=0.8f))
                 }
             }
+        }
+
+        // MENÚ DE AJUSTES DEL VEHÍCULO
+        if (showSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { Text("Personalizar Mapa") },
+                text = {
+                    Column {
+                        Text("Tipo de Vehículo:", fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            listOf("FLECHA", "SEDAN", "HATCHBACK", "CAMIONETA", "MOTO").forEach { type ->
+                                FilterChip(
+                                    selected = AppSettings.vehicleType.value == type,
+                                    onClick = { AppSettings.vehicleType.value = type },
+                                    label = { Text(type.take(3)) }
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Color del Vehículo:", fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            listOf(Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, Color.Green).forEach { color ->
+                                Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(color).border(2.dp, if (AppSettings.vehicleColor.value == color.toArgb()) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50)).pointerInput(Unit) { detectHorizontalDragGestures { _, _ -> } /* Solo para tap */ }) {
+                                    IconButton(onClick = { AppSettings.vehicleColor.value = color.toArgb() }) {}
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("Guardar") } }
+            )
         }
     }
 }

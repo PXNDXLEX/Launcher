@@ -7,35 +7,34 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-// IMPORTANTE: Ahora llamamos al GlobalState, no al MusicState
 import com.tuusuario.carlauncher.services.GlobalState
 
 @Composable
 fun MusicPlayerWidget() {
-    // Leemos los valores en tiempo real del nuevo GlobalState
     val songTitle = GlobalState.songTitle.value
     val songArtist = GlobalState.songArtist.value
+    val textColor = MaterialTheme.colorScheme.onSurface // Adaptativo
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Reproduciendo ahora", color = Color(0xFF03A9F4), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text("Reproduciendo ahora", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(12.dp))
         
         Text(
             text = songTitle, 
-            color = Color.White, 
+            color = textColor, 
             fontSize = 20.sp, 
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -43,7 +42,7 @@ fun MusicPlayerWidget() {
         )
         Text(
             text = songArtist, 
-            color = Color.Gray, 
+            color = textColor.copy(alpha = 0.6f), 
             fontSize = 16.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -54,14 +53,14 @@ fun MusicPlayerWidget() {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { /* Implementar saltar después */ }) { 
-                Icon(Icons.Default.SkipPrevious, "Anterior", tint = Color.White, modifier = Modifier.size(32.dp)) 
+            IconButton(onClick = { /* Implementaremos después */ }) { 
+                Icon(Icons.Default.SkipPrevious, "Anterior", tint = textColor, modifier = Modifier.size(32.dp)) 
             }
-            IconButton(onClick = { /* Implementar play/pause después */ }) { 
-                Icon(Icons.Default.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(48.dp)) 
+            IconButton(onClick = { /* Implementaremos después */ }) { 
+                Icon(Icons.Default.PlayArrow, "Play", tint = textColor, modifier = Modifier.size(48.dp)) 
             }
-            IconButton(onClick = { /* Implementar saltar después */ }) { 
-                Icon(Icons.Default.SkipNext, "Siguiente", tint = Color.White, modifier = Modifier.size(32.dp)) 
+            IconButton(onClick = { /* Implementaremos después */ }) { 
+                Icon(Icons.Default.SkipNext, "Siguiente", tint = textColor, modifier = Modifier.size(32.dp)) 
             }
         }
     }
