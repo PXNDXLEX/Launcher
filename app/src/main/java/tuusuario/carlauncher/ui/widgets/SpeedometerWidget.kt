@@ -29,27 +29,42 @@ import com.google.android.gms.location.*
 @Composable
 fun SpeedometerWidget() {
     val currentSpeedKmH = rememberGpsSpeed()
+    
+    // Reducimos el tiempo de la animación de 800ms a 300ms 
+    // para que la aguja "siga" al GPS casi en tiempo real.
     val animatedSpeed by animateFloatAsState(
         targetValue = currentSpeedKmH,
-        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        animationSpec = tween(
+            durationMillis = 300, 
+            easing = FastOutSlowInEasing
+        ),
         label = "SpeedAnimation"
     )
 
-    // Colores dinámicos según el tema
     val textColor = MaterialTheme.colorScheme.onSurface
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        SpeedometerDial(speed = animatedSpeed, maxSpeed = 220f, trackColor = trackColor, textColor = textColor)
+        SpeedometerDial(
+            speed = animatedSpeed, 
+            maxSpeed = 220f, 
+            trackColor = trackColor, 
+            textColor = textColor
+        )
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = currentSpeedKmH.toInt().toString(),
-                color = textColor, // Dinámico
+                color = textColor,
                 fontSize = 64.sp,
                 fontWeight = FontWeight.ExtraBold
             )
-            Text("KM/H", color = textColor.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "KM/H", 
+                color = textColor.copy(alpha = 0.6f), 
+                fontSize = 14.sp, 
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -60,8 +75,9 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float, trackColor: Color, textColor:
         val sweepAngle = 240f
         val startAngle = 150f
 
+        // Arco de fondo
         drawArc(
-            color = trackColor, // Dinámico
+            color = trackColor,
             startAngle = startAngle,
             sweepAngle = sweepAngle,
             useCenter = false,
@@ -72,6 +88,7 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float, trackColor: Color, textColor:
         val speedProgress = (speed / maxSpeed).coerceIn(0f, 1f)
         val activeSweepAngle = sweepAngle * speedProgress
 
+        // Arco de velocidad activo (Rojo)
         drawArc(
             color = Color(0xFFE53935),
             startAngle = startAngle,
@@ -81,10 +98,11 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float, trackColor: Color, textColor:
             size = Size(size.width, size.height)
         )
 
+        // Aguja
         val needleAngle = startAngle + activeSweepAngle
         rotate(degrees = needleAngle + 90f) {
             drawLine(
-                color = textColor, // Aguja se adapta a la luz
+                color = textColor,
                 start = Offset(center.x, center.y),
                 end = Offset(center.x, 20.dp.toPx()),
                 strokeWidth = 6.dp.toPx(),
@@ -101,22 +119,35 @@ fun rememberGpsSpeed(): Float {
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(500)
+        
+        // Configuramos el intervalo a 500ms para mayor frecuencia de muestreo
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
+            .setMinUpdateIntervalMillis(300)
+            .setMinUpdateDistanceMeters(0f)
             .build()
 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                for (location in result.locations) {
+                // Usamos lastLocation para obtener la actualización más reciente inmediatamente
+                result.lastLocation?.let { location ->
                     if (location.hasSpeed()) {
-                        speed = location.speed * 3.6f // metros/segundo a KM/H
+                        speed = location.speed * 3.6f // Conversión m/s a km/h
                     }
                 }
             }
         }
 
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+        // Validación de permisos antes de iniciar
+        if (ActivityCompat.checkSelfPermission(
+                context, 
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest, 
+                locationCallback, 
+                Looper.getMainLooper()
+            )
         }
 
         onDispose {
