@@ -16,21 +16,17 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
         
-    - name: Reparar Motor Gradle (Solución Windows a Linux)
+    - name: Reparar Motor Gradle
       run: gradle wrapper --gradle-version 8.7
         
-    - name: Compilar APK (Forzando Descargas)
+    - name: Compilar APK
+      # Definimos la variable MAPS_API_KEY para que el Manifest la recoja. 
+      # Si está vacía, Google Maps compilará pero mostrará una marca de agua de desarrollo.
       env:
-        RAW_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
-        RAW_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+        MAPS_API_KEY: "" 
       run: |
-        # Limpiamos los tokens de espacios o saltos de línea invisibles que bloquean la red
-        export MAPBOX_DOWNLOADS_TOKEN=$(echo -n "$RAW_DOWNLOADS_TOKEN" | tr -d '\n\r ')
-        export MAPBOX_ACCESS_TOKEN=$(echo -n "$RAW_ACCESS_TOKEN" | tr -d '\n\r ')
-        
         chmod +x gradlew
-        # --refresh-dependencies obliga a Gradle a ignorar el caché y buscar Mapbox de nuevo
-        ./gradlew :app:assembleDebug --refresh-dependencies
+        ./gradlew :app:assembleDebug
         
     - name: Subir APK
       uses: actions/upload-artifact@v4
