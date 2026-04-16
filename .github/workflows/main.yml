@@ -20,11 +20,10 @@ jobs:
       run: gradle wrapper --gradle-version 8.7
         
     - name: Compilar APK
-      # Definimos la variable MAPS_API_KEY para que el Manifest la recoja. 
-      # Si está vacía, Google Maps compilará pero mostrará una marca de agua de desarrollo.
-      env:
-        MAPS_API_KEY: "" 
       run: |
+        # Inyectamos una clave de prueba directamente en el Manifiesto para que el compilador no se queje
+        sed -i 's/${MAPS_API_KEY}/CLAVE_DE_PRUEBA_TEMPORAL/g' app/src/main/AndroidManifest.xml
+        
         chmod +x gradlew
         ./gradlew :app:assembleDebug
         
