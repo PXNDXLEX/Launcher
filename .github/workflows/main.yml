@@ -19,13 +19,18 @@ jobs:
     - name: Reparar Motor Gradle (Solución Windows a Linux)
       run: gradle wrapper --gradle-version 8.7
         
-    - name: Compilar APK
+    - name: Compilar APK (Forzando Descargas)
       env:
-        MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
-        MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+        RAW_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+        RAW_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
       run: |
+        # Limpiamos los tokens de espacios o saltos de línea invisibles que bloquean la red
+        export MAPBOX_DOWNLOADS_TOKEN=$(echo -n "$RAW_DOWNLOADS_TOKEN" | tr -d '\n\r ')
+        export MAPBOX_ACCESS_TOKEN=$(echo -n "$RAW_ACCESS_TOKEN" | tr -d '\n\r ')
+        
         chmod +x gradlew
-        ./gradlew :app:assembleDebug
+        # --refresh-dependencies obliga a Gradle a ignorar el caché y buscar Mapbox de nuevo
+        ./gradlew :app:assembleDebug --refresh-dependencies
         
     - name: Subir APK
       uses: actions/upload-artifact@v4
