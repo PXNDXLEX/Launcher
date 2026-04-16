@@ -22,6 +22,7 @@ jobs:
     - name: Compilar APK
       env:
         MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+        MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
       run: |
         chmod +x gradlew
         ./gradlew :app:assembleDebug
