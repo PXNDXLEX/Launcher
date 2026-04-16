@@ -1,5 +1,6 @@
 package com.tuusuario.carlauncher.ui
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.*
@@ -34,9 +35,45 @@ import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
 
+// Clase para manejar la persistencia de ajustes usando SharedPreferences
+class SettingsManager(context: Context) {
+    private val sharedPreferences = context.getSharedPreferences("CarLauncherSettings", Context.MODE_PRIVATE)
+
+    var vehicleType: String
+        get() = sharedPreferences.getString("vehicleType", "FLECHA") ?: "FLECHA"
+        set(value) = sharedPreferences.edit().putString("vehicleType", value).apply()
+
+    var vehicleColor: Int
+        get() = sharedPreferences.getInt("vehicleColor", Color.Blue.toArgb())
+        set(value) = sharedPreferences.edit().putInt("vehicleColor", value).apply()
+}
+
+// Objeto global para los ajustes del Vehículo (ahora usa SettingsManager para guardar)
 object AppSettings {
     val vehicleType = mutableStateOf("FLECHA")
     val vehicleColor = mutableStateOf(Color.Blue.toArgb())
+    private var settingsManager: SettingsManager? = null
+
+    // Inicializa los ajustes cargándolos de la memoria del teléfono
+    fun initialize(context: Context) {
+        if (settingsManager == null) {
+            settingsManager = SettingsManager(context)
+            vehicleType.value = settingsManager!!.vehicleType
+            vehicleColor.value = settingsManager!!.vehicleColor
+        }
+    }
+
+    // Guarda el tipo de vehículo
+    fun saveVehicleType(type: String) {
+        vehicleType.value = type
+        settingsManager?.vehicleType = type
+    }
+
+    // Guarda el color del vehículo
+    fun saveVehicleColor(color: Int) {
+        vehicleColor.value = color
+        settingsManager?.vehicleColor = color
+    }
 }
 
 @Composable
@@ -45,6 +82,11 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
     var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
     
+    // Inicializamos los ajustes al arrancar el Dashboard para cargar lo guardado
+    LaunchedEffect(Unit) {
+        AppSettings.initialize(context)
+    }
+
     var currentScreen by remember { mutableStateOf("DASHBOARD") } 
     var showYoutubeInDashboard by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -95,7 +137,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // ÁREA PRINCIPAL DINÁMICA (Sin Crossfade para evitar reinicios)
+            // ÁREA PRINCIPAL DINÁMICA
             Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                 when (currentScreen) {
                     "MAPA_FULL" -> {
@@ -150,7 +192,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
             }
         }
 
-        // ... El bloque de AnimatedVisibility (Notificaciones deslizable) que tenías va aquí, déjalo igual ...
+        // POPUP DE NOTIFICACIONES (Con gesto para deslizar y cerrar)
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
@@ -185,7 +227,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
             }
         }
 
-        // MENÚ DE AJUSTES DEL VEHÍCULO
+        // MENÚ DE AJUSTES DEL VEHÍCULO (Con más colores y guardado automático)
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = { showSettingsDialog = false },
@@ -197,23 +239,34 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                             listOf("FLECHA", "SEDAN", "HATCHBACK", "CAMIONETA", "MOTO").forEach { type ->
                                 FilterChip(
                                     selected = AppSettings.vehicleType.value == type,
-                                    onClick = { AppSettings.vehicleType.value = type },
+                                    onClick = { AppSettings.saveVehicleType(type) }, // Guarda al hacer clic
                                     label = { Text(type.take(3)) }
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Color del Vehículo:", fontWeight = FontWeight.Bold)
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            listOf(Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, Color.Green).forEach { color ->
+                        // Lista de colores ampliada
+                        val colors = listOf(
+                            Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, Color.Green,
+                            Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500) // Naranja
+                        )
+                        // Usamos un FlowRow para que los colores se acomoden en varias filas si es necesario
+                        OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            colors.forEach { color ->
                                 Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(color).border(2.dp, if (AppSettings.vehicleColor.value == color.toArgb()) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50))) {
-                                    IconButton(onClick = { AppSettings.vehicleColor.value = color.toArgb() }) {}
+                                    IconButton(onClick = { AppSettings.saveVehicleColor(color.toArgb()) }) {} // Guarda al hacer clic
                                 }
                             }
                         }
                     }
                 },
-                confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("Guardar") } }
+                confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("Cerrar") } }
             )
         }
     }
