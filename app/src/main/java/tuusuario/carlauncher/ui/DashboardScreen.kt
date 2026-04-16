@@ -1,5 +1,7 @@
 package com.tuusuario.carlauncher.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,9 +32,11 @@ import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
 fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, isDarkMode: Boolean, isLandscape: Boolean) {
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
+    val context = LocalContext.current
     
-    // Controla si mostramos Música o YouTube
+    // Controles de estado
     var activeMediaTab by remember { mutableStateOf("MUSIC") } 
+    var isMapFullScreen by remember { mutableStateOf(false) } // Nuevo estado para pantalla completa
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -42,7 +47,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
         }
     }
 
-    // Ocultar popup de notificación después de 6 segundos
     if (GlobalState.showPopup.value) {
         LaunchedEffect(GlobalState.showPopup.value) {
             delay(6000)
@@ -51,49 +55,91 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            
-            // SIDEBAR LATERAL (Moderna)
-            NavigationRail(
-                modifier = Modifier.width(80.dp).fillMaxHeight(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                Text(currentDate, fontSize = 12.sp, color = Color.Gray)
+        
+        // INTERFAZ ALTERNATIVA: MAPA EN PANTALLA COMPLETA
+        if (isMapFullScreen) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                NavigationMap(isFullScreen = true)
                 
-                Spacer(modifier = Modifier.weight(1f))
-                
-                // Botones de Control
-                IconButton(onClick = { activeMediaTab = if (activeMediaTab == "MUSIC") "YOUTUBE" else "MUSIC" }) {
-                    Icon(if (activeMediaTab == "MUSIC") Icons.Default.OndemandVideo else Icons.Default.MusicNote, "Alternar Multimedia")
+                // Botón para salir de pantalla completa
+                FloatingActionButton(
+                    onClick = { isMapFullScreen = false },
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Icon(Icons.Default.ArrowBack, "Volver al Dashboard")
                 }
-                IconButton(onClick = onToggleOrientation) { Icon(Icons.Default.ScreenRotation, "Rotar Pantalla") }
-                IconButton(onClick = onToggleTheme) { 
-                    Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Alternar Tema") 
-                }
-                Spacer(modifier = Modifier.height(16.dp))
+
+                // Botón inteligente que lanza la app nativa de Google Maps para calcular rutas
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        val gmmIntentUri = Uri.parse("google.navigation:q=") // Abre el modo conducción
+                        val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                        mapIntent.setPackage("com.google.android.apps.maps")
+                        context.startActivity(mapIntent)
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    icon = { Icon(Icons.Default.Navigation, "Navegar") },
+                    text = { Text("Iniciar Ruta") },
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
             }
-
-            // ÁREA PRINCIPAL
-            Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                
-                // Mapa (Ocupa el 60%)
-                Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                    NavigationMap()
+        } 
+        // INTERFAZ NORMAL: DASHBOARD DIVIDIDO
+        else {
+            Row(modifier = Modifier.fillMaxSize()) {
+                // SIDEBAR LATERAL
+                NavigationRail(
+                    modifier = Modifier.width(80.dp).fillMaxHeight(),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(currentDate, fontSize = 12.sp, color = Color.Gray)
+                    
+                    Spacer(modifier = Modifier.weight(1f))
+                    
+                    // NUEVO: Botón para ver el mapa en grande
+                    IconButton(onClick = { isMapFullScreen = true }) {
+                        Icon(Icons.Default.Map, "Mapa Grande")
+                    }
+                    
+                    IconButton(onClick = { activeMediaTab = if (activeMediaTab == "MUSIC") "YOUTUBE" else "MUSIC" }) {
+                        Icon(if (activeMediaTab == "MUSIC") Icons.Default.OndemandVideo else Icons.Default.MusicNote, "Alternar Multimedia")
+                    }
+                    IconButton(onClick = onToggleOrientation) { Icon(Icons.Default.ScreenRotation, "Rotar Pantalla") }
+                    IconButton(onClick = onToggleTheme) { 
+                        Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Alternar Tema") 
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // Widgets (Ocupan el 40%)
-                Column(modifier = Modifier.weight(0.4f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                        SpeedometerWidget()
+                // ÁREA PRINCIPAL
+                Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    
+                    // Mapa (Ocupa el 60%)
+                    Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                        NavigationMap()
+                        // Botón flotante sutil para expandir el mapa
+                        IconButton(
+                            onClick = { isMapFullScreen = true },
+                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha=0.5f), RoundedCornerShape(50))
+                        ) {
+                            Icon(Icons.Default.Fullscreen, "Expandir", tint = Color.White)
+                        }
                     }
-                    Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                        // Animación cruzada entre YouTube y Música
-                        Crossfade(targetState = activeMediaTab, label = "MediaSwap") { tab ->
-                            when (tab) {
-                                "MUSIC" -> MusicPlayerWidget()
-                                "YOUTUBE" -> YouTubeWidget()
+
+                    // Widgets (Ocupan el 40%)
+                    Column(modifier = Modifier.weight(0.4f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                            SpeedometerWidget()
+                        }
+                        Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, Color.White.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                            Crossfade(targetState = activeMediaTab, label = "MediaSwap") { tab ->
+                                when (tab) {
+                                    "MUSIC" -> MusicPlayerWidget()
+                                    "YOUTUBE" -> YouTubeWidget()
+                                }
                             }
                         }
                     }
@@ -101,7 +147,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
             }
         }
 
-        // POPUP ANIMADO DE NOTIFICACIONES (Ej: WhatsApp)
+        // POPUP ANIMADO DE NOTIFICACIONES
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),

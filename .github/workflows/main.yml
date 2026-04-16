@@ -22,7 +22,7 @@ jobs:
     - name: Compilar APK
       run: |
         # Inyectamos una clave de prueba directamente en el Manifiesto para que el compilador no se queje
-        sed -i 's/${MAPS_API_KEY}/CLAVE_DE_PRUEBA_TEMPORAL/g' app/src/main/AndroidManifest.xml
+        sed -i 's/${MAPS_API_KEY}/AIzaSyDkRzaE-QxeOCx43w5Vxfm9HhBiyVhRvJQ/g' app/src/main/AndroidManifest.xml
         
         chmod +x gradlew
         ./gradlew :app:assembleDebug
