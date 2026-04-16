@@ -1,27 +1,43 @@
 package com.tuusuario.carlauncher.ui.map
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.MapView
+import com.mapbox.maps.Style
+import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
+import com.mapbox.maps.plugin.locationcomponent.location
+import com.mapbox.maps.plugin.gestures.gestures
 
 @Composable
 fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false) {
-    Box(
-        modifier = modifier.fillMaxSize().background(Color(0xFF1E1E24)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "GPS Mapbox (Pendiente de Token)", 
-            color = Color.Gray,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mapView = remember { MapView(context) }
+
+    AndroidView(
+        factory = { mapView },
+        modifier = modifier,
+        update = { view ->
+            view.mapboxMap.loadStyle(Style.DARK) {
+                // Inclinación 3D para la conducción
+                view.mapboxMap.setCamera(
+                    CameraOptions.Builder().zoom(17.5).pitch(60.0).bearing(0.0).build()
+                )
+                // Habilitamos tu posición real
+                view.location.updateSettings {
+                    enabled = true
+                    pulsingEnabled = false
+                    puckBearingEnabled = true
+                    puckBearing = PuckBearing.HEADING
+                    locationPuck = createDefault2DPuck(withBearing = true)
+                }
+                view.gestures.updateSettings {
+                    rotateEnabled = isFullScreen
+                    pinchToZoomEnabled = isFullScreen
+                }
+            }
+        }
+    )
 }

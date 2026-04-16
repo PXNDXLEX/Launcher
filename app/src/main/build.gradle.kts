@@ -49,5 +49,5 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
     // Mapbox está comentado temporalmente hasta que configuremos tu Token Secreto
-    //implementation("com.mapbox.maps:android:11.2.0")
+    implementation("com.mapbox.maps:android:11.2.0")
 }
