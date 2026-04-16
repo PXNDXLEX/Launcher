@@ -19,11 +19,8 @@ jobs:
     - name: Reparar Motor Gradle
       run: gradle wrapper --gradle-version 8.7
         
-    - name: Compilar APK
+    - name: Compilar APK (Sin API Keys)
       run: |
-        # Inyectamos una clave de prueba directamente en el Manifiesto para que el compilador no se queje
-        sed -i 's/${MAPS_API_KEY}/AIzaSyDkRzaE-QxeOCx43w5Vxfm9HhBiyVhRvJQ/g' app/src/main/AndroidManifest.xml
-        
         chmod +x gradlew
         ./gradlew :app:assembleDebug
         

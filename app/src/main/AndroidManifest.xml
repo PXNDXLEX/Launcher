@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     
@@ -9,13 +11,6 @@
         android:icon="@android:drawable/sym_def_app_icon" 
         android:label="Auto Launcher"
         android:theme="@android:style/Theme.Material.NoActionBar"> 
-        
-        <!-- API KEY DE GOOGLE MAPS -->
-        <!-- Ponemos una clave temporal vacía o genérica para que compile. 
-             Luego tendrás que sacar una real en Google Cloud Console -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${MAPS_API_KEY}" />
         
         <activity
             android:name=".MainActivity"

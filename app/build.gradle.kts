@@ -1,8 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // Opcional, pero recomendado para Google Maps
-    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin") version "2.0.1" apply false
 }
 
 android {
@@ -17,22 +15,13 @@ android {
         versionName = "1.0"
     }
 
-    buildFeatures {
-        compose = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.10"
-    }
-
+    buildFeatures { compose = true }
+    composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
@@ -49,7 +38,6 @@ dependencies {
     // GPS para el velocímetro
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
-    // LIBRERÍAS DE GOOGLE MAPS PARA COMPOSE
-    implementation("com.google.maps.android:maps-compose:4.3.3")
-    implementation("com.google.android.gms:play-services-maps:18.2.0")
+    // ¡OPEN STREET MAPS (OSMDroid)! Libre y sin tarjetas de crédito
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
 }
