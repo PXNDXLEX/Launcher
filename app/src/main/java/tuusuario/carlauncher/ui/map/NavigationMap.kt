@@ -35,11 +35,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false) 
     val vehicleType = AppSettings.vehicleType.value
     val vehicleColor = AppSettings.vehicleColor.value
 
-    // Recordamos el mapa y el overlay de ubicación para poder manejarlos desde el botón
     val mapView = remember { MapView(context) }
     var locationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
 
-    LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
+    LaunchedEffect(Unit) { 
+        Configuration.getInstance().userAgentValue = context.packageName 
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
@@ -47,65 +48,81 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false) 
             factory = { ctx ->
                 mapView.apply {
                     setTileSource(TileSourceFactory.MAPNIK)
-                    controller.setZoom(17.5)
-                    controller.setCenter(GeoPoint(11.0333, -63.8500))
+                    controller.setZoom(18.0) // Un poco más de zoom para ver mejor las calles
+                    setMultiTouchControls(true)
+                    
+                    // Ajustes para que la rotación sea fluida
+                    setHasTransientState(true)
 
                     if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                         val provider = GpsMyLocationProvider(ctx)
-                        val overlay = MyLocationNewOverlay(provider, this)
+                        // Configuramos el proveedor para que sea igual de rápido que tu velocímetro
+                        provider.locationUpdateMinTime = 300 
+                        provider.locationUpdateMinDistance = 0f
+                        
+                        val overlay = object : MyLocationNewOverlay(provider, this) {
+                            override fun onLocationChanged(location: android.location.Location?, source: org.osmdroid.views.overlay.mylocation.IMyLocationProvider?) {
+                                super.onLocationChanged(location, source)
+                                // MAGIA DE NAVEGACIÓN: Si tenemos rumbo (bearing), rotamos el mapa
+                                if (location != null && location.hasBearing() && isFollowLocationEnabled) {
+                                    // Rotamos el mapa en sentido inverso al rumbo para que el auto apunte siempre arriba
+                                    mapOrientation = -location.bearing
+                                }
+                            }
+                        }
                         
                         overlay.enableMyLocation()
                         overlay.enableFollowLocation()
                         
-                        // Forzamos el icono al inicializar
+                        // Dibujamos el icono inicial
                         val icon = drawVehicleBitmap(vehicleType, vehicleColor)
                         overlay.setDirectionArrow(icon, icon)
                         overlay.setPersonIcon(icon)
                         
                         overlays.add(overlay)
-                        locationOverlay = overlay // Lo guardamos para el botón
+                        locationOverlay = overlay
                     }
                 }
             },
             update = { view ->
+                // Permitimos gestos manuales solo en pantalla completa
                 view.setMultiTouchControls(isFullScreen)
                 
-                // Actualizamos el icono de forma agresiva si cambias ajustes
+                // Actualizar icono agresivamente si cambia en ajustes
                 locationOverlay?.let { overlay ->
                     val icon = drawVehicleBitmap(vehicleType, vehicleColor)
                     overlay.setDirectionArrow(icon, icon)
                     overlay.setPersonIcon(icon)
-                    view.invalidate() // Fuerza al mapa a redibujar tu auto
+                    view.invalidate()
                 }
             }
         )
 
-        // BOTÓN FLOTANTE PARA CENTRAR UBICACIÓN
+        // BOTÓN DE CENTRAR Y RE-ACTIVAR MODO NAVEGACIÓN
         IconButton(
             onClick = {
                 locationOverlay?.let { overlay ->
-                    // 1. Reactiva el seguimiento automático si habías movido el mapa
-                    overlay.enableFollowLocation()
-                    // 2. Hace un salto suave hacia donde estás
+                    overlay.enableFollowLocation() // Activa el seguimiento
                     val myLoc = overlay.myLocation
                     if (myLoc != null) {
                         mapView.controller.animateTo(myLoc)
+                        // Al centrar, reiniciamos la rotación si estaba perdida
+                        mapView.mapOrientation = -overlay.lastFix?.bearing!! ?: 0f
                     }
                 }
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(if (isFullScreen) 32.dp else 16.dp) // Sube un poco si estamos en FullScreen para no tapar el otro botón
+                .padding(if (isFullScreen) 32.dp else 16.dp)
                 .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f), RoundedCornerShape(50))
         ) {
-            Icon(Icons.Default.MyLocation, "Centrar GPS", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Icon(Icons.Default.MyLocation, "Modo Navegación", tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     }
 }
 
-// MOTOR DE DIBUJO DE VEHÍCULOS (Intacto, listo para dibujar)
 fun drawVehicleBitmap(type: String, color: Int): Bitmap {
-    val size = 120 // Lo aumenté a 120 para que OSMDroid no lo ignore por pequeño
+    val size = 120
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     
@@ -113,7 +130,7 @@ fun drawVehicleBitmap(type: String, color: Int): Bitmap {
     val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.DKGRAY; style = Paint.Style.FILL }
     val lightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.parseColor("#FFF59D"); style = Paint.Style.FILL }
     
-    val scale = 1.2f // Factor de escala para hacerlo más visible
+    val scale = 1.2f
     canvas.scale(scale, scale)
 
     when (type) {
