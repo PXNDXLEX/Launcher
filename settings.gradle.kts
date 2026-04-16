@@ -1,7 +1,6 @@
 pluginManagement {
     repositories {
         google()
-        maven { url = uri("https://repo1.maven.org/maven2/") }
         mavenCentral()
         gradlePluginPortal()
     }
@@ -9,11 +8,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
-        maven { url = uri("https://repo1.maven.org/maven2/") }
-        mavenCentral()
-        
-        // Repositorio oficial de Mapbox para descargar la librería
+        // 1. Repositorio oficial de Mapbox como PRIORIDAD VIP para evitar conflictos
         maven {
             url = uri("https://api.mapbox.com/downloads/v2/releases/maven")
             credentials {
@@ -25,6 +20,10 @@ dependencyResolutionManagement {
                 create<BasicAuthentication>("basic")
             }
         }
+        
+        // 2. Tiendas generales de Android
+        google()
+        mavenCentral()
     }
 }
 rootProject.name = "CarLauncher"
