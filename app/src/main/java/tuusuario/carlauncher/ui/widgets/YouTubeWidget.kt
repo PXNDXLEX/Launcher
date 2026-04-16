@@ -33,7 +33,7 @@ fun YouTubeWidget() {
                         super.onWindowVisibilityChanged(View.VISIBLE)
                     }
 
-                    // Mentira #2: Siempre me están mirando, no pauses la música
+                    // Mentira #2: Siempre me están mirando, no pauses la multimedia
                     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                         super.onWindowFocusChanged(true)
                     }
@@ -49,7 +49,22 @@ fun YouTubeWidget() {
                         loadWithOverviewMode = true
                         layoutAlgorithm = WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING
                     }
-                    webViewClient = WebViewClient()
+                    
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            // Inyección JavaScript: Cegamos a YouTube para que no pueda detectar si la pestaña está oculta o minimizada
+                            view?.evaluateJavascript(
+                                """
+                                Object.defineProperty(document, 'hidden', {value: false, writable: false});
+                                Object.defineProperty(document, 'visibilityState', {value: 'visible', writable: false});
+                                window.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
+                                """.trimIndent(), 
+                                null
+                            )
+                        }
+                    }
+                    
                     webChromeClient = WebChromeClient()
                     loadUrl("https://m.youtube.com")
                 }
@@ -59,11 +74,7 @@ fun YouTubeWidget() {
             (YouTubeState.webView?.parent as? ViewGroup)?.removeView(YouTubeState.webView)
             
             YouTubeState.webView!!
-        },
-        update = { webView ->
-            // Forzamos a que despierte y reactive sus motores cada vez que se reubica
-            webView.onResume()
-            webView.resumeTimers()
         }
+        // ¡Se eliminó el bloque 'update' para evitar que el reloj del Dashboard interrumpa el video!
     )
 }
