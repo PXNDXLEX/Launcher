@@ -48,13 +48,12 @@ class SettingsManager(context: Context) {
         set(value) = sharedPreferences.edit().putInt("vehicleColor", value).apply()
 }
 
-// Objeto global para los ajustes del Vehículo (ahora usa SettingsManager para guardar)
+// Objeto global para los ajustes del Vehículo
 object AppSettings {
     val vehicleType = mutableStateOf("FLECHA")
     val vehicleColor = mutableStateOf(Color.Blue.toArgb())
     private var settingsManager: SettingsManager? = null
 
-    // Inicializa los ajustes cargándolos de la memoria del teléfono
     fun initialize(context: Context) {
         if (settingsManager == null) {
             settingsManager = SettingsManager(context)
@@ -63,13 +62,11 @@ object AppSettings {
         }
     }
 
-    // Guarda el tipo de vehículo
     fun saveVehicleType(type: String) {
         vehicleType.value = type
         settingsManager?.vehicleType = type
     }
 
-    // Guarda el color del vehículo
     fun saveVehicleColor(color: Int) {
         vehicleColor.value = color
         settingsManager?.vehicleColor = color
@@ -82,7 +79,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
     var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
     
-    // Inicializamos los ajustes al arrancar el Dashboard para cargar lo guardado
+    // Cargar lo guardado al iniciar
     LaunchedEffect(Unit) {
         AppSettings.initialize(context)
     }
@@ -227,7 +224,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
             }
         }
 
-        // MENÚ DE AJUSTES DEL VEHÍCULO (Con más colores y guardado automático)
+        // MENÚ DE AJUSTES DEL VEHÍCULO
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = { showSettingsDialog = false },
@@ -239,28 +236,29 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                             listOf("FLECHA", "SEDAN", "HATCHBACK", "CAMIONETA", "MOTO").forEach { type ->
                                 FilterChip(
                                     selected = AppSettings.vehicleType.value == type,
-                                    onClick = { AppSettings.saveVehicleType(type) }, // Guarda al hacer clic
+                                    onClick = { AppSettings.saveVehicleType(type) },
                                     label = { Text(type.take(3)) }
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Color del Vehículo:", fontWeight = FontWeight.Bold)
-                        // Lista de colores ampliada
+                        
+                        // Lista de colores ampliada (10 colores)
                         val colors = listOf(
-                            Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, Color.Green,
-                            Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500) // Naranja
+                            Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, 
+                            Color.Green, Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500)
                         )
-                        // Usamos un FlowRow para que los colores se acomoden en varias filas si es necesario
-                        OptIn(ExperimentalLayoutApi::class)
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            colors.forEach { color ->
-                                Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(color).border(2.dp, if (AppSettings.vehicleColor.value == color.toArgb()) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50))) {
-                                    IconButton(onClick = { AppSettings.saveVehicleColor(color.toArgb()) }) {} // Guarda al hacer clic
+                        
+                        // Chunked agrupa la lista de 5 en 5 (Cero errores de compilación)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            colors.chunked(5).forEach { rowColors ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    rowColors.forEach { color ->
+                                        Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(color).border(2.dp, if (AppSettings.vehicleColor.value == color.toArgb()) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50))) {
+                                            IconButton(onClick = { AppSettings.saveVehicleColor(color.toArgb()) }) {}
+                                        }
+                                    }
                                 }
                             }
                         }
