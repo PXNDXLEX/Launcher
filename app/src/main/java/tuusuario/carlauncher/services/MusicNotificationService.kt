@@ -33,30 +33,52 @@ class MusicNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        val notification = sbn?.notification ?: return
-        val extras = notification.extras
+        // ESCUDO PROTECTOR: Evita que la app se cierre si una notificación viene defectuosa
+        try {
+            val notification = sbn?.notification ?: return
+            val extras = notification.extras
 
-        // Verificamos si es una notificación de música
-        if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
-            val title = extras.getString(Notification.EXTRA_TITLE) ?: "Sin título"
-            val artist = extras.getString(Notification.EXTRA_TEXT) ?: "Artista desconocido"
-            
-            // Extraer la carátula
-            val largeIcon = extras.getParcelable<Bitmap>(Notification.EXTRA_LARGE_ICON) 
-                ?: extractBitmapFromIcon(notification.getLargeIcon())
+            // Verificamos si es una notificación de música
+            if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
+                // Usamos getCharSequence para evitar errores si el texto viene con formato
+                val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "Sin título"
+                val artist = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: "Artista desconocido"
+                
+                // --- CORRECCIÓN CRÍTICA DE LA IMAGEN ---
+                var largeIcon: Bitmap? = null
 
-            GlobalState.songTitle.value = title
-            GlobalState.songArtist.value = artist
-            GlobalState.songAlbumArt.value = largeIcon
-        } else {
-            // Notificaciones normales (WhatsApp, etc.)
-            val title = extras.getString(Notification.EXTRA_TITLE)
-            val text = extras.getString(Notification.EXTRA_TEXT)
-            if (!title.isNullOrEmpty() && !text.isNullOrEmpty() && sbn.packageName != packageName && sbn.packageName != "android") {
-                GlobalState.popupApp.value = title
-                GlobalState.popupMessage.value = text
-                GlobalState.showPopup.value = true
+                // Intento 1: Método moderno (Android 6.0+)
+                val iconObj = notification.getLargeIcon()
+                if (iconObj != null) {
+                    largeIcon = extractBitmapFromIcon(iconObj)
+                }
+
+                // Intento 2: Fallback para el formato clásico en los extras
+                if (largeIcon == null) {
+                    val extraIcon = extras.get(Notification.EXTRA_LARGE_ICON)
+                    if (extraIcon is Bitmap) {
+                        largeIcon = extraIcon
+                    } else if (extraIcon is Icon) {
+                        largeIcon = extractBitmapFromIcon(extraIcon)
+                    }
+                }
+
+                GlobalState.songTitle.value = title
+                GlobalState.songArtist.value = artist
+                GlobalState.songAlbumArt.value = largeIcon
+            } else {
+                // Notificaciones normales (WhatsApp, etc.)
+                val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+                val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+                if (!title.isNullOrEmpty() && !text.isNullOrEmpty() && sbn.packageName != packageName && sbn.packageName != "android") {
+                    GlobalState.popupApp.value = title
+                    GlobalState.popupMessage.value = text
+                    GlobalState.showPopup.value = true
+                }
             }
+        } catch (e: Exception) {
+            // Si algo falla, lo ignoramos pero NO cerramos la app
+            e.printStackTrace()
         }
     }
 
@@ -74,7 +96,11 @@ class MusicNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        // Al conectar, revisamos qué está sonando ahora mismo
-        activeNotifications?.forEach { onNotificationPosted(it) }
+        try {
+            // Al conectar, revisamos qué está sonando ahora mismo de forma segura
+            activeNotifications?.forEach { onNotificationPosted(it) }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
