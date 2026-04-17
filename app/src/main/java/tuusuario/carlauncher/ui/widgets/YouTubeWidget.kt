@@ -44,7 +44,7 @@ fun YouTubeWidget() {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // HACKER MODE: Cegamos a YouTube para que no pause el video al salir de FullScreen o al cambiar el tamaño del WebView
+                            // HACKER MODE LEVEL 2: Forzamos la reproducción cada medio segundo si el sistema pausa el video por cambio de pestaña
                             view?.evaluateJavascript(
                                 """
                                 Object.defineProperty(document, 'hidden', {value: false, writable: false});
@@ -52,10 +52,23 @@ fun YouTubeWidget() {
                                 window.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
                                 window.addEventListener('blur', e => e.stopImmediatePropagation(), true);
                                 document.hasFocus = () => true;
-                                
-                                // Bloqueamos el evento que dispara la pausa cuando la ventana cambia de tamaño
                                 document.addEventListener('fullscreenchange', e => e.stopImmediatePropagation(), true);
                                 document.addEventListener('webkitfullscreenchange', e => e.stopImmediatePropagation(), true);
+                                
+                                // Escuchamos al usuario: si él le da pausa manual, no lo forzamos.
+                                window.userPaused = false;
+                                document.addEventListener('click', () => {
+                                    let v = document.querySelector('video');
+                                    if(v) window.userPaused = v.paused;
+                                });
+
+                                // Fuerza bruta: Si el video se pausó (por salir de FullScreen o pestaña) y el usuario NO lo pausó, dale Play de nuevo.
+                                setInterval(() => {
+                                    let v = document.querySelector('video');
+                                    if (v && v.paused && !window.userPaused) {
+                                        v.play();
+                                    }
+                                }, 500);
                                 """.trimIndent(), 
                                 null
                             )

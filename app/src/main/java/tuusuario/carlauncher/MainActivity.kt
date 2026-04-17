@@ -48,14 +48,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             var isDarkMode by remember { mutableStateOf(true) }
 
-            // MAGIA: El teléfono girará automáticamente usando sus sensores (Horizontal/Vertical)
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            // MAGIA SENSORIAL: "FULL_SENSOR" lee el hardware del teléfono ignorando el candado de Android
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 
             MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     MainAppFlow(
                         isDarkMode = isDarkMode,
-                        onToggleTheme = { isDarkMode = !isDarkMode } // Quitamos el toggle manual de orientación
+                        onToggleTheme = { isDarkMode = !isDarkMode }
                     )
                 }
             }
@@ -80,7 +80,11 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 checkPermissions()
-                if (notificationsGranted) MusicNotificationService.reconnect(context)
+                if (notificationsGranted) {
+                    MusicNotificationService.reconnect(context)
+                    // Resucitamos el control de música si el teléfono estaba bloqueado
+                    MusicNotificationService.instance?.refreshCurrentMedia()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -97,7 +101,6 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         ) {
             Text("Configuración de tu Kia Rio", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(24.dp))
-            
             if (!locationGranted) {
                 Text("1. Necesitamos acceso al GPS para el velocímetro y el mapa.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
