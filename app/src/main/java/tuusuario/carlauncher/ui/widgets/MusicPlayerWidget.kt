@@ -1,4 +1,4 @@
-package tuusuario.carlauncher.ui.widgets
+package com.tuusuario.carlauncher.ui.widgets
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,7 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import tuusuario.carlauncher.services.GlobalState
+import com.tuusuario.carlauncher.services.GlobalState // Importamos el estado global
 
 @Composable
 fun MusicPlayerWidget() {
@@ -57,12 +57,10 @@ fun MusicPlayerWidget() {
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+            // Se usa .toString() para evitar ambigüedad en el compilador
             Text(
-                text = songTitle, 
+                text = songTitle.toString(), 
                 color = textColor, 
                 fontSize = 18.sp, 
                 fontWeight = FontWeight.Bold,
@@ -70,7 +68,7 @@ fun MusicPlayerWidget() {
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = songArtist, 
+                text = songArtist.toString(), 
                 color = textColor.copy(alpha = 0.6f), 
                 fontSize = 14.sp,
                 maxLines = 1,
@@ -81,9 +79,9 @@ fun MusicPlayerWidget() {
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.Start
             ) {
-                IconButton(onClick = { /* Pendiente */ }) { Icon(Icons.Default.SkipPrevious, null, tint = textColor) }
-                IconButton(onClick = { /* Pendiente */ }) { Icon(Icons.Default.PlayArrow, null, tint = textColor, modifier = Modifier.size(32.dp)) }
-                IconButton(onClick = { /* Pendiente */ }) { Icon(Icons.Default.SkipNext, null, tint = textColor) }
+                IconButton(onClick = { /* Acción */ }) { Icon(Icons.Default.SkipPrevious, null, tint = textColor) }
+                IconButton(onClick = { /* Acción */ }) { Icon(Icons.Default.PlayArrow, null, tint = textColor, modifier = Modifier.size(32.dp)) }
+                IconButton(onClick = { /* Acción */ }) { Icon(Icons.Default.SkipNext, null, tint = textColor) }
             }
         }
     }

@@ -29,10 +29,10 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import com.tuusuario.carlauncher.services.GlobalState
+import com.tuusuario.carlauncher.services.GlobalState // Importación necesaria
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
-import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
+import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget // Importación necesaria
 import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
 
 // Manejo de persistencia
