@@ -1,4 +1,4 @@
-package com.tuusuario.carlauncher.ui.widgets
+package tuusuario.carlauncher.ui.widgets
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,7 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tuusuario.carlauncher.services.GlobalState
+import tuusuario.carlauncher.services.GlobalState
 
 @Composable
 fun MusicPlayerWidget() {
@@ -34,7 +34,7 @@ fun MusicPlayerWidget() {
 
     Row(
         modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalAlignment = Alignment.CenterHorizontally
+        verticalAlignment = Alignment.CenterVertically
     ) {
         // ÁREA DE LA CARÁTULA
         Box(
@@ -59,7 +59,10 @@ fun MusicPlayerWidget() {
         Spacer(modifier = Modifier.width(16.dp))
 
         // INFORMACIÓN Y CONTROLES
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
             Text(
                 text = songTitle, 
                 color = textColor, 

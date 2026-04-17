@@ -1,4 +1,4 @@
-package com.tuusuario.carlauncher
+package tuusuario.carlauncher
 
 import android.Manifest
 import android.content.Intent
@@ -26,8 +26,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.tuusuario.carlauncher.ui.DashboardScreen
-import com.tuusuario.carlauncher.services.MusicNotificationService
+import tuusuario.carlauncher.ui.DashboardScreen
+import tuusuario.carlauncher.services.MusicNotificationService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        // --- SOLUCIÓN AL TEDIO: Despertamos el servicio de música cada vez que la app abre ---
+        // Despertamos el servicio de música cada vez que la app abre
         if (NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)) {
             MusicNotificationService.reconnect(this)
         }
@@ -83,7 +83,6 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boo
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 checkPermissions()
-                // También reintentamos conexión al volver a la app
                 if (notificationsGranted) MusicNotificationService.reconnect(context)
             }
         }
