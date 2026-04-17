@@ -19,6 +19,7 @@ object GlobalState {
 }
 
 class MusicNotificationService : NotificationListenerService() {
+
     companion object {
         fun reconnect(context: android.content.Context) {
             try {
@@ -31,12 +32,10 @@ class MusicNotificationService : NotificationListenerService() {
         val notification = sbn?.notification ?: return
         val extras = notification.extras
 
-        // Verificamos si la notificación es de un reproductor multimedia
         if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
             val title = extras.getString(Notification.EXTRA_TITLE)
             val artist = extras.getString(Notification.EXTRA_TEXT)
             
-            // Intentamos extraer la carátula del álbum (Large Icon)
             val largeIcon = extras.getParcelable<Bitmap>(Notification.EXTRA_LARGE_ICON) 
                 ?: extractBitmapFromIcon(notification.getLargeIcon())
 
@@ -46,7 +45,6 @@ class MusicNotificationService : NotificationListenerService() {
                 GlobalState.songAlbumArt.value = largeIcon
             }
         } else {
-            // Si no es música, la tratamos como una notificación normal (ej: WhatsApp)
             val title = extras.getString(Notification.EXTRA_TITLE)
             val text = extras.getString(Notification.EXTRA_TEXT)
             if (!title.isNullOrEmpty() && !text.isNullOrEmpty() && sbn.packageName != packageName && sbn.packageName != "android") {
@@ -57,7 +55,6 @@ class MusicNotificationService : NotificationListenerService() {
         }
     }
 
-    // Convierte el objeto Icon de Android en un Bitmap que Compose pueda dibujar
     private fun extractBitmapFromIcon(icon: Icon?): Bitmap? {
         try {
             val drawable = icon?.loadDrawable(this)
@@ -70,7 +67,6 @@ class MusicNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        // Al conectar, escaneamos las notificaciones actuales para mostrar lo que ya esté sonando
         activeNotifications?.forEach { onNotificationPosted(it) }
     }
 }
