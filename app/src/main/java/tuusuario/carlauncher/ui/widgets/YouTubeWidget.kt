@@ -44,7 +44,7 @@ fun YouTubeWidget() {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // HACKER MODE LEVEL 2: Forzamos la reproducción cada medio segundo si el sistema pausa el video por cambio de pestaña
+                            // HACKER MODE LEVEL 3: Dios. Anulamos la capacidad del sistema de pausar el video.
                             view?.evaluateJavascript(
                                 """
                                 Object.defineProperty(document, 'hidden', {value: false, writable: false});
@@ -55,20 +55,40 @@ fun YouTubeWidget() {
                                 document.addEventListener('fullscreenchange', e => e.stopImmediatePropagation(), true);
                                 document.addEventListener('webkitfullscreenchange', e => e.stopImmediatePropagation(), true);
                                 
-                                // Escuchamos al usuario: si él le da pausa manual, no lo forzamos.
+                                // Detectamos si el usuario realmente está tocando la pantalla
+                                window.isUserClicking = false;
                                 window.userPaused = false;
-                                document.addEventListener('click', () => {
-                                    let v = document.querySelector('video');
-                                    if(v) window.userPaused = v.paused;
+                                
+                                document.addEventListener('pointerdown', () => { window.isUserClicking = true; });
+                                document.addEventListener('pointerup', () => { 
+                                    setTimeout(() => { window.isUserClicking = false; }, 300); 
                                 });
 
-                                // Fuerza bruta: Si el video se pausó (por salir de FullScreen o pestaña) y el usuario NO lo pausó, dale Play de nuevo.
+                                // SECUESTRO DE LA FUNCIÓN PAUSE NATIVA
+                                const originalPause = HTMLMediaElement.prototype.pause;
+                                HTMLMediaElement.prototype.pause = function() {
+                                    if (window.isUserClicking) {
+                                        window.userPaused = true;
+                                        originalPause.call(this); // Pausa permitida (fue el usuario)
+                                    } else {
+                                        // Bloqueamos la pausa del sistema al cambiar de pestaña
+                                        console.log("Sistema intentó pausar: Bloqueado.");
+                                    }
+                                };
+
+                                const originalPlay = HTMLMediaElement.prototype.play;
+                                HTMLMediaElement.prototype.play = function() {
+                                    window.userPaused = false;
+                                    return originalPlay.call(this);
+                                };
+
+                                // Fuerza bruta de respaldo por si el motor nativo pausa la tubería de medios
                                 setInterval(() => {
                                     let v = document.querySelector('video');
                                     if (v && v.paused && !window.userPaused) {
                                         v.play();
                                     }
-                                }, 500);
+                                }, 250);
                                 """.trimIndent(), 
                                 null
                             )
