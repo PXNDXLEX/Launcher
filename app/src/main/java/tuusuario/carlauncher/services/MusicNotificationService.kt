@@ -4,6 +4,9 @@ import android.app.Notification
 import android.content.ComponentName
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
+import android.media.session.MediaController
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.runtime.mutableStateOf
@@ -14,9 +17,30 @@ object GlobalState {
     val songArtist = mutableStateOf("")
     val songAlbumArt = mutableStateOf<Bitmap?>(null)
     
+    // Novedad: Estado de reproducción y Controlador Multimedia
+    val isPlaying = mutableStateOf(false)
+    var mediaController: MediaController? = null
+    
     val showPopup = mutableStateOf(false)
     val popupMessage = mutableStateOf("")
     val popupApp = mutableStateOf("")
+
+    // Funciones para que los botones de la interfaz puedan controlar la música
+    fun togglePlayPause() {
+        if (isPlaying.value) {
+            mediaController?.transportControls?.pause()
+        } else {
+            mediaController?.transportControls?.play()
+        }
+    }
+
+    fun skipToNext() {
+        mediaController?.transportControls?.skipToNext()
+    }
+
+    fun skipToPrevious() {
+        mediaController?.transportControls?.skipToPrevious()
+    }
 }
 
 class MusicNotificationService : NotificationListenerService() {
@@ -40,11 +64,23 @@ class MusicNotificationService : NotificationListenerService() {
 
             // Verificamos si es una notificación de música
             if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
-                // Usamos getCharSequence para evitar errores si el texto viene con formato
+                
+                // 1. OBTENER EL CONTROL REMOTO (MediaController)
+                val tokenObj = extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+                if (tokenObj != null) {
+                    val controller = MediaController(this, tokenObj)
+                    GlobalState.mediaController = controller
+                    
+                    // Verificamos si está sonando o pausado
+                    val state = controller.playbackState
+                    GlobalState.isPlaying.value = state?.state == PlaybackState.STATE_PLAYING
+                }
+
+                // 2. EXTRAER INFORMACIÓN DE LA PISTA
                 val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "Sin título"
                 val artist = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: "Artista desconocido"
                 
-                // --- CORRECCIÓN CRÍTICA DE LA IMAGEN ---
+                // 3. CORRECCIÓN CRÍTICA DE LA IMAGEN
                 var largeIcon: Bitmap? = null
 
                 // Intento 1: Método moderno (Android 6.0+)
