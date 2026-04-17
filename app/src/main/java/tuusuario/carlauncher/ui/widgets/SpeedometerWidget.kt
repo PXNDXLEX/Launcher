@@ -18,96 +18,141 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun SpeedometerWidget() {
     val currentSpeedKmH = rememberGpsSpeed()
-    
-    // Reducimos el tiempo de la animación de 800ms a 300ms 
-    // para que la aguja "siga" al GPS casi en tiempo real.
     val animatedSpeed by animateFloatAsState(
         targetValue = currentSpeedKmH,
-        animationSpec = tween(
-            durationMillis = 300, 
-            easing = FastOutSlowInEasing
-        ),
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
         label = "SpeedAnimation"
     )
 
+    // Colores basados en tu imagen de referencia
+    val activeTrackColor = Color(0xFFE91E63) // Rosa/Rojo intenso
+    val inactiveTrackColor = Color(0xFF2A1B2E) // Morado muy oscuro
+    val tickColor = Color.DarkGray
     val textColor = MaterialTheme.colorScheme.onSurface
-    val trackColor = MaterialTheme.colorScheme.surfaceVariant
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // Marcador digital
         SpeedometerDial(
             speed = animatedSpeed, 
-            maxSpeed = 220f, 
-            trackColor = trackColor, 
-            textColor = textColor
+            maxSpeed = 220f, // Mantenemos el límite de 220km/h para el Kia Rio
+            activeColor = activeTrackColor, 
+            inactiveColor = inactiveTrackColor,
+            tickColor = tickColor
         )
 
+        // Textos centrales
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = currentSpeedKmH.toInt().toString(),
                 color = textColor,
-                fontSize = 64.sp,
-                fontWeight = FontWeight.ExtraBold
+                fontSize = 72.sp,
+                fontWeight = FontWeight.Medium
             )
             Text(
-                text = "KM/H", 
+                text = "km/h", 
                 color = textColor.copy(alpha = 0.6f), 
-                fontSize = 14.sp, 
-                fontWeight = FontWeight.Bold
+                fontSize = 18.sp, 
+                fontWeight = FontWeight.Normal
             )
         }
     }
 }
 
 @Composable
-fun SpeedometerDial(speed: Float, maxSpeed: Float, trackColor: Color, textColor: Color) {
-    Canvas(modifier = Modifier.size(180.dp)) {
+fun SpeedometerDial(speed: Float, maxSpeed: Float, activeColor: Color, inactiveColor: Color, tickColor: Color) {
+    val density = LocalDensity.current
+    val textPaint = remember(density) {
+        android.graphics.Paint().apply {
+            color = android.graphics.Color.LTGRAY
+            textSize = with(density) { 12.sp.toPx() }
+            textAlign = android.graphics.Paint.Align.CENTER
+            isAntiAlias = true
+        }
+    }
+
+    Canvas(modifier = Modifier.size(220.dp)) { // Tamaño un poco más grande para el detalle
         val sweepAngle = 240f
         val startAngle = 150f
+        val arcWidth = 20.dp.toPx()
+        val radius = size.width / 2
 
-        // Arco de fondo
+        // 1. Arco Inactivo (Fondo Oscuro)
         drawArc(
-            color = trackColor,
+            color = inactiveColor,
             startAngle = startAngle,
             sweepAngle = sweepAngle,
             useCenter = false,
-            style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round),
+            style = Stroke(width = arcWidth, cap = StrokeCap.Round),
             size = Size(size.width, size.height)
         )
 
+        // 2. Arco Activo (Progreso Rosa/Rojo)
         val speedProgress = (speed / maxSpeed).coerceIn(0f, 1f)
         val activeSweepAngle = sweepAngle * speedProgress
 
-        // Arco de velocidad activo (Rojo)
         drawArc(
-            color = Color(0xFFE53935),
+            color = activeColor,
             startAngle = startAngle,
             sweepAngle = activeSweepAngle,
             useCenter = false,
-            style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round),
+            style = Stroke(width = arcWidth, cap = StrokeCap.Round),
             size = Size(size.width, size.height)
         )
 
-        // Aguja
-        val needleAngle = startAngle + activeSweepAngle
-        rotate(degrees = needleAngle + 90f) {
-            drawLine(
-                color = textColor,
-                start = Offset(center.x, center.y),
-                end = Offset(center.x, 20.dp.toPx()),
-                strokeWidth = 6.dp.toPx(),
-                cap = StrokeCap.Round
-            )
+        // 3. Dibujar las rayitas (ticks) y los números
+        val numTicks = 22 // Para ir de 0 a 220 de 10 en 10
+        val tickStepAngle = sweepAngle / numTicks
+        val center = Offset(size.width / 2, size.height / 2)
+        val tickStartRadius = radius - (arcWidth / 2) - 8.dp.toPx() // Empieza justo dentro del arco
+
+        drawIntoCanvas { canvas ->
+            for (i in 0..numTicks) {
+                val currentAngle = startAngle + (i * tickStepAngle)
+                val angleRad = Math.toRadians(currentAngle.toDouble())
+
+                val isMajorTick = i % 2 == 0 // Rayita larga y número cada 20 km/h (0, 20, 40...)
+                val tickLength = if (isMajorTick) 12.dp.toPx() else 6.dp.toPx()
+
+                // Coordenadas de inicio y fin para la rayita
+                val startX = (center.x + tickStartRadius * cos(angleRad)).toFloat()
+                val startY = (center.y + tickStartRadius * sin(angleRad)).toFloat()
+                
+                val endX = (center.x + (tickStartRadius - tickLength) * cos(angleRad)).toFloat()
+                val endY = (center.y + (tickStartRadius - tickLength) * sin(angleRad)).toFloat()
+
+                drawLine(
+                    color = if (i * 10 <= speed) activeColor else tickColor,
+                    start = Offset(startX, startY),
+                    end = Offset(endX, endY),
+                    strokeWidth = 2.dp.toPx()
+                )
+
+                // Dibujar el número en los Major Ticks
+                if (isMajorTick) {
+                    val textRadius = tickStartRadius - tickLength - 14.dp.toPx()
+                    val textX = (center.x + textRadius * cos(angleRad)).toFloat()
+                    val textY = (center.y + textRadius * sin(angleRad)).toFloat()
+                    
+                    // Ajustamos Y un poco hacia abajo por la forma en que dibuja el texto nativo
+                    val speedValue = (i * 10).toString()
+                    canvas.nativeCanvas.drawText(speedValue, textX, textY + 12f, textPaint)
+                }
+            }
         }
     }
 }
@@ -119,35 +164,22 @@ fun rememberGpsSpeed(): Float {
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        
-        // Configuramos el intervalo a 500ms para mayor frecuencia de muestreo
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
-            .setMinUpdateIntervalMillis(300)
-            .setMinUpdateDistanceMeters(0f)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+            .setMinUpdateIntervalMillis(500)
             .build()
 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                // Usamos lastLocation para obtener la actualización más reciente inmediatamente
-                result.lastLocation?.let { location ->
+                for (location in result.locations) {
                     if (location.hasSpeed()) {
-                        speed = location.speed * 3.6f // Conversión m/s a km/h
+                        speed = location.speed * 3.6f 
                     }
                 }
             }
         }
 
-        // Validación de permisos antes de iniciar
-        if (ActivityCompat.checkSelfPermission(
-                context, 
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest, 
-                locationCallback, 
-                Looper.getMainLooper()
-            )
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
         }
 
         onDispose {
