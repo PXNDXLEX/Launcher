@@ -70,7 +70,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
     
-    // Detectamos la orientación en tiempo real
+    // Detector de orientación para hacer el diseño responsivo automáticamente
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     
@@ -92,8 +92,8 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // En Vertical movemos la barra lateral a la parte inferior (estilo dock), en Horizontal a la izquierda
         if (isLandscape) {
+            // --- MODO HORIZONTAL ---
             Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(modifier = Modifier.width(80.dp).fillMaxHeight(), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -113,10 +113,12 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it })
             }
         } else {
+            // --- MODO VERTICAL (RESPONSIVO) ---
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
                     MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it })
                 }
+                // Barra de navegación inferior en modo vertical
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     NavigationBarItem(selected = currentScreen == "DASHBOARD", onClick = { currentScreen = "DASHBOARD" }, icon = { Icon(Icons.Default.Dashboard, "Dashboard") })
                     NavigationBarItem(selected = currentScreen == "MAPA_FULL", onClick = { currentScreen = "MAPA_FULL" }, icon = { Icon(Icons.Default.Map, "Mapa") })
@@ -126,7 +128,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // Popup notificaciones
+        // --- NOTIFICACIONES DESLIZABLES ---
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
@@ -150,7 +152,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // Settings Dialog (se mantiene igual, puedes conservarlo como lo tenías)
+        // --- AJUSTES ---
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = { showSettingsDialog = false },
@@ -177,6 +179,16 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                                 }
                             }
                         }
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Divider()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Solución de Errores:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        Text("Si la música deja de actualizarse, desactiva la optimización de batería para esta app.", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                        ) { Text("Quitar Límite de Batería") }
                     }
                 },
                 confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("Cerrar") } }
@@ -185,7 +197,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     }
 }
 
-// Extrajimos el área principal para reusarla tanto en vertical como horizontal
+// Extrajimos el área principal para reusarla y adaptarla
 @Composable
 fun MainContentArea(
     currentScreen: String, 
@@ -213,7 +225,7 @@ fun MainContentArea(
             "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
             "DASHBOARD" -> {
                 if (isLandscape) {
-                    // Diseño Horizontal Original
+                    // Diseño Horizontal Original (Mapa izquierda, Widgets derecha)
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap() }
                         Column(modifier = Modifier.weight(0.4f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -224,10 +236,10 @@ fun MainContentArea(
                         }
                     }
                 } else {
-                    // NUEVO Diseño Vertical Responsivo (Mapa arriba, widgets abajo lado a lado)
+                    // NUEVO DISEÑO VERTICAL RESPONSIVO (Mapa Arriba, Velocímetro y Música Abajo compartiendo espacio)
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.6f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap() }
-                        Row(modifier = Modifier.weight(0.4f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap() }
+                        Row(modifier = Modifier.weight(0.5f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
                             Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)

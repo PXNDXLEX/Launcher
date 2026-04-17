@@ -2,6 +2,7 @@ package com.tuusuario.carlauncher.services
 
 import android.app.Notification
 import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
 import android.media.session.MediaController
@@ -33,11 +34,30 @@ object GlobalState {
 class MusicNotificationService : NotificationListenerService() {
 
     companion object {
-        // Guardamos la instancia para poder llamarla desde la MainActivity
         var instance: MusicNotificationService? = null
 
         fun reconnect(context: android.content.Context) {
-            try { requestRebind(ComponentName(context, MusicNotificationService::class.java)) } catch (e: Exception) {}
+            try {
+                // TRUCO MAESTRO: Apagamos y encendemos el componente a nivel de sistema.
+                // Esto fuerza a Android a reiniciar la lectura de notificaciones sin que el usuario tenga que ir a los ajustes.
+                val pm = context.packageManager
+                val componentName = ComponentName(context, MusicNotificationService::class.java)
+                
+                // Deshabilitar
+                pm.setComponentEnabledSetting(
+                    componentName,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+                // Habilitar inmediatamente
+                pm.setComponentEnabledSetting(
+                    componentName,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+            } catch (e: Exception) { 
+                e.printStackTrace() 
+            }
         }
     }
 
@@ -91,7 +111,7 @@ class MusicNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        instance = this // Guardamos la instancia activa
+        instance = this
         refreshCurrentMedia()
     }
 
@@ -100,7 +120,6 @@ class MusicNotificationService : NotificationListenerService() {
         super.onListenerDisconnected()
     }
 
-    // Método que llamamos desde MainActivity al desbloquear el teléfono
     fun refreshCurrentMedia() {
         try {
             activeNotifications?.forEach { onNotificationPosted(it) }
