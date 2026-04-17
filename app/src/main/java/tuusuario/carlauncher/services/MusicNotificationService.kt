@@ -1,4 +1,4 @@
-package tuusuario.carlauncher.services
+package com.tuusuario.carlauncher.services
 
 import android.app.Notification
 import android.content.ComponentName
@@ -8,7 +8,6 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.runtime.mutableStateOf
 
-// Objeto global para compartir el estado de la música con los widgets
 object GlobalState {
     val songTitle = mutableStateOf("Música detenida")
     val songArtist = mutableStateOf("")
@@ -20,9 +19,7 @@ object GlobalState {
 }
 
 class MusicNotificationService : NotificationListenerService() {
-
     companion object {
-        // Método para forzar la reconexión del servicio y evitar que Android lo "duerma"
         fun reconnect(context: android.content.Context) {
             try {
                 requestRebind(ComponentName(context, MusicNotificationService::class.java))

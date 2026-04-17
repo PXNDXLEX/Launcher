@@ -1,4 +1,4 @@
-package tuusuario.carlauncher
+package com.tuusuario.carlauncher
 
 import android.Manifest
 import android.content.Intent
@@ -26,8 +26,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import tuusuario.carlauncher.ui.DashboardScreen
-import tuusuario.carlauncher.services.MusicNotificationService
+import com.tuusuario.carlauncher.ui.DashboardScreen
+import com.tuusuario.carlauncher.services.MusicNotificationService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
