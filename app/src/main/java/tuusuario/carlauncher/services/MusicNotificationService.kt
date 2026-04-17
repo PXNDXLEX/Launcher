@@ -1,75 +1,92 @@
-package com.tuusuario.carlauncher.services
+package com.tuusuario.carlauncher.ui.widgets
 
-import android.app.Notification
-import android.content.ComponentName
-import android.graphics.Bitmap
-import android.graphics.drawable.Icon
-import android.service.notification.NotificationListenerService
-import android.service.notification.StatusBarNotification
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.tuusuario.carlauncher.services.GlobalState
 
-object GlobalState {
-    val songTitle = mutableStateOf("Música detenida")
-    val songArtist = mutableStateOf("")
-    val songAlbumArt = mutableStateOf<Bitmap?>(null) // Nuevo: Guardamos la imagen
-    
-    val showPopup = mutableStateOf(false)
-    val popupMessage = mutableStateOf("")
-    val popupApp = mutableStateOf("")
-}
+@Composable
+fun MusicPlayerWidget() {
+    val songTitle = GlobalState.songTitle.value
+    val songArtist = GlobalState.songArtist.value
+    val albumArt = GlobalState.songAlbumArt.value
+    val textColor = MaterialTheme.colorScheme.onSurface
 
-class MusicNotificationService : NotificationListenerService() {
-
-    // Función para "despertar" el servicio desde la MainActivity
-    companion object {
-        fun reconnect(context: android.content.Context) {
-            requestRebind(ComponentName(context, MusicNotificationService::class.java))
+    Row(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically // <-- CORREGIDO: Alignment.CenterVertically
+    ) {
+        // ÁREA DE LA CARÁTULA
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            if (albumArt != null) {
+                Image(
+                    bitmap = albumArt.asImageBitmap(),
+                    contentDescription = "Album Art",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(Icons.Default.MusicNote, null, modifier = Modifier.size(40.dp), tint = textColor.copy(alpha = 0.3f))
+            }
         }
-    }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        val notification = sbn?.notification ?: return
-        val extras = notification.extras
+        Spacer(modifier = Modifier.width(16.dp))
 
-        if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
-            val title = extras.getString(Notification.EXTRA_TITLE)
-            val artist = extras.getString(Notification.EXTRA_TEXT)
+        // INFORMACIÓN Y CONTROLES
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = songTitle, 
+                color = textColor, 
+                fontSize = 18.sp, 
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = songArtist, 
+                color = textColor.copy(alpha = 0.6f), 
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             
-            // Extraemos la carátula (Large Icon)
-            val largeIcon = extras.getParcelable<Bitmap>(Notification.EXTRA_LARGE_ICON) 
-                ?: extractBitmapFromIcon(notification.getLargeIcon())
-
-            if (!title.isNullOrEmpty()) {
-                GlobalState.songTitle.value = title
-                GlobalState.songArtist.value = artist ?: "Desconocido"
-                GlobalState.songAlbumArt.value = largeIcon // Actualizamos la imagen
-            }
-        } else {
-            val title = extras.getString(Notification.EXTRA_TITLE)
-            val text = extras.getString(Notification.EXTRA_TEXT)
-            if (!title.isNullOrEmpty() && !text.isNullOrEmpty() && sbn.packageName != packageName && sbn.packageName != "android") {
-                GlobalState.popupApp.value = title
-                GlobalState.popupMessage.value = text
-                GlobalState.showPopup.value = true
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                IconButton(onClick = { /* Implementar */ }) { Icon(Icons.Default.SkipPrevious, null, tint = textColor) }
+                IconButton(onClick = { /* Implementar */ }) { Icon(Icons.Default.PlayArrow, null, tint = textColor, modifier = Modifier.size(32.dp)) }
+                IconButton(onClick = { /* Implementar */ }) { Icon(Icons.Default.SkipNext, null, tint = textColor) }
             }
         }
-    }
-
-    // Helper para convertir Icon a Bitmap si es necesario
-    private fun extractBitmapFromIcon(icon: Icon?): Bitmap? {
-        try {
-            val drawable = icon?.loadDrawable(this)
-            if (drawable is android.graphics.drawable.BitmapDrawable) {
-                return drawable.bitmap
-            }
-        } catch (e: Exception) { e.printStackTrace() }
-        return null
-    }
-
-    override fun onListenerConnected() {
-        super.onListenerConnected()
-        // Cuando se conecta, intentamos capturar lo que ya está sonando
-        val activeNotifications = activeNotifications
-        activeNotifications?.forEach { onNotificationPosted(it) }
     }
 }
