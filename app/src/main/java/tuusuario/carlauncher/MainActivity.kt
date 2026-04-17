@@ -33,7 +33,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Mantiene la pantalla encendida para el uso en el auto
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -42,24 +41,21 @@ class MainActivity : ComponentActivity() {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        // Despertamos el servicio de música cada vez que la app abre para evitar el "tedio" de reconectar
         if (NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)) {
             MusicNotificationService.reconnect(this)
         }
 
         setContent {
             var isDarkMode by remember { mutableStateOf(true) }
-            var isLandscape by remember { mutableStateOf(true) }
 
-            requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            // MAGIA: El teléfono girará automáticamente usando sus sensores (Horizontal/Vertical)
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
 
             MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     MainAppFlow(
                         isDarkMode = isDarkMode,
-                        onToggleTheme = { isDarkMode = !isDarkMode },
-                        isLandscape = isLandscape,
-                        onToggleOrientation = { isLandscape = !isLandscape }
+                        onToggleTheme = { isDarkMode = !isDarkMode } // Quitamos el toggle manual de orientación
                     )
                 }
             }
@@ -68,7 +64,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boolean, onToggleOrientation: () -> Unit) {
+fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     
@@ -84,7 +80,6 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boo
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 checkPermissions()
-                // Si el permiso ya está, intentamos reconectar el servicio automáticamente
                 if (notificationsGranted) MusicNotificationService.reconnect(context)
             }
         }
@@ -108,12 +103,12 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boo
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = { locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }) { Text("Permitir GPS") }
             } else if (!notificationsGranted) {
-                Text("2. GPS Listo. Ahora da acceso a las Notificaciones para la música y WhatsApp.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                Text("2. GPS Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Abrir Ajustes de Notificaciones") }
+                Button(onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Abrir Ajustes") }
             }
         }
     } else {
-        DashboardScreen(onToggleTheme, onToggleOrientation, isDarkMode, isLandscape)
+        DashboardScreen(onToggleTheme, isDarkMode)
     }
 }

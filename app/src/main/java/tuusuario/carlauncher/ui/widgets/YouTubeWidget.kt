@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 
-// Objeto global para mantener vivo el video aunque cambiemos de pestaña
 object YouTubeState {
     var webView: WebView? = null
 }
@@ -23,27 +22,19 @@ fun YouTubeWidget() {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
-            // Solo creamos el YouTube UNA vez en toda la vida de la app
             if (YouTubeState.webView == null) {
-                // MAGIA REBELDE: Creamos un WebView personalizado que ignora los bloqueos de Android
                 YouTubeState.webView = object : WebView(context) {
-                    
-                    // Mentira #1: Siempre estoy visible, nunca me he ocultado
                     override fun onWindowVisibilityChanged(visibility: Int) {
                         super.onWindowVisibilityChanged(View.VISIBLE)
                     }
-
-                    // Mentira #2: Siempre me están mirando, no pauses la multimedia
                     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                         super.onWindowFocusChanged(true)
                     }
-                    
                 }.apply {
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
-                        mediaPlaybackRequiresUserGesture = false // Permite reproducir sin tocar
-                        // Engañamos a YouTube para que crea que somos un navegador real
+                        mediaPlaybackRequiresUserGesture = false 
                         userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36"
                         useWideViewPort = true
                         loadWithOverviewMode = true
@@ -53,12 +44,18 @@ fun YouTubeWidget() {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // Inyección JavaScript: Cegamos a YouTube para que no pueda detectar si la pestaña está oculta o minimizada
+                            // HACKER MODE: Cegamos a YouTube para que no pause el video al salir de FullScreen o al cambiar el tamaño del WebView
                             view?.evaluateJavascript(
                                 """
                                 Object.defineProperty(document, 'hidden', {value: false, writable: false});
                                 Object.defineProperty(document, 'visibilityState', {value: 'visible', writable: false});
                                 window.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
+                                window.addEventListener('blur', e => e.stopImmediatePropagation(), true);
+                                document.hasFocus = () => true;
+                                
+                                // Bloqueamos el evento que dispara la pausa cuando la ventana cambia de tamaño
+                                document.addEventListener('fullscreenchange', e => e.stopImmediatePropagation(), true);
+                                document.addEventListener('webkitfullscreenchange', e => e.stopImmediatePropagation(), true);
                                 """.trimIndent(), 
                                 null
                             )
@@ -70,11 +67,8 @@ fun YouTubeWidget() {
                 }
             }
             
-            // Despegamos el WebView de su padre anterior si lo tenía para moverlo a la nueva pestaña
             (YouTubeState.webView?.parent as? ViewGroup)?.removeView(YouTubeState.webView)
-            
             YouTubeState.webView!!
         }
-        // ¡Se eliminó el bloque 'update' para evitar que el reloj del Dashboard interrumpa el video!
     )
 }

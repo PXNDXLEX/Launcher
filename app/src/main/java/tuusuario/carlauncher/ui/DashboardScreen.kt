@@ -3,6 +3,7 @@ package com.tuusuario.carlauncher.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,13 +30,12 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import com.tuusuario.carlauncher.services.GlobalState // Importación necesaria
+import com.tuusuario.carlauncher.services.GlobalState
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
-import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget // Importación necesaria
+import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
 
-// Manejo de persistencia
 class SettingsManager(context: Context) {
     private val sharedPreferences = context.getSharedPreferences("CarLauncherSettings", Context.MODE_PRIVATE)
 
@@ -72,8 +72,9 @@ object AppSettings {
     }
 }
 
+// Se eliminó la variable isLandscape y onToggleOrientation
 @Composable
-fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, isDarkMode: Boolean, isLandscape: Boolean) {
+fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -105,10 +106,13 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                 Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
                 Text(currentDate, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.weight(1f))
+                
                 IconButton(onClick = { currentScreen = "DASHBOARD" }, colors = IconButtonDefaults.iconButtonColors(contentColor = if (currentScreen == "DASHBOARD") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)) { Icon(Icons.Default.Dashboard, "Dashboard") }
                 IconButton(onClick = { currentScreen = "MAPA_FULL" }, colors = IconButtonDefaults.iconButtonColors(contentColor = if (currentScreen == "MAPA_FULL") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)) { Icon(Icons.Default.Map, "Mapa") }
                 IconButton(onClick = { currentScreen = "YOUTUBE" }, colors = IconButtonDefaults.iconButtonColors(contentColor = if (currentScreen == "YOUTUBE") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)) { Icon(Icons.Default.OndemandVideo, "YouTube") }
+                
                 Spacer(modifier = Modifier.height(16.dp))
+                // Botón de orientación eliminado. Ahora solo están Ajustes y Tema
                 IconButton(onClick = { showSettingsDialog = true }) { Icon(Icons.Default.Settings, "Ajustes") }
                 IconButton(onClick = onToggleTheme) { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema") }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -160,7 +164,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
             }
         }
 
-        // Notificaciones deslizables
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
@@ -187,17 +190,17 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = { showSettingsDialog = false },
-                title = { Text("Personalizar") },
+                title = { Text("Ajustes del Car Launcher") },
                 text = {
                     Column {
-                        Text("Vehículo:")
+                        Text("Vehículo en Mapa:", fontWeight = FontWeight.Bold)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                             listOf("FLECHA", "SEDAN", "HATCHBACK", "CAMIONETA", "MOTO").forEach { type ->
                                 FilterChip(selected = AppSettings.vehicleType.value == type, onClick = { AppSettings.saveVehicleType(type) }, label = { Text(type.take(3)) })
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Color:")
+                        Text("Color:", fontWeight = FontWeight.Bold)
                         val colors = listOf(Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, Color.Green, Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500))
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             colors.chunked(5).forEach { rowColors ->
@@ -209,6 +212,24 @@ fun DashboardScreen(onToggleTheme: () -> Unit, onToggleOrientation: () -> Unit, 
                                     }
                                 }
                             }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Divider()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        // BOTÓN MÁGICO PARA EVITAR QUE LA MÚSICA SE DUERMA
+                        Text("Solución de Errores:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        Text("Si la música deja de actualizarse, desactiva la optimización de batería para esta app.", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { 
+                                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                        ) {
+                            Text("Quitar Límite de Batería")
                         }
                     }
                 },
