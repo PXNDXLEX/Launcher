@@ -6,7 +6,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
-import android.view.WindowManager // Importación necesaria para el manejo de la pantalla
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,13 +27,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.tuusuario.carlauncher.ui.DashboardScreen
+import com.tuusuario.carlauncher.services.MusicNotificationService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // --- FUNCIÓN DE PANTALLA SIEMPRE ENCENDIDA ---
-        // Esto evita que el teléfono se bloquee o atenúe la luz mientras usas el Launcher
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -42,11 +41,15 @@ class MainActivity : ComponentActivity() {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
+        // --- SOLUCIÓN AL TEDIO: Despertamos el servicio de música cada vez que la app abre ---
+        if (NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)) {
+            MusicNotificationService.reconnect(this)
+        }
+
         setContent {
             var isDarkMode by remember { mutableStateOf(true) }
             var isLandscape by remember { mutableStateOf(true) }
 
-            // Bloqueamos la orientación para que se mantenga en horizontal como una radio de coche real
             requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 
             MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()) {
@@ -78,7 +81,11 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boo
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) checkPermissions()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                checkPermissions()
+                // También reintentamos conexión al volver a la app
+                if (notificationsGranted) MusicNotificationService.reconnect(context)
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
