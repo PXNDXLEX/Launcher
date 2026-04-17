@@ -1,4 +1,4 @@
-package com.tuusuario.carlauncher.services
+package tuusuario.carlauncher.services
 
 import android.app.Notification
 import android.content.ComponentName
@@ -8,10 +8,11 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.runtime.mutableStateOf
 
+// Objeto global para compartir el estado de la música con los widgets
 object GlobalState {
     val songTitle = mutableStateOf("Música detenida")
     val songArtist = mutableStateOf("")
-    val songAlbumArt = mutableStateOf<Bitmap?>(null) // Nuevo: Guardamos la imagen
+    val songAlbumArt = mutableStateOf<Bitmap?>(null)
     
     val showPopup = mutableStateOf(false)
     val popupMessage = mutableStateOf("")
@@ -20,10 +21,12 @@ object GlobalState {
 
 class MusicNotificationService : NotificationListenerService() {
 
-    // Función para "despertar" el servicio desde la MainActivity
     companion object {
+        // Método para forzar la reconexión del servicio y evitar que Android lo "duerma"
         fun reconnect(context: android.content.Context) {
-            requestRebind(ComponentName(context, MusicNotificationService::class.java))
+            try {
+                requestRebind(ComponentName(context, MusicNotificationService::class.java))
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
 
@@ -31,20 +34,22 @@ class MusicNotificationService : NotificationListenerService() {
         val notification = sbn?.notification ?: return
         val extras = notification.extras
 
+        // Verificamos si la notificación es de un reproductor multimedia
         if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
             val title = extras.getString(Notification.EXTRA_TITLE)
             val artist = extras.getString(Notification.EXTRA_TEXT)
             
-            // Extraemos la carátula (Large Icon)
+            // Intentamos extraer la carátula del álbum (Large Icon)
             val largeIcon = extras.getParcelable<Bitmap>(Notification.EXTRA_LARGE_ICON) 
                 ?: extractBitmapFromIcon(notification.getLargeIcon())
 
             if (!title.isNullOrEmpty()) {
                 GlobalState.songTitle.value = title
                 GlobalState.songArtist.value = artist ?: "Desconocido"
-                GlobalState.songAlbumArt.value = largeIcon // Actualizamos la imagen
+                GlobalState.songAlbumArt.value = largeIcon
             }
         } else {
+            // Si no es música, la tratamos como una notificación normal (ej: WhatsApp)
             val title = extras.getString(Notification.EXTRA_TITLE)
             val text = extras.getString(Notification.EXTRA_TEXT)
             if (!title.isNullOrEmpty() && !text.isNullOrEmpty() && sbn.packageName != packageName && sbn.packageName != "android") {
@@ -55,7 +60,7 @@ class MusicNotificationService : NotificationListenerService() {
         }
     }
 
-    // Helper para convertir Icon a Bitmap si es necesario
+    // Convierte el objeto Icon de Android en un Bitmap que Compose pueda dibujar
     private fun extractBitmapFromIcon(icon: Icon?): Bitmap? {
         try {
             val drawable = icon?.loadDrawable(this)
@@ -68,8 +73,7 @@ class MusicNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        // Cuando se conecta, intentamos capturar lo que ya está sonando
-        val activeNotifications = activeNotifications
+        // Al conectar, escaneamos las notificaciones actuales para mostrar lo que ya esté sonando
         activeNotifications?.forEach { onNotificationPosted(it) }
     }
 }

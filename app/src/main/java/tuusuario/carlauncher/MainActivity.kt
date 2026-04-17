@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Mantiene la pantalla encendida para el uso en el auto
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -41,7 +42,7 @@ class MainActivity : ComponentActivity() {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        // Despertamos el servicio de música cada vez que la app abre
+        // Despertamos el servicio de música cada vez que la app abre para evitar el "tedio" de reconectar
         if (NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)) {
             MusicNotificationService.reconnect(this)
         }
@@ -83,6 +84,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit, isLandscape: Boo
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 checkPermissions()
+                // Si el permiso ya está, intentamos reconectar el servicio automáticamente
                 if (notificationsGranted) MusicNotificationService.reconnect(context)
             }
         }

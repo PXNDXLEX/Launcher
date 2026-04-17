@@ -36,7 +36,6 @@ fun MusicPlayerWidget() {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // ÁREA DE LA CARÁTULA
         Box(
             modifier = Modifier
                 .size(100.dp)
@@ -58,7 +57,6 @@ fun MusicPlayerWidget() {
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        // INFORMACIÓN Y CONTROLES
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.Center
@@ -83,9 +81,9 @@ fun MusicPlayerWidget() {
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.Start
             ) {
-                IconButton(onClick = { /* Implementar */ }) { Icon(Icons.Default.SkipPrevious, null, tint = textColor) }
-                IconButton(onClick = { /* Implementar */ }) { Icon(Icons.Default.PlayArrow, null, tint = textColor, modifier = Modifier.size(32.dp)) }
-                IconButton(onClick = { /* Implementar */ }) { Icon(Icons.Default.SkipNext, null, tint = textColor) }
+                IconButton(onClick = { /* Pendiente */ }) { Icon(Icons.Default.SkipPrevious, null, tint = textColor) }
+                IconButton(onClick = { /* Pendiente */ }) { Icon(Icons.Default.PlayArrow, null, tint = textColor, modifier = Modifier.size(32.dp)) }
+                IconButton(onClick = { /* Pendiente */ }) { Icon(Icons.Default.SkipNext, null, tint = textColor) }
             }
         }
     }
