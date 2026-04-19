@@ -11,6 +11,7 @@ import android.graphics.Path
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
@@ -18,7 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight // ESTE ES EL IMPORT QUE FALTABA
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -56,7 +57,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
-    // AUTO-CENTRADO: Al pasar de 5 km/h, se engancha al GPS automáticamente
+    // AUTO-CENTRADO
     LaunchedEffect(currentSpeed) {
         if (currentSpeed >= 5f && locationOverlay?.isFollowLocationEnabled == false) {
             locationOverlay?.enableFollowLocation()
@@ -70,17 +71,26 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             factory = { ctx ->
                 mapView.apply {
                     setTileSource(TileSourceFactory.MAPNIK)
-                    controller.setZoom(20.0) // Zoom máximo para ver bien las calles
+                    controller.setCenter(GeoPoint(10.996, -63.804)) // Pampatar (Centro temporal mientras busca GPS)
+                    
+                    // SOLUCIÓN AL MAPA EN BLANCO: Forzamos el renderizado inicial y el onResume
+                    post { 
+                        controller.setZoom(19.0)
+                        invalidate() 
+                    }
+                    onResume()
+
                     setMultiTouchControls(true)
                     setHasTransientState(true)
 
-                    // Detector de pulsación larga para trazar ruta
                     val mReceive = object : MapEventsReceiver {
                         override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean = false
                         override fun longPressHelper(p: GeoPoint?): Boolean {
                             if (p != null) {
                                 selectedDestination = p
-                                overlays.removeAll { it is Marker && it.id == "DEST" }
+                                // Al elegir destino nuevo, limpiamos rutas anteriores
+                                routeDistance = ""
+                                overlays.removeAll { it is Marker && it.id == "DEST" || it is Polyline }
                                 val marker = Marker(mapView).apply {
                                     position = p
                                     id = "DEST"
@@ -116,9 +126,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
+                view.onResume() // Asegura que el mapa se actualice y no quede en blanco
                 view.setMultiTouchControls(isFullScreen)
                 
-                // MODO NOCHE: Filtro que invierte los colores para modo nocturno elegante
                 if (isDarkMode) {
                     val inverseMatrix = ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
@@ -144,61 +154,82 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             
             if (routeDistance.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    Text("Destino a: $routeDistance", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("Distancia: $routeDistance", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
             }
 
-            if (selectedDestination != null) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            val start = locationOverlay?.myLocation
-                            val dest = selectedDestination
-                            if (start != null && dest != null) {
-                                // AHORA CON HTTPS Y AVISO SI EL GPS NO ESTÁ LISTO
-                                val urlStr = "https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson"
-                                try {
-                                    val result = withContext(Dispatchers.IO) {
-                                        val url = URL(urlStr)
-                                        val conn = url.openConnection() as HttpURLConnection
-                                        conn.inputStream.bufferedReader().readText()
-                                    }
-                                    val json = JSONObject(result)
-                                    val routes = json.getJSONArray("routes")
-                                    if (routes.length() > 0) {
-                                        val route = routes.getJSONObject(0)
-                                        val distanceMeters = route.getDouble("distance")
-                                        
-                                        routeDistance = if (distanceMeters > 1000) String.format("%.1f km", distanceMeters / 1000) else "${distanceMeters.toInt()} m"
+            if (selectedDestination != null || routeDistance.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                    
+                    // BOTÓN DE CANCELAR RUTA
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            selectedDestination = null
+                            routeDistance = ""
+                            mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
+                            mapView.invalidate()
+                        },
+                        icon = { Icon(Icons.Default.Close, "Cancelar") }, 
+                        text = { Text("Cancelar") }, 
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
 
-                                        val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
-                                        val geoPoints = ArrayList<GeoPoint>()
-                                        for (i in 0 until coordinates.length()) {
-                                            val pt = coordinates.getJSONArray(i)
-                                            geoPoints.add(GeoPoint(pt.getDouble(1), pt.getDouble(0)))
+                    // BOTÓN DE IR AQUÍ (Solo se muestra si hay destino pero no ha calculado la ruta)
+                    if (routeDistance.isEmpty()) {
+                        ExtendedFloatingActionButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val start = locationOverlay?.myLocation
+                                    val dest = selectedDestination
+                                    if (start != null && dest != null) {
+                                        routeDistance = "Calculando..."
+                                        val urlStr = "https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson"
+                                        try {
+                                            val result = withContext(Dispatchers.IO) {
+                                                val url = URL(urlStr)
+                                                val conn = url.openConnection() as HttpURLConnection
+                                                conn.inputStream.bufferedReader().readText()
+                                            }
+                                            val json = JSONObject(result)
+                                            val routes = json.getJSONArray("routes")
+                                            if (routes.length() > 0) {
+                                                val route = routes.getJSONObject(0)
+                                                val distanceMeters = route.getDouble("distance")
+                                                
+                                                routeDistance = if (distanceMeters > 1000) String.format("%.1f km", distanceMeters / 1000) else "${distanceMeters.toInt()} m"
+
+                                                val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
+                                                val geoPoints = ArrayList<GeoPoint>()
+                                                for (i in 0 until coordinates.length()) {
+                                                    val pt = coordinates.getJSONArray(i)
+                                                    geoPoints.add(GeoPoint(pt.getDouble(1), pt.getDouble(0)))
+                                                }
+                                                
+                                                mapView.overlays.removeAll { it is Polyline }
+                                                val polyline = Polyline(mapView).apply {
+                                                    setPoints(geoPoints)
+                                                    outlinePaint.color = vehicleColor
+                                                    outlinePaint.strokeWidth = 15f
+                                                }
+                                                mapView.overlays.add(0, polyline)
+                                                mapView.invalidate()
+                                            }
+                                        } catch (e: Exception) { 
+                                            e.printStackTrace() 
+                                            routeDistance = "Error. Verifique Internet/GPS"
                                         }
-                                        
-                                        mapView.overlays.removeAll { it is Polyline }
-                                        val polyline = Polyline(mapView).apply {
-                                            setPoints(geoPoints)
-                                            outlinePaint.color = vehicleColor
-                                            outlinePaint.strokeWidth = 15f
-                                        }
-                                        mapView.overlays.add(0, polyline)
-                                        mapView.invalidate()
+                                    } else {
+                                        routeDistance = "Esperando GPS..."
                                     }
-                                } catch (e: Exception) { 
-                                    e.printStackTrace() 
-                                    // Si falla la conexión o el GPS, mostramos "Calculando..." para que sepas que el botón sí se presionó
-                                    routeDistance = "Calculando... ¿GPS listo?"
                                 }
-                            } else {
-                                routeDistance = "Esperando señal GPS..."
-                            }
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Directions, "Trazar") }, text = { Text("Ir Aquí") }, containerColor = MaterialTheme.colorScheme.tertiary, modifier = Modifier.padding(bottom = 8.dp)
-                )
+                            },
+                            icon = { Icon(Icons.Default.Directions, "Trazar") }, 
+                            text = { Text("Ir Aquí") }, 
+                            containerColor = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                }
             }
 
             FloatingActionButton(

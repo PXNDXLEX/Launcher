@@ -13,10 +13,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -50,7 +50,7 @@ fun SpeedometerWidget() {
                 for (location in result.locations) {
                     if (location.hasSpeed()) {
                         speed = location.speed * 3.6f 
-                        NavigationState.currentSpeedKmH.value = speed // Informamos al mapa
+                        NavigationState.currentSpeedKmH.value = speed 
                     }
                 }
             }
@@ -69,22 +69,20 @@ fun SpeedometerWidget() {
     )
 
     val style = AppSettings.speedoStyle.value
-    val activeColor = Color(AppSettings.speedoColor.value)
-    
-    // Adaptación a modo claro/oscuro para el fondo y las letras
+    val baseColor = Color(AppSettings.speedoColor.value)
     val isLight = MaterialTheme.colorScheme.background.red > 0.5f 
-    val inactiveColor = if (isLight) Color.LightGray.copy(alpha = 0.4f) else Color(0xFF2A1B2E)
+    val inactiveColor = if (isLight) Color.LightGray.copy(alpha = 0.5f) else Color(0xFF1E1E1E)
     val textColor = MaterialTheme.colorScheme.onSurface
     val tickColor = if (isLight) Color.Gray else Color.DarkGray
 
-    // BoxWithConstraints escala el reloj para que encaje perfecto sin cortarse
     BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val boxSize = min(maxWidth, maxHeight) * 0.85f // Usa el 85% del espacio disponible
+        val boxSize = min(maxWidth, maxHeight) * 0.9f 
         
-        SpeedometerDial(
+        // El diseño del velocímetro
+        SpeedometerDraw(
             speed = animatedSpeed, 
             maxSpeed = 220f, 
-            activeColor = activeColor, 
+            activeColor = baseColor, 
             inactiveColor = inactiveColor,
             textColor = textColor,
             tickColor = tickColor,
@@ -92,16 +90,25 @@ fun SpeedometerWidget() {
             modifier = Modifier.size(boxSize)
         )
 
-        // Textos Centrales Ajustables
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.25f).sp, fontWeight = FontWeight.Bold)
-            Text(text = "km/h", color = textColor.copy(alpha = 0.6f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Normal)
+        // Textos adaptados al estilo
+        if (style == "MINIMAL") {
+            // Para el estilo Rectangular (Moto), el texto va más arriba y centrado sobre la barra
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-30).dp)) {
+                Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Bold)
+                Text(text = "km/h", color = textColor.copy(alpha = 0.6f), fontSize = (boxSize.value * 0.1f).sp, fontWeight = FontWeight.Normal)
+            }
+        } else {
+            // Para los circulares (PREMIUM y NEON), el texto va en el centro
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Bold)
+                Text(text = "km/h", color = textColor.copy(alpha = 0.6f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Normal)
+            }
         }
     }
 }
 
 @Composable
-fun SpeedometerDial(speed: Float, maxSpeed: Float, activeColor: Color, inactiveColor: Color, textColor: Color, tickColor: Color, style: String, modifier: Modifier) {
+fun SpeedometerDraw(speed: Float, maxSpeed: Float, activeColor: Color, inactiveColor: Color, textColor: Color, tickColor: Color, style: String, modifier: Modifier) {
     val density = LocalDensity.current
     val textPaint = remember(density, textColor) {
         android.graphics.Paint().apply {
@@ -113,29 +120,30 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float, activeColor: Color, inactiveC
     }
 
     Canvas(modifier = modifier) {
-        val sweepAngle = 240f
-        val startAngle = 150f
         val speedProgress = (speed / maxSpeed).coerceIn(0f, 1f)
-        val activeSweepAngle = sweepAngle * speedProgress
-        val radius = size.width / 2
-
+        
         when (style) {
             "PREMIUM" -> {
-                // MODELO 1: Analógico Clásico con marcas completas (Líneas largas y cortas)
-                val arcWidth = size.width * 0.04f // Arco más delgado como soporte
+                // MODELO 1: Analógico Clásico
+                val sweepAngle = 240f
+                val startAngle = 150f
+                val activeSweepAngle = sweepAngle * speedProgress
+                val arcWidth = size.width * 0.05f
+                val radius = size.width / 2
+
                 drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
                 drawArc(color = activeColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
                 
-                val numTicks = 22 // Ticks de 0 a 220 (de 10 en 10)
+                val numTicks = 22 
                 val tickStepAngle = sweepAngle / numTicks
                 val center = Offset(size.width / 2, size.height / 2)
-                val tickStartRadius = radius - (arcWidth / 2) - 15f // Separado hacia adentro
+                val tickStartRadius = radius - (arcWidth / 2) - 15f
 
                 drawIntoCanvas { canvas ->
                     for (i in 0..numTicks) {
                         val currentAngle = startAngle + (i * tickStepAngle)
                         val angleRad = Math.toRadians(currentAngle.toDouble())
-                        val isMajorTick = i % 2 == 0 // Rayas principales cada 20 km/h
+                        val isMajorTick = i % 2 == 0
                         val tickLength = if (isMajorTick) size.width * 0.06f else size.width * 0.03f
 
                         val startX = (center.x + tickStartRadius * cos(angleRad)).toFloat()
@@ -146,7 +154,6 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float, activeColor: Color, inactiveC
                         val lineColor = if (i * 10 <= speed) activeColor else tickColor
                         drawLine(color = lineColor, start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = if (isMajorTick) 6f else 3f)
 
-                        // Números debajo de los ticks mayores
                         if (isMajorTick) {
                             val textRadius = tickStartRadius - tickLength - 30f
                             val textX = (center.x + textRadius * cos(angleRad)).toFloat()
@@ -157,40 +164,70 @@ fun SpeedometerDial(speed: Float, maxSpeed: Float, activeColor: Color, inactiveC
                 }
             }
             "NEON" -> {
-                // MODELO 2: Deportivo Segmentado (Línea punteada gruesa simulando LEDs digitales)
-                val arcWidth = size.width * 0.09f
-                // PathEffect crea los bloques: línea de 20px, espacio de 10px
-                val segmentedDash = PathEffect.dashPathEffect(floatArrayOf(20f, 10f), 0f)
+                // MODELO 2: Neón que cambia de color
+                val sweepAngle = 240f
+                val startAngle = 150f
+                val activeSweepAngle = sweepAngle * speedProgress
+                val arcWidth = size.width * 0.08f
                 
-                // Fondo oscuro segmentado
-                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, pathEffect = segmentedDash), size = Size(size.width, size.height))
-                // Relleno segmentado del color elegido
-                drawArc(color = activeColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, pathEffect = segmentedDash), size = Size(size.width, size.height))
+                // Color dinámico según la velocidad
+                val dynamicColor = when {
+                    speed < 60f -> Color(0xFF00FF00) // Verde
+                    speed < 100f -> Color(0xFFFFEB3B) // Amarillo
+                    else -> Color(0xFFFF1744) // Rojo
+                }
+
+                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
                 
-                // Un anillo interno fino para darle más estilo
-                drawArc(color = activeColor.copy(alpha=0.3f), startAngle = startAngle - 2f, sweepAngle = sweepAngle + 4f, useCenter = false, style = Stroke(width = 3f), size = Size(size.width, size.height))
+                // Efecto de Brillo (Glow)
+                drawArc(color = dynamicColor.copy(alpha=0.2f), startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth * 2.5f, cap = StrokeCap.Round), size = Size(size.width, size.height))
+                drawArc(color = dynamicColor.copy(alpha=0.5f), startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth * 1.5f, cap = StrokeCap.Round), size = Size(size.width, size.height))
+                
+                // Línea principal brillante
+                drawArc(color = dynamicColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
             }
             "MINIMAL" -> {
-                // MODELO 3: Futurista Minimalista (Línea muy delgada y punto brillante)
-                val arcWidth = size.width * 0.015f // Línea súper fina
+                // MODELO 3: ESTILO MOTOCICLETA (Rectangular y gráfica de llenado horizontal)
+                val barHeight = size.height * 0.25f
+                val cornerRadius = CornerRadius(20f, 20f)
+                val barY = (size.height / 2) + (size.height * 0.1f) // Lo ubicamos abajo para que el texto respire arriba
+
+                // Fondo de la barra horizontal
+                drawRoundRect(
+                    color = inactiveColor,
+                    topLeft = Offset(0f, barY),
+                    size = Size(size.width, barHeight),
+                    cornerRadius = cornerRadius
+                )
+
+                // Barra Activa de velocidad (Llena de izquierda a derecha)
+                drawRoundRect(
+                    color = activeColor,
+                    topLeft = Offset(0f, barY),
+                    size = Size(size.width * speedProgress, barHeight),
+                    cornerRadius = cornerRadius
+                )
+
+                // Máscara de Segmentos (Rayitas verticales transparentes para separar y darle look digital)
+                val numSegments = 22
+                val segmentWidth = size.width / numSegments
+                for(i in 1 until numSegments) {
+                    drawLine(
+                        color = Color.Black.copy(alpha=0.8f), // Línea oscura que "corta" el color
+                        start = Offset(i * segmentWidth, barY),
+                        end = Offset(i * segmentWidth, barY + barHeight),
+                        strokeWidth = 6f
+                    )
+                }
                 
-                // Arco guía
-                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
-                // Arco principal
-                drawArc(color = activeColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
-                
-                // Punto indicador estilo "radar" al final del recorrido actual
-                val center = Offset(size.width / 2, size.height / 2)
-                val angleRad = Math.toRadians((startAngle + activeSweepAngle).toDouble())
-                val dotX = (center.x + radius * cos(angleRad)).toFloat()
-                val dotY = (center.y + radius * sin(angleRad)).toFloat()
-                
-                // Halo difuminado detrás del punto
-                drawCircle(color = activeColor.copy(alpha=0.4f), radius = arcWidth * 6f, center = Offset(dotX, dotY))
-                // Punto principal
-                drawCircle(color = activeColor, radius = arcWidth * 3f, center = Offset(dotX, dotY))
-                // Brillo blanco central
-                drawCircle(color = Color.White, radius = arcWidth * 1.5f, center = Offset(dotX, dotY))
+                // Borde delgado rodeando toda la barra para más elegancia
+                drawRoundRect(
+                    color = textColor.copy(alpha=0.3f),
+                    topLeft = Offset(0f, barY),
+                    size = Size(size.width, barHeight),
+                    style = Stroke(width = 3f),
+                    cornerRadius = cornerRadius
+                )
             }
         }
     }
