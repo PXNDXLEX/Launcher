@@ -76,8 +76,9 @@ fun SpeedometerWidget() {
     val isLight = MaterialTheme.colorScheme.background.red > 0.5f 
     val inactiveColor = if (isLight) Color.LightGray.copy(alpha = 0.3f) else Color(0xFF1A1A24)
     val textColor = MaterialTheme.colorScheme.onSurface
-    val tickColor = if (isLight) Color.Gray else Color.DarkGray
-    val backgroundColor = MaterialTheme.colorScheme.background // EXTRAÍDO ANTES DEL CANVAS PARA EVITAR EL ERROR
+    // Oscurecemos las líneas marcadoras (ticks) en modo claro para más contraste
+    val tickColor = if (isLight) Color.Black.copy(alpha = 0.6f) else Color.DarkGray
+    val backgroundColor = MaterialTheme.colorScheme.background
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val boxSize = min(maxWidth, maxHeight) * 0.9f 
@@ -91,13 +92,14 @@ fun SpeedometerWidget() {
             tickColor = tickColor,
             backgroundColor = backgroundColor,
             style = style,
+            isLight = isLight, // Pasamos la variable isLight para dibujar los contornos
             modifier = Modifier.size(boxSize)
         )
 
         when (style) {
             "RACING" -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-10).dp)) {
-                    Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.1f).dp)) {
+                    Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black)
                     Text(text = "KM/H", color = textColor.copy(alpha = 0.5f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 }
             }
@@ -128,6 +130,7 @@ fun SpeedometerDraw(
     tickColor: Color, 
     backgroundColor: Color, 
     style: String, 
+    isLight: Boolean,
     modifier: Modifier
 ) {
     val density = LocalDensity.current
@@ -141,6 +144,9 @@ fun SpeedometerDraw(
         }
     }
 
+    // Color oscuro estandarizado para los contornos en modo claro
+    val outlineColor = Color.Black.copy(alpha = 0.85f)
+
     Canvas(modifier = modifier) {
         val speedProgress = (speed / maxSpeed).coerceIn(0f, 1f)
         
@@ -151,6 +157,11 @@ fun SpeedometerDraw(
                 val activeSweepAngle = sweepAngle * speedProgress
                 val arcWidth = size.width * 0.04f
                 val radius = size.width / 2
+
+                // Contorno oscuro en modo claro
+                if (isLight) {
+                    drawArc(color = outlineColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth + 6f, cap = StrokeCap.Round), size = Size(size.width, size.height))
+                }
 
                 drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
                 drawArc(color = activeColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
@@ -189,7 +200,7 @@ fun SpeedometerDraw(
                 val sweepAngle = 240f
                 val startAngle = 150f
                 val activeSweepAngle = sweepAngle * speedProgress
-                val arcWidth = size.width * 0.06f
+                val arcWidth = size.width * 0.08f
                 val radius = size.width / 2
                 
                 val dynamicColor = when {
@@ -200,121 +211,174 @@ fun SpeedometerDraw(
 
                 val neonTextPaint = android.graphics.Paint().apply {
                     color = android.graphics.Color.argb((dynamicColor.alpha*255).toInt(), (dynamicColor.red*255).toInt(), (dynamicColor.green*255).toInt(), (dynamicColor.blue*255).toInt())
-                    textSize = with(density) { 11.sp.toPx() }
+                    textSize = with(density) { 12.sp.toPx() }
                     textAlign = android.graphics.Paint.Align.CENTER
                     isAntiAlias = true
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
                 }
 
-                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
-                
-                drawArc(color = dynamicColor.copy(alpha=0.2f), startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth * 2.5f, cap = StrokeCap.Round), size = Size(size.width, size.height))
-                drawArc(color = dynamicColor.copy(alpha=0.5f), startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth * 1.5f, cap = StrokeCap.Round), size = Size(size.width, size.height))
-                drawArc(color = dynamicColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Round), size = Size(size.width, size.height))
+                val segmentEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 15f), 0f)
 
-                val numTicks = 22 
+                // Contorno oscuro en modo claro para que resalten los segmentos
+                if (isLight) {
+                    drawArc(color = outlineColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth + 6f, cap = StrokeCap.Round), size = Size(size.width, size.height))
+                }
+
+                // Background track
+                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Butt, pathEffect = segmentEffect), size = Size(size.width, size.height))
+                
+                // Glow effects
+                drawArc(color = dynamicColor.copy(alpha=0.3f), startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth * 2f, cap = StrokeCap.Round), size = Size(size.width, size.height))
+                
+                // Active segmented track
+                drawArc(color = dynamicColor, startAngle = startAngle, sweepAngle = activeSweepAngle, useCenter = false, style = Stroke(width = arcWidth, cap = StrokeCap.Butt, pathEffect = segmentEffect), size = Size(size.width, size.height))
+
+                // Inner glow ring
+                drawArc(color = dynamicColor.copy(alpha = 0.5f), startAngle = startAngle - 5f, sweepAngle = sweepAngle + 10f, useCenter = false, style = Stroke(width = 4f, cap = StrokeCap.Round), size = Size(size.width - arcWidth * 2.5f, size.height - arcWidth * 2.5f), topLeft = Offset(arcWidth * 1.25f, arcWidth * 1.25f))
+
+                val numTicks = 11
                 val tickStepAngle = sweepAngle / numTicks
                 val center = Offset(size.width / 2, size.height / 2)
-                val tickStartRadius = radius - (arcWidth / 2) - 15f
+                val textRadius = radius - arcWidth - 35f
 
                 drawIntoCanvas { canvas ->
                     for (i in 0..numTicks) {
                         val currentAngle = startAngle + (i * tickStepAngle)
                         val angleRad = Math.toRadians(currentAngle.toDouble())
-                        val isMajorTick = i % 2 == 0
-                        val tickLength = if (isMajorTick) size.width * 0.05f else size.width * 0.02f
-
-                        val startX = (center.x + tickStartRadius * cos(angleRad)).toFloat()
-                        val startY = (center.y + tickStartRadius * sin(angleRad)).toFloat()
-                        val endX = (center.x + (tickStartRadius - tickLength) * cos(angleRad)).toFloat()
-                        val endY = (center.y + (tickStartRadius - tickLength) * sin(angleRad)).toFloat()
-
-                        val isLit = (i * 10) <= speed
-                        val drawColor = if (isLit) dynamicColor else tickColor.copy(alpha = 0.3f)
                         
-                        drawLine(color = drawColor, start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = if (isMajorTick) 5f else 3f)
-
-                        if (isMajorTick) {
-                            val textRadius = tickStartRadius - tickLength - 30f
-                            val textX = (center.x + textRadius * cos(angleRad)).toFloat()
-                            val textY = (center.y + textRadius * sin(angleRad)).toFloat()
-                            val currentTextPaint = if (isLit) neonTextPaint else baseTextPaint
-                            canvas.nativeCanvas.drawText((i * 10).toString(), textX, textY + 12f, currentTextPaint)
-                        }
+                        val speedValue = i * 20
+                        val isLit = speedValue <= speed
+                        
+                        val textX = (center.x + textRadius * cos(angleRad)).toFloat()
+                        val textY = (center.y + textRadius * sin(angleRad)).toFloat()
+                        
+                        val currentTextPaint = if (isLit) neonTextPaint else baseTextPaint
+                        canvas.nativeCanvas.drawText(speedValue.toString(), textX, textY + 12f, currentTextPaint)
                     }
                 }
             }
 
             "RACING" -> {
-                val barHeight = size.height * 0.12f
-                val cornerRadius = CornerRadius(10f, 10f)
-                val barY = size.height * 0.70f 
+                val sweepAngle = 180f
+                val startAngle = 180f 
+                val activeSweepAngle = sweepAngle * speedProgress
+                val radius = size.width / 2
+                val center = Offset(size.width / 2, size.height / 2 + size.height * 0.2f) 
+                val arcWidth = size.width * 0.12f
 
-                val scaleValues = listOf(0, 50, 100, 150, 220)
+                // Contorno oscuro en modo claro para la barra Racing
+                if (isLight) {
+                    drawArc(
+                        color = outlineColor,
+                        startAngle = startAngle,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = arcWidth + 6f, cap = StrokeCap.Butt),
+                        size = Size(radius * 2, radius * 2),
+                        topLeft = Offset(center.x - radius, center.y - radius)
+                    )
+                }
+
+                // Inactive Background Track
+                drawArc(
+                    color = inactiveColor,
+                    startAngle = startAngle,
+                    sweepAngle = sweepAngle,
+                    useCenter = false,
+                    style = Stroke(width = arcWidth, cap = StrokeCap.Butt),
+                    size = Size(radius * 2, radius * 2),
+                    topLeft = Offset(center.x - radius, center.y - radius)
+                )
+
+                // Active Gradient Track
+                val gradientBrush = Brush.sweepGradient(
+                    colors = listOf(activeColor.copy(alpha = 0.3f), activeColor, Color.White),
+                    center = center
+                )
+                
+                if (speedProgress > 0) {
+                     drawArc(
+                        brush = gradientBrush,
+                        startAngle = startAngle,
+                        sweepAngle = activeSweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = arcWidth, cap = StrokeCap.Butt),
+                        size = Size(radius * 2, radius * 2),
+                        topLeft = Offset(center.x - radius, center.y - radius)
+                    )
+                }
+
+                // Ticks (Segments cutting into the bar)
+                val numSegments = 30
+                val tickStepAngle = sweepAngle / numSegments
+                for (i in 0..numSegments) {
+                    val currentAngle = startAngle + (i * tickStepAngle)
+                    val angleRad = Math.toRadians(currentAngle.toDouble())
+                    val isMajor = i % 5 == 0
+                    
+                    val startRad = radius - (arcWidth / 2)
+                    val endRad = if(isMajor) radius + (arcWidth / 2) else radius + (arcWidth / 4)
+
+                    val startX = (center.x + startRad * cos(angleRad)).toFloat()
+                    val startY = (center.y + startRad * sin(angleRad)).toFloat()
+                    val endX = (center.x + endRad * cos(angleRad)).toFloat()
+                    val endY = (center.y + endRad * sin(angleRad)).toFloat()
+
+                    drawLine(
+                        color = backgroundColor, 
+                        start = Offset(startX, startY),
+                        end = Offset(endX, endY),
+                        strokeWidth = if (isMajor) 6f else 3f
+                    )
+                }
+
+                // Numbers above the arc
+                val numScaleValues = 5
+                val scaleStepAngle = sweepAngle / numScaleValues
+                val textRadius = radius + arcWidth
+                
                 drawIntoCanvas { canvas ->
-                    scaleValues.forEach { value ->
-                        val ratio = value / 220f
-                        val posX = size.width * ratio
-                        val adjustedX = when (value) {
-                            0 -> posX + 15f
-                            220 -> posX - 25f
-                            else -> posX
-                        }
-                        val isLit = speed >= value
-                        val colorToUse = if (isLit) activeColor else tickColor
-                        val paint = android.graphics.Paint().apply {
-                            color = android.graphics.Color.argb((colorToUse.alpha*255).toInt(), (colorToUse.red*255).toInt(), (colorToUse.green*255).toInt(), (colorToUse.blue*255).toInt())
-                            textSize = with(density) { 10.sp.toPx() }
+                    for (i in 0..numScaleValues) {
+                        val currentAngle = startAngle + (i * scaleStepAngle)
+                        val angleRad = Math.toRadians(currentAngle.toDouble())
+                        val speedVal = (i * (220 / numScaleValues)).toInt()
+                        
+                        val textX = (center.x + textRadius * cos(angleRad)).toFloat()
+                        val textY = (center.y + textRadius * sin(angleRad)).toFloat()
+                        
+                         val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb((textColor.alpha*255).toInt(), (textColor.red*255).toInt(), (textColor.green*255).toInt(), (textColor.blue*255).toInt())
+                            textSize = with(density) { 14.sp.toPx() }
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.DEFAULT_BOLD
                         }
-                        canvas.nativeCanvas.drawText(value.toString(), adjustedX, barY - 15f, paint)
+                        
+                        canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY, paint)
                     }
                 }
-
-                drawRoundRect(
-                    color = inactiveColor.copy(alpha = 0.8f),
-                    topLeft = Offset(0f, barY),
-                    size = Size(size.width, barHeight),
-                    cornerRadius = cornerRadius
-                )
-
-                val activeGradient = Brush.horizontalGradient(
-                    colors = listOf(activeColor.copy(alpha = 0.3f), activeColor, Color.White),
-                    startX = 0f,
-                    endX = size.width * speedProgress
-                )
                 
-                if (speedProgress > 0.01f) {
-                    drawRoundRect(
-                        brush = activeGradient,
-                        topLeft = Offset(0f, barY),
-                        size = Size(size.width * speedProgress, barHeight),
-                        cornerRadius = cornerRadius
+                // Add a "Redline" section indicator at the end con contorno oscuro opcional
+                 if (isLight) {
+                    drawArc(
+                        color = outlineColor,
+                        startAngle = startAngle + (sweepAngle * 0.8f),
+                        sweepAngle = sweepAngle * 0.2f,
+                        useCenter = false,
+                        style = Stroke(width = (arcWidth * 0.15f) + 6f, cap = StrokeCap.Butt),
+                        size = Size(radius * 2 - arcWidth + 5f, radius * 2 - arcWidth + 5f),
+                        topLeft = Offset(center.x - radius + arcWidth/2 - 2.5f, center.y - radius + arcWidth/2 - 2.5f)
                     )
-                }
+                 }
 
-                val numSegments = 44 
-                val segmentWidth = size.width / numSegments
-                for(i in 1 until numSegments) {
-                    val x = i * segmentWidth
-                    val isMajor = i % 10 == 0
-                    val startYOffset = if (isMajor) barY - 5f else barY
-                    drawLine(
-                        color = backgroundColor, // CORRECCIÓN APLICADA: Ahora lee la variable sin generar conflicto en Canvas
-                        start = Offset(x, startYOffset),
-                        end = Offset(x, barY + barHeight),
-                        strokeWidth = if (isMajor) 4f else 2f
-                    )
-                }
-
-                drawRoundRect(
-                    color = textColor.copy(alpha=0.2f),
-                    topLeft = Offset(0f, barY),
-                    size = Size(size.width, barHeight),
-                    style = Stroke(width = 2f),
-                    cornerRadius = cornerRadius
+                 drawArc(
+                    color = Color.Red.copy(alpha = 0.8f),
+                    startAngle = startAngle + (sweepAngle * 0.8f), // Last 20%
+                    sweepAngle = sweepAngle * 0.2f,
+                    useCenter = false,
+                    style = Stroke(width = arcWidth * 0.15f, cap = StrokeCap.Butt),
+                    size = Size(radius * 2 - arcWidth + 5f, radius * 2 - arcWidth + 5f),
+                    topLeft = Offset(center.x - radius + arcWidth/2 - 2.5f, center.y - radius + arcWidth/2 - 2.5f)
                 )
             }
 
@@ -325,7 +389,32 @@ fun SpeedometerDraw(
                 val radius = size.width / 2
                 val center = Offset(size.width / 2, size.height / 2)
 
+                val radialGradient = Brush.radialGradient(
+                    colors = listOf(activeColor.copy(alpha = 0.15f), Color.Transparent),
+                    center = center,
+                    radius = radius * 0.8f
+                )
+                drawCircle(
+                    brush = radialGradient,
+                    radius = radius * 0.8f,
+                    center = center
+                )
+
                 val outerRadius = radius - 5f
+                
+                // Contorno oscuro para el arco exterior
+                if (isLight) {
+                    drawArc(
+                        color = outlineColor,
+                        startAngle = startAngle,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = 6f, cap = StrokeCap.Round),
+                        size = Size(outerRadius * 2, outerRadius * 2),
+                        topLeft = Offset(center.x - outerRadius, center.y - outerRadius)
+                    )
+                }
+
                 drawArc(
                     color = activeColor.copy(alpha = 0.2f),
                     startAngle = startAngle,
@@ -348,6 +437,19 @@ fun SpeedometerDraw(
                 val innerRadius = radius - 35f
                 val innerArcWidth = 20f
                 val segmentEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 5f), 0f)
+
+                // Contorno oscuro grueso para el arco segmentado interior
+                if (isLight) {
+                    drawArc(
+                        color = outlineColor,
+                        startAngle = startAngle,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = innerArcWidth + 6f, cap = StrokeCap.Butt),
+                        size = Size(innerRadius * 2, innerRadius * 2),
+                        topLeft = Offset(center.x - innerRadius, center.y - innerRadius)
+                    )
+                }
 
                 drawArc(
                     color = inactiveColor,
@@ -372,6 +474,10 @@ fun SpeedometerDraw(
                 val dotX = (center.x + innerRadius * cos(angleRad)).toFloat()
                 val dotY = (center.y + innerRadius * sin(angleRad)).toFloat()
                 
+                // Contorno para el punto indicador
+                if (isLight) {
+                    drawCircle(color = outlineColor, radius = 15f, center = Offset(dotX, dotY))
+                }
                 drawCircle(color = Color.White, radius = 6f, center = Offset(dotX, dotY))
                 drawCircle(color = activeColor.copy(alpha = 0.5f), radius = 12f, center = Offset(dotX, dotY))
 
@@ -385,7 +491,8 @@ fun SpeedometerDraw(
                     val endX = (center.x + (innerRadius - 30f) * cos(rad)).toFloat()
                     val endY = (center.y + (innerRadius - 30f) * sin(rad)).toFloat()
                     
-                    drawLine(color = activeColor.copy(alpha = 0.3f), start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = 2f)
+                    val drawColor = if (isLight) Color.Black.copy(alpha = 0.6f) else activeColor.copy(alpha = 0.3f)
+                    drawLine(color = drawColor, start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = 3f)
                 }
             }
         }
