@@ -38,19 +38,37 @@ import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
 import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
 
+// Estado global para compartir velocidad con el Mapa
+object NavigationState {
+    val currentSpeedKmH = mutableStateOf(0f)
+}
+
 class SettingsManager(context: Context) {
     private val sharedPreferences = context.getSharedPreferences("CarLauncherSettings", Context.MODE_PRIVATE)
+    
     var vehicleType: String
         get() = sharedPreferences.getString("vehicleType", "FLECHA") ?: "FLECHA"
         set(value) = sharedPreferences.edit().putString("vehicleType", value).apply()
+        
     var vehicleColor: Int
         get() = sharedPreferences.getInt("vehicleColor", Color.Blue.toArgb())
         set(value) = sharedPreferences.edit().putInt("vehicleColor", value).apply()
+
+    var speedoStyle: String
+        get() = sharedPreferences.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
+        set(value) = sharedPreferences.edit().putString("speedoStyle", value).apply()
+
+    var speedoColor: Int
+        get() = sharedPreferences.getInt("speedoColor", Color(0xFFE91E63).toArgb())
+        set(value) = sharedPreferences.edit().putInt("speedoColor", value).apply()
 }
 
 object AppSettings {
     val vehicleType = mutableStateOf("FLECHA")
     val vehicleColor = mutableStateOf(Color.Blue.toArgb())
+    val speedoStyle = mutableStateOf("PREMIUM")
+    val speedoColor = mutableStateOf(Color(0xFFE91E63).toArgb())
+    
     private var settingsManager: SettingsManager? = null
 
     fun initialize(context: Context) {
@@ -58,10 +76,14 @@ object AppSettings {
             settingsManager = SettingsManager(context)
             vehicleType.value = settingsManager!!.vehicleType
             vehicleColor.value = settingsManager!!.vehicleColor
+            speedoStyle.value = settingsManager!!.speedoStyle
+            speedoColor.value = settingsManager!!.speedoColor
         }
     }
     fun saveVehicleType(type: String) { vehicleType.value = type; settingsManager?.vehicleType = type }
     fun saveVehicleColor(color: Int) { vehicleColor.value = color; settingsManager?.vehicleColor = color }
+    fun saveSpeedoStyle(style: String) { speedoStyle.value = style; settingsManager?.speedoStyle = style }
+    fun saveSpeedoColor(color: Int) { speedoColor.value = color; settingsManager?.speedoColor = color }
 }
 
 @Composable
@@ -70,7 +92,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
     
-    // Detector de orientación para hacer el diseño responsivo automáticamente
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     
@@ -93,7 +114,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isLandscape) {
-            // --- MODO HORIZONTAL ---
             Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(modifier = Modifier.width(80.dp).fillMaxHeight(), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -110,15 +130,13 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                     IconButton(onClick = onToggleTheme) { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema") }
                     Spacer(modifier = Modifier.height(16.dp))
                 }
-                MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it })
+                MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it }, isDarkMode)
             }
         } else {
-            // --- MODO VERTICAL (RESPONSIVO) ---
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
-                    MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it })
+                    MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it }, isDarkMode)
                 }
-                // Barra de navegación inferior en modo vertical
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     NavigationBarItem(selected = currentScreen == "DASHBOARD", onClick = { currentScreen = "DASHBOARD" }, icon = { Icon(Icons.Default.Dashboard, "Dashboard") })
                     NavigationBarItem(selected = currentScreen == "MAPA_FULL", onClick = { currentScreen = "MAPA_FULL" }, icon = { Icon(Icons.Default.Map, "Mapa") })
@@ -128,7 +146,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // --- NOTIFICACIONES DESLIZABLES ---
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
@@ -152,43 +169,45 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // --- AJUSTES ---
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = { showSettingsDialog = false },
-                title = { Text("Ajustes del Car Launcher") },
+                title = { Text("Ajustes del Sistema") },
                 text = {
-                    Column {
-                        Text("Vehículo en Mapa:", fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text("Vehículo en Mapa:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                             listOf("FLECHA", "SEDAN", "HATCHBACK").forEach { type ->
-                                FilterChip(selected = AppSettings.vehicleType.value == type, onClick = { AppSettings.saveVehicleType(type) }, label = { Text(type.take(3)) })
+                                FilterChip(selected = AppSettings.vehicleType.value == type, onClick = { AppSettings.saveVehicleType(type) }, label = { Text(type.take(3), fontSize = 10.sp) })
                             }
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Color:", fontWeight = FontWeight.Bold)
-                        val colors = listOf(Color.Blue, Color.Red, Color.White, Color.Black, Color.DarkGray, Color.Green, Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Estilo del Velocímetro:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            listOf("PREMIUM", "NEON", "MINIMAL").forEach { type ->
+                                FilterChip(selected = AppSettings.speedoStyle.value == type, onClick = { AppSettings.saveSpeedoStyle(type) }, label = { Text(type.take(5), fontSize = 10.sp) })
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Color Principal:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        val colors = listOf(Color.Blue, Color(0xFFE91E63), Color.White, Color.Black, Color.DarkGray, Color.Green, Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500))
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             colors.chunked(5).forEach { rowColors ->
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     rowColors.forEach { color ->
-                                        Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(color).border(2.dp, if (AppSettings.vehicleColor.value == color.toArgb()) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50))) {
-                                            IconButton(onClick = { AppSettings.saveVehicleColor(color.toArgb()) }) {}
+                                        Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(color).border(2.dp, if (AppSettings.speedoColor.value == color.toArgb()) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50))) {
+                                            IconButton(onClick = { AppSettings.saveSpeedoColor(color.toArgb()); AppSettings.saveVehicleColor(color.toArgb()) }) {}
                                         }
                                     }
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Divider()
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Solución de Errores:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                        Text("Si la música deja de actualizarse, desactiva la optimización de batería para esta app.", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
-                        ) { Text("Quitar Límite de Batería") }
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Quitar Límite Batería a Música") }
                     }
                 },
                 confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("Cerrar") } }
@@ -197,37 +216,28 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     }
 }
 
-// Extrajimos el área principal para reusarla y adaptarla
 @Composable
 fun MainContentArea(
     currentScreen: String, 
     isLandscape: Boolean, 
     youtubeContent: @Composable () -> Unit,
     showYoutubeInDashboard: Boolean,
-    onToggleYoutubeInDashboard: (Boolean) -> Unit
+    onToggleYoutubeInDashboard: (Boolean) -> Unit,
+    isDarkMode: Boolean
 ) {
     val context = LocalContext.current
     Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         when (currentScreen) {
             "MAPA_FULL" -> {
                 Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                    NavigationMap(isFullScreen = true)
-                    ExtendedFloatingActionButton(
-                        onClick = {
-                            val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=")).setPackage("com.google.android.apps.maps")
-                            context.startActivity(mapIntent)
-                        },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
-                        icon = { Icon(Icons.Default.Navigation, "Navegar") }, text = { Text("Iniciar Ruta") }, containerColor = MaterialTheme.colorScheme.primary
-                    )
+                    NavigationMap(isFullScreen = true, isDarkMode = isDarkMode)
                 }
             }
             "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
             "DASHBOARD" -> {
                 if (isLandscape) {
-                    // Diseño Horizontal Original (Mapa izquierda, Widgets derecha)
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap() }
+                        Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
                         Column(modifier = Modifier.weight(0.4f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
                             Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
@@ -236,9 +246,8 @@ fun MainContentArea(
                         }
                     }
                 } else {
-                    // NUEVO DISEÑO VERTICAL RESPONSIVO (Mapa Arriba, Velocímetro y Música Abajo compartiendo espacio)
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap() }
+                        Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
                         Row(modifier = Modifier.weight(0.5f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
                             Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
