@@ -44,17 +44,9 @@ fun YouTubeWidget() {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // PARCHE VISUAL: Forzamos a la web a no salirse de los márgenes en vertical
+                            // HACKER MODE LEVEL 3: Dios. Anulamos la capacidad del sistema de pausar el video.
                             view?.evaluateJavascript(
                                 """
-                                let style = document.createElement('style');
-                                style.innerHTML = `
-                                    html, body { width: 100vw !important; overflow-x: hidden !important; margin: 0; padding: 0; }
-                                    #app, ytm-app { width: 100% !important; max-width: 100% !important; }
-                                `;
-                                document.head.appendChild(style);
-                                
-                                // El código Hacker Original que te funcionaba
                                 Object.defineProperty(document, 'hidden', {value: false, writable: false});
                                 Object.defineProperty(document, 'visibilityState', {value: 'visible', writable: false});
                                 window.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
@@ -63,6 +55,7 @@ fun YouTubeWidget() {
                                 document.addEventListener('fullscreenchange', e => e.stopImmediatePropagation(), true);
                                 document.addEventListener('webkitfullscreenchange', e => e.stopImmediatePropagation(), true);
                                 
+                                // Detectamos si el usuario realmente está tocando la pantalla
                                 window.isUserClicking = false;
                                 window.userPaused = false;
                                 
@@ -71,12 +64,14 @@ fun YouTubeWidget() {
                                     setTimeout(() => { window.isUserClicking = false; }, 300); 
                                 });
 
+                                // SECUESTRO DE LA FUNCIÓN PAUSE NATIVA
                                 const originalPause = HTMLMediaElement.prototype.pause;
                                 HTMLMediaElement.prototype.pause = function() {
                                     if (window.isUserClicking) {
                                         window.userPaused = true;
-                                        originalPause.call(this);
+                                        originalPause.call(this); // Pausa permitida (fue el usuario)
                                     } else {
+                                        // Bloqueamos la pausa del sistema al cambiar de pestaña
                                         console.log("Sistema intentó pausar: Bloqueado.");
                                     }
                                 };
@@ -87,6 +82,7 @@ fun YouTubeWidget() {
                                     return originalPlay.call(this);
                                 };
 
+                                // Fuerza bruta de respaldo por si el motor nativo pausa la tubería de medios
                                 setInterval(() => {
                                     let v = document.querySelector('video');
                                     if (v && v.paused && !window.userPaused) {

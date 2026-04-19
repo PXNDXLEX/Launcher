@@ -18,7 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontWeight // ESTE ES EL IMPORT QUE FALTABA
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -155,7 +155,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             val start = locationOverlay?.myLocation
                             val dest = selectedDestination
                             if (start != null && dest != null) {
-                                val urlStr = "http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson"
+                                // AHORA CON HTTPS Y AVISO SI EL GPS NO ESTÁ LISTO
+                                val urlStr = "https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson"
                                 try {
                                     val result = withContext(Dispatchers.IO) {
                                         val url = URL(urlStr)
@@ -186,7 +187,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         mapView.overlays.add(0, polyline)
                                         mapView.invalidate()
                                     }
-                                } catch (e: Exception) { e.printStackTrace() }
+                                } catch (e: Exception) { 
+                                    e.printStackTrace() 
+                                    // Si falla la conexión o el GPS, mostramos "Calculando..." para que sepas que el botón sí se presionó
+                                    routeDistance = "Calculando... ¿GPS listo?"
+                                }
+                            } else {
+                                routeDistance = "Esperando señal GPS..."
                             }
                         }
                     },
