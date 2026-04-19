@@ -182,12 +182,19 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
+                        
                         Text("Estilo del Velocímetro:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        // AHORA TIENE LOS 4 ESTILOS COMPLETOS Y SIN ERRORES
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            listOf("PREMIUM", "NEON", "MINIMAL").forEach { type ->
-                                FilterChip(selected = AppSettings.speedoStyle.value == type, onClick = { AppSettings.saveSpeedoStyle(type) }, label = { Text(type.take(5), fontSize = 10.sp) })
+                            listOf("PREMIUM", "NEON", "RACING", "CYBER").forEach { type ->
+                                FilterChip(
+                                    selected = AppSettings.speedoStyle.value == type, 
+                                    onClick = { AppSettings.saveSpeedoStyle(type) }, 
+                                    label = { Text(type, fontSize = 10.sp) }
+                                )
                             }
                         }
+                        
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("Color Principal:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         val colors = listOf(Color.Blue, Color(0xFFE91E63), Color.White, Color.Black, Color.DarkGray, Color.Green, Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500))
