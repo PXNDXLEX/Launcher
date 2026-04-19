@@ -82,7 +82,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                 if (carMarker == null) {
                     carMarker = Marker(mapView).apply {
-                        icon = drawVehicleBitmap(vehicleType, uiColor)
+                        // CORRECCIÓN: Envolver el Bitmap en un BitmapDrawable
+                        icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         position = newGeo
                         rotation = if (loc.hasBearing()) -loc.bearing else 0f
@@ -205,7 +206,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 val marker = Marker(mapView).apply {
                                     position = p
                                     id = "DEST"
-                                    // ADIÓS MANO VERDE: Pintamos un PIN Minimalista y profesional del color de la UI
                                     icon = BitmapDrawable(ctx.resources, drawCustomPin(uiColor))
                                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                                     title = "Destino"
@@ -235,7 +235,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     view.overlayManager.tilesOverlay.setColorFilter(null)
                 }
 
-                carMarker?.icon = drawVehicleBitmap(vehicleType, uiColor)
+                // CORRECCIÓN: Envolver el Bitmap en un BitmapDrawable también en la actualización visual
+                carMarker?.icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                 view.invalidate()
             }
         )
@@ -371,7 +372,8 @@ fun drawCustomPin(color: Int): Bitmap {
     paint.color = android.graphics.Color.WHITE
     canvas.drawCircle(45f, 35f, 12f, paint)
     
-    return BitmapDrawable(android.content.res.Resources.getSystem(), bitmap).bitmap
+    // Devolver un Bitmap puro, el BitmapDrawable se envuelve cuando se asigna a `icon`
+    return bitmap 
 }
 
 fun drawVehicleBitmap(type: String, color: Int): Bitmap {
