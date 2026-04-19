@@ -8,7 +8,6 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -56,7 +56,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
-    // AUTO-CENTRADO: Si la velocidad supera los 5 km/h, centramos y rotamos automáticamente
+    // AUTO-CENTRADO: Al pasar de 5 km/h, se engancha al GPS automáticamente
     LaunchedEffect(currentSpeed) {
         if (currentSpeed >= 5f && locationOverlay?.isFollowLocationEnabled == false) {
             locationOverlay?.enableFollowLocation()
@@ -70,11 +70,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             factory = { ctx ->
                 mapView.apply {
                     setTileSource(TileSourceFactory.MAPNIK)
-                    controller.setZoom(19.0) // Zoom más cercano como solicitaste
+                    controller.setZoom(20.0) // Zoom máximo para ver bien las calles
                     setMultiTouchControls(true)
                     setHasTransientState(true)
 
-                    // Detector de toques largos para seleccionar destino
+                    // Detector de pulsación larga para trazar ruta
                     val mReceive = object : MapEventsReceiver {
                         override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean = false
                         override fun longPressHelper(p: GeoPoint?): Boolean {
@@ -118,7 +118,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             update = { view ->
                 view.setMultiTouchControls(isFullScreen)
                 
-                // MODO NOCHE: Aplicamos inversión de colores a los mosaicos del mapa
+                // MODO NOCHE: Filtro que invierte los colores para modo nocturno elegante
                 if (isDarkMode) {
                     val inverseMatrix = ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
@@ -140,17 +140,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         )
 
-        // Botones sobre el mapa
         Column(modifier = Modifier.align(Alignment.BottomEnd).padding(if (isFullScreen) 32.dp else 16.dp), horizontalAlignment = Alignment.End) {
             
-            // Distancia restante
             if (routeDistance.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    Text("Faltan: $routeDistance", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("Destino a: $routeDistance", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
             }
 
-            // Botón de trazar ruta
             if (selectedDestination != null) {
                 ExtendedFloatingActionButton(
                     onClick = {
@@ -158,7 +155,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             val start = locationOverlay?.myLocation
                             val dest = selectedDestination
                             if (start != null && dest != null) {
-                                // Calculamos la ruta usando OSRM API Libre
                                 val urlStr = "http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson"
                                 try {
                                     val result = withContext(Dispatchers.IO) {
@@ -172,10 +168,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         val route = routes.getJSONObject(0)
                                         val distanceMeters = route.getDouble("distance")
                                         
-                                        // Formatear distancia
                                         routeDistance = if (distanceMeters > 1000) String.format("%.1f km", distanceMeters / 1000) else "${distanceMeters.toInt()} m"
 
-                                        // Dibujar línea
                                         val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
                                         val geoPoints = ArrayList<GeoPoint>()
                                         for (i in 0 until coordinates.length()) {
@@ -200,7 +194,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 )
             }
 
-            // Botón de centrado manual
             FloatingActionButton(
                 onClick = {
                     locationOverlay?.let { overlay ->
