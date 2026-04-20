@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.BitmapDrawable
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -73,7 +74,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// INYECCIÓN: Agregada la variable distanceKm para medir la lejanía real
 data class PlaceResult(val name: String, val address: String, val lat: Double, val lon: Double, val iconType: String = "Star", val distanceKm: Double = 0.0)
 
 class FavoritesManager(context: Context) {
@@ -289,6 +289,27 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     rotationGestureOverlay.isEnabled = true
                     overlays.add(rotationGestureOverlay)
 
+                    // ESCUDO TÁCTIL: Cancela inmediatamente el seguimiento del GPS en cuanto tocas la pantalla
+                    setOnTouchListener { _, event ->
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                                isFollowingLocation = false
+                                autoCenterJob?.cancel()
+                            }
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                autoCenterJob?.cancel()
+                                autoCenterJob = coroutineScope.launch {
+                                    delay(6000)
+                                    isFollowingLocation = true
+                                    NavigationState.currentLocation.value?.let {
+                                        controller.animateTo(GeoPoint(it.latitude, it.longitude))
+                                    }
+                                }
+                            }
+                        }
+                        false // Retornamos false para permitir que el gesto de pellizco continúe procesándose
+                    }
+
                     addMapListener(object : MapListener {
                         override fun onScroll(event: ScrollEvent?): Boolean {
                             if (event != null && (event.x != 0 || event.y != 0)) {
@@ -325,6 +346,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         controller.setZoom(19.0)
                         invalidate() 
                     }
+                    
+                    // Esto tiene que estar SOLO aquí en el Factory, no en el update.
                     setMultiTouchControls(true)
                     setBuiltInZoomControls(false)
                     setHasTransientState(true)
@@ -372,9 +395,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
-                // INYECCIÓN: Al forzar en true garantizamos que el pellizco funcione siempre, 
-                // incluso en la pantalla principal.
-                view.setMultiTouchControls(true)
+                // NOTA: Se eliminó el setMultiTouchControls(true) de aquí porque borraba el gesto
+                // de pellizco cada vez que la pantalla se actualizaba, arruinando el zoom.
                 
                 if (isMapDarkMode) {
                     val inverseMatrix = ColorMatrix(floatArrayOf(
@@ -399,7 +421,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 IconButton(onClick = { 
                     showFavorites = !showFavorites
                     if(showFavorites) {
-                        // INYECCIÓN: Calcula las distancias reales de tus favoritos al instante
                         val loc = NavigationState.currentLocation.value
                         val favs = favManager.getFavorites().map { fav ->
                             var dist = 0.0
@@ -409,7 +430,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 dist = res[0] / 1000.0
                             }
                             fav.copy(distanceKm = dist)
-                        }.sortedBy { it.distanceKm } // Ordena los más cercanos primero
+                        }.sortedBy { it.distanceKm } 
                         searchResults = favs
                     } else {
                         searchResults = emptyList()
@@ -434,7 +455,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     val query = URLEncoder.encode(searchQuery, "UTF-8")
                                     val loc = NavigationState.currentLocation.value
                                     
-                                    // INYECCIÓN: Bias de búsqueda para que la API priorice resultados cerca de tu GPS actual, limite subido a 10
                                     val urlStr = buildString {
                                         append("https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=10&addressdetails=1")
                                         if (loc != null) {
@@ -467,7 +487,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         val placeAddress = parts.getOrNull(1)?.trim() ?: ""
                                         list.add(PlaceResult(placeName, placeAddress, lat, lon, "Place", dist))
                                     }
-                                    // INYECCIÓN: Ordenamos la lista localmente por distancia y nos quedamos con los 5 mejores
                                     searchResults = list.sortedBy { it.distanceKm }.take(5)
                                     if(list.isEmpty()) Toast.makeText(context, "No se encontraron resultados", Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) { Toast.makeText(context, "Error al buscar", Toast.LENGTH_SHORT).show() }
@@ -518,7 +537,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 }
                             }
 
-                            // INYECCIÓN: Mostrador de Kilómetros de Distancia
                             if (place.distanceKm > 0.0) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(String.format("%.1f km", place.distanceKm), fontWeight = FontWeight.Bold, color = Color(uiColor), fontSize = 14.sp)
