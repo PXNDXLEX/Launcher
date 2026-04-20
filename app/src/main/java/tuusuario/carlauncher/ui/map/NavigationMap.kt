@@ -11,6 +11,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.BitmapDrawable
 import android.os.Looper
+import android.view.MotionEvent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,16 +23,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.google.android.gms.location.*
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -49,8 +54,8 @@ import java.net.URL
 @Composable
 fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, isDarkMode: Boolean = true) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val vehicleType = AppSettings.vehicleType.value
-    // uiColor ahora controla la estética del mapa (Marcadores, vehículo), speedoColor es independiente
     val uiColor = AppSettings.uiColor.value 
 
     val coroutineScope = rememberCoroutineScope()
@@ -64,9 +69,22 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     var carMarker by remember { mutableStateOf<Marker?>(null) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
-    var lastKnownLocation by remember { mutableStateOf<android.location.Location?>(null) }
+    var autoCenterJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
+
+    // ARREGLO: El mapa reacciona correctamente a los ciclos de vida para evitar la pantalla en blanco al girar
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
@@ -77,16 +95,20 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val loc = result.lastLocation ?: return
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
+                NavigationState.currentLocation.value = loc
+
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = loc.speed * 3.6f
-                if ((loc.speed * 3.6f) > 5f) isFollowingLocation = true
+                
+                // Solo auto-engancha a altas velocidades si no hay un job de pausa de centrado activo
+                if ((loc.speed * 3.6f) > 10f && autoCenterJob == null) isFollowingLocation = true
 
                 if (carMarker == null) {
                     carMarker = Marker(mapView).apply {
-                        // CORRECCIÓN: Envolver el Bitmap en un BitmapDrawable
                         icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         position = newGeo
-                        rotation = if (loc.hasBearing()) -loc.bearing else 0f
+                        // ARREGLO: Rotación positiva correcta del bearing para evitar giros raros
+                        rotation = if (loc.hasBearing()) loc.bearing else 0f
                     }
                     mapView.overlays.add(carMarker)
                     if (isFollowingLocation) {
@@ -97,7 +119,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     animator?.cancel()
                     val startGeo = carMarker!!.position
                     val startRot = carMarker!!.rotation
-                    val endRot = if (loc.hasBearing()) -loc.bearing else startRot
+                    val endRot = if (loc.hasBearing()) loc.bearing else startRot
                     
                     var deltaRot = endRot - startRot
                     if (deltaRot > 180) deltaRot -= 360
@@ -116,15 +138,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
-                                mapView.mapOrientation = carMarker!!.rotation
+                                mapView.mapOrientation = -loc.bearing // Rotar el mapa en base a la brújula real
                             }
                             mapView.invalidate()
                         }
                         start()
                     }
                 }
-                lastKnownLocation = loc
 
+                // Borrado de Puntos (Comiendo Ruta)
                 if (currentRoutePoints.isNotEmpty()) {
                     var minDistance = Float.MAX_VALUE
                     var closestIndex = 0
@@ -146,8 +168,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         for (i in 0 until closestIndex) {
                             if (currentRoutePoints.isNotEmpty()) currentRoutePoints.removeAt(0)
                         }
-                        val polyline = mapView.overlays.find { it is Polyline && it.id == "ROUTE" } as? Polyline
-                        polyline?.setPoints(currentRoutePoints.toList())
+                        
+                        // Actualizar línea resplandor y línea principal
+                        val glowPoly = mapView.overlays.find { it is Polyline && it.id == "ROUTE_GLOW" } as? Polyline
+                        val mainPoly = mapView.overlays.find { it is Polyline && it.id == "ROUTE_MAIN" } as? Polyline
+                        glowPoly?.setPoints(currentRoutePoints.toList())
+                        mainPoly?.setPoints(currentRoutePoints.toList())
                     }
 
                     if (currentRoutePoints.size < 10) {
@@ -185,11 +211,34 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     setTileSource(TileSourceFactory.MAPNIK)
                     controller.setCenter(GeoPoint(10.996, -63.804)) 
                     
+                    // ARREGLO: Bajar el centro de gravedad del mapa para ver más camino por delante
+                    addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+                        val h = bottom - top
+                        if (h > 0) { setMapCenterOffset(0, h / 4) }
+                    }
+
+                    // ARREGLO: Auto-Centrado dinámico. Si el usuario toca el mapa, espera 5 segs y vuelve a centrar.
+                    setOnTouchListener { v, event ->
+                        if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_MOVE) {
+                            isFollowingLocation = false
+                            autoCenterJob?.cancel()
+                            autoCenterJob = coroutineScope.launch {
+                                delay(5000)
+                                isFollowingLocation = true
+                                NavigationState.currentLocation.value?.let {
+                                    controller.animateTo(GeoPoint(it.latitude, it.longitude))
+                                }
+                                autoCenterJob = null
+                            }
+                        }
+                        v.performClick()
+                        false 
+                    }
+
                     post { 
                         controller.setZoom(19.0)
                         invalidate() 
                     }
-                    onResume()
                     setMultiTouchControls(true)
                     setHasTransientState(true)
 
@@ -220,7 +269,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
-                view.onResume()
                 view.setMultiTouchControls(isFullScreen)
                 
                 if (isDarkMode) {
@@ -235,7 +283,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     view.overlayManager.tilesOverlay.setColorFilter(null)
                 }
 
-                // CORRECCIÓN: Envolver el Bitmap en un BitmapDrawable también en la actualización visual
                 carMarker?.icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                 view.invalidate()
             }
@@ -270,7 +317,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         ExtendedFloatingActionButton(
                             onClick = {
                                 coroutineScope.launch {
-                                    val start = lastKnownLocation
+                                    val start = NavigationState.currentLocation.value
                                     val dest = selectedDestination
                                     if (start != null && dest != null) {
                                         routeDistanceText = "Calculando ruta..."
@@ -296,18 +343,31 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                 }
                                                 
                                                 mapView.overlays.removeAll { it is Polyline }
-                                                val polyline = Polyline(mapView).apply {
-                                                    id = "ROUTE"
+                                                
+                                                // ARREGLO: 1. Línea Blanca Transparente abajo para marcar carreteras
+                                                val glowPolyline = Polyline(mapView).apply {
+                                                    id = "ROUTE_GLOW"
                                                     setPoints(currentRoutePoints.toList())
-                                                    // LÍNEA CARPLAY BLUE FIJA
-                                                    outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
-                                                    outlinePaint.strokeWidth = 22f
+                                                    outlinePaint.color = android.graphics.Color.argb(120, 255, 255, 255)
+                                                    outlinePaint.strokeWidth = 38f
                                                     outlinePaint.strokeCap = Paint.Cap.ROUND
                                                     outlinePaint.strokeJoin = Paint.Join.ROUND
                                                 }
-                                                mapView.overlays.add(0, polyline)
+                                                mapView.overlays.add(0, glowPolyline)
+                                                
+                                                // 2. Línea Azul Activa de la ruta encima
+                                                val polyline = Polyline(mapView).apply {
+                                                    id = "ROUTE_MAIN"
+                                                    setPoints(currentRoutePoints.toList())
+                                                    outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
+                                                    outlinePaint.strokeWidth = 18f
+                                                    outlinePaint.strokeCap = Paint.Cap.ROUND
+                                                    outlinePaint.strokeJoin = Paint.Join.ROUND
+                                                }
+                                                mapView.overlays.add(1, polyline)
                                                 
                                                 isFollowingLocation = true 
+                                                autoCenterJob?.cancel()
                                                 mapView.invalidate()
                                             }
                                         } catch (e: Exception) { 
@@ -329,7 +389,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             FloatingActionButton(
                 onClick = {
                     isFollowingLocation = true
-                    lastKnownLocation?.let { 
+                    autoCenterJob?.cancel()
+                    NavigationState.currentLocation.value?.let { 
                         mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
                         if (it.hasBearing()) mapView.mapOrientation = -it.bearing
                     }
@@ -357,7 +418,6 @@ fun drawCustomPin(color: Int): Bitmap {
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
     
-    // Gota / Pin moderno
     val path = Path().apply {
         moveTo(45f, 90f)
         cubicTo(45f, 90f, 10f, 50f, 10f, 35f)
@@ -368,11 +428,9 @@ fun drawCustomPin(color: Int): Bitmap {
     }
     canvas.drawPath(path, paint)
     
-    // Circulo interno blanco
     paint.color = android.graphics.Color.WHITE
     canvas.drawCircle(45f, 35f, 12f, paint)
     
-    // Devolver un Bitmap puro, el BitmapDrawable se envuelve cuando se asigna a `icon`
     return bitmap 
 }
 

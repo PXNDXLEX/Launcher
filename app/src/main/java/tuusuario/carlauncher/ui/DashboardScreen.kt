@@ -11,13 +11,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,24 +50,11 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-// Base de datos de regiones para descarga Offline
-val mapRegions = mapOf(
-    "América del Sur" to mapOf(
-        "Venezuela" to BoundingBox(12.5, -59.5, 0.5, -73.5),
-        "Colombia" to BoundingBox(13.0, -66.5, -4.5, -79.5),
-        "Argentina" to BoundingBox(-21.0, -53.0, -55.0, -74.0),
-        "Brasil" to BoundingBox(5.0, -34.0, -33.0, -73.0)
-    ),
-    "América del Norte" to mapOf(
-        "México" to BoundingBox(33.0, -86.0, 14.0, -119.0),
-        "EEUU (Sur/Florida)" to BoundingBox(35.0, -79.0, 24.0, -88.0)
-    ),
-    "Europa" to mapOf(
-        "España" to BoundingBox(44.0, 4.5, 35.0, -9.5)
-    )
-)
-
-object NavigationState { val currentSpeedKmH = mutableStateOf(0f) }
+// Estado Global
+object NavigationState { 
+    val currentSpeedKmH = mutableStateOf(0f) 
+    val currentLocation = mutableStateOf<android.location.Location?>(null) // Para el mapa offline
+}
 
 class SettingsManager(context: Context) {
     private val prefs = context.getSharedPreferences("CarLauncherSettings", Context.MODE_PRIVATE)
@@ -76,11 +64,11 @@ class SettingsManager(context: Context) {
         set(value) = prefs.edit().putString("vehicleType", value).apply()
         
     var uiColor: Int
-        get() = prefs.getInt("uiColor", Color(0xFF007AFF).toArgb()) // Azul CarPlay por defecto
+        get() = prefs.getInt("uiColor", Color(0xFF007AFF).toArgb()) 
         set(value) = prefs.edit().putInt("uiColor", value).apply()
 
     var speedoStyle: String
-        get() = prefs.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
+        get() = prefs.getString("speedoStyle", "AURA") ?: "AURA" // AURA por defecto :)
         set(value) = prefs.edit().putString("speedoStyle", value).apply()
 
     var speedoColor: Int
@@ -91,7 +79,7 @@ class SettingsManager(context: Context) {
 object AppSettings {
     val vehicleType = mutableStateOf("FLECHA")
     val uiColor = mutableStateOf(Color(0xFF007AFF).toArgb())
-    val speedoStyle = mutableStateOf("PREMIUM")
+    val speedoStyle = mutableStateOf("AURA")
     val speedoColor = mutableStateOf(Color(0xFFE91E63).toArgb())
     
     private var settingsManager: SettingsManager? = null
@@ -123,7 +111,9 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     var currentScreen by remember { mutableStateOf("DASHBOARD") } 
     var showYoutubeInDashboard by remember { mutableStateOf(false) }
-    var showSettingsDialog by remember { mutableStateOf(false) }
+    
+    // ARREGLO: Para que no se cierre al rotar ni pierda estado
+    var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
     val activeUiColor = Color(AppSettings.uiColor.value)
@@ -171,7 +161,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // --- POPUPS DE NOTIFICACIÓN ---
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
@@ -195,7 +184,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // --- MENÚ DE AJUSTES PREMIUM ---
         if (showSettingsDialog) {
             PremiumSettingsDialog(onDismiss = { showSettingsDialog = false })
         }
@@ -208,14 +196,14 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    // ARREGLO: usePlatformDefaultWidth = false permite usar la pantalla completa si es necesario
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.85f),
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header
                 Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Configuración del Vehículo", fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
@@ -227,9 +215,10 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                     Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Mapas Offline") })
                 }
 
-                Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                // ARREGLO: verticalScroll para que no se corten las opciones en modo horizontal
+                Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState())) {
                     when (selectedTab) {
-                        0 -> // TABA 1: APARIENCIA GLOBAL
+                        0 -> 
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Color de Interfaz y Mapas") {
                                     ColorPicker(selectedColor = AppSettings.uiColor.value, onColorSelected = { AppSettings.saveUiColor(it) })
@@ -247,12 +236,13 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
                                     ) { Text("Quitar Limite de Batería (Música en 2do Plano)") }
                                 }
+                                Spacer(modifier = Modifier.height(20.dp))
                             }
-                        1 -> // TABA 2: VELOCÍMETRO
+                        1 -> 
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Estilo del Tablero") {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        listOf("AURA","PREMIUM", "NEON", "RACING", "CYBER").forEach { type ->
+                                        listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA").forEach { type ->
                                             FilterChip(selected = AppSettings.speedoStyle.value == type, onClick = { AppSettings.saveSpeedoStyle(type) }, label = { Text(type) })
                                         }
                                     }
@@ -260,8 +250,9 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                 SettingsSection("Color de Retroiluminación (Independiente)") {
                                     ColorPicker(selectedColor = AppSettings.speedoColor.value, onColorSelected = { AppSettings.saveSpeedoColor(it) })
                                 }
+                                Spacer(modifier = Modifier.height(20.dp))
                             }
-                        2 -> // TABA 3: MAPAS OFFLINE
+                        2 -> 
                             OfflineMapDownloader(context, coroutineScope)
                     }
                 }
@@ -299,63 +290,65 @@ fun ColorPicker(selectedColor: Int, onColorSelected: (Int) -> Unit) {
 
 @Composable
 fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.CoroutineScope) {
-    var selectedContinent by remember { mutableStateOf<String?>(null) }
-    var showConfirmDialog by remember { mutableStateOf<Pair<String, BoundingBox>?>(null) }
+    var showConfirmDialog by remember { mutableStateOf(false) }
     var estimatedSize by remember { mutableStateOf("Calculando...") }
+    var downloadBox by remember { mutableStateOf<BoundingBox?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text("Descarga mapas completos de tu país para navegar sin usar datos móviles. Las descargas cubren calles y autopistas.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Default.Map, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.height(16.dp))
+        Text("Zonas Seguras (Offline)", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Evita descargar países completos (24GB+). Con esta opción, el sistema detectará tu ubicación GPS actual y descargará un cuadrante a tu alrededor de 20x20 KM, cubriendo todas las carreteras detalladas. Ideal y ligero para rodar en tu zona diaria.", 
+            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        
+        Spacer(modifier = Modifier.height(32.dp))
 
-        LazyColumn(modifier = Modifier.weight(1f)) {
-            if (selectedContinent == null) {
-                items(mapRegions.keys.toList()) { continent ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { selectedContinent = continent }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                        Text(continent, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+        Button(
+            onClick = {
+                val loc = NavigationState.currentLocation.value
+                if (loc != null) {
+                    val lat = loc.latitude
+                    val lon = loc.longitude
+                    // Un radio de 0.1 grados es aprox 10-11km, generando un cuadro de 20x20km
+                    downloadBox = BoundingBox(lat + 0.1, lon + 0.1, lat - 0.1, lon - 0.1)
+                    showConfirmDialog = true
+                    
+                    estimatedSize = "Calculando peso exacto..."
+                    coroutineScope.launch {
+                        val dummyMap = MapView(context)
+                        val cm = CacheManager(dummyMap)
+                        val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } // Zoom hasta 16 (gran detalle)
+                        estimatedSize = "${(tiles * 18L) / 1024L} MB" // Promedio 18KB por tile
                     }
+                } else {
+                    Toast.makeText(context, "Buscando satélites GPS. Intenta en 5 segundos...", Toast.LENGTH_SHORT).show()
                 }
-            } else {
-                item { TextButton(onClick = { selectedContinent = null }) { Text("← Volver a Continentes") } }
-                val countries = mapRegions[selectedContinent]!!
-                items(countries.keys.toList()) { country ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { 
-                            showConfirmDialog = Pair(country, countries[country]!!)
-                            estimatedSize = "Calculando peso exacto..."
-                            coroutineScope.launch {
-                                val dummyMap = MapView(context)
-                                val cm = CacheManager(dummyMap)
-                                val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(countries[country]!!, 10, 15) }
-                                estimatedSize = "${(tiles * 15L) / 1024L} MB"
-                            }
-                        },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(country, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Icon(Icons.Default.CloudDownload, "Descargar", tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                }
-            }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
+        ) {
+            Icon(Icons.Default.CloudDownload, null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Descargar Área Actual (~200 MB)", fontWeight = FontWeight.Bold)
         }
     }
 
-    if (showConfirmDialog != null) {
+    if (showConfirmDialog && downloadBox != null) {
         AlertDialog(
-            onDismissRequest = { showConfirmDialog = null },
-            title = { Text("Descargar ${showConfirmDialog!!.first}") },
-            text = { Text("Se descargarán todos los mapas de calles y carreteras (Zoom 10 al 15) para evitar saturar la memoria.\n\nPeso aproximado: $estimatedSize") },
+            onDismissRequest = { showConfirmDialog = false },
+            title = { Text("Descargar Zona Actual") },
+            text = { Text("Se descargarán todos los mapas de calles y carreteras (Zoom 10 al 16) en un radio de 10KM a la redonda de tu posición.\n\nPeso aproximado: $estimatedSize") },
             confirmButton = {
                 Button(onClick = {
                     val dummyMap = MapView(context)
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
-                    cm.downloadAreaAsync(context, showConfirmDialog!!.second, 10, 15)
-                    showConfirmDialog = null
+                    cm.downloadAreaAsync(context, downloadBox!!, 10, 16)
+                    showConfirmDialog = false
                 }) { Text("Iniciar Descarga") }
             },
-            dismissButton = { TextButton(onClick = { showConfirmDialog = null }) { Text("Cancelar") } }
+            dismissButton = { TextButton(onClick = { showConfirmDialog = false }) { Text("Cancelar") } }
         )
     }
 }
@@ -373,20 +366,21 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
             "DASHBOARD" -> {
                 if (isLandscape) {
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.6f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Column(modifier = Modifier.weight(0.4f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                        Column(modifier = Modifier.weight(0.5f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            // ARREGLO: Speedometer más grande visualmente (0.65f vs 0.35f)
+                            Box(modifier = Modifier.weight(0.65f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.35f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }
                     }
                 } else {
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Row(modifier = Modifier.weight(0.5f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        Box(modifier = Modifier.weight(0.45f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                        Row(modifier = Modifier.weight(0.55f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Box(modifier = Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.35f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }

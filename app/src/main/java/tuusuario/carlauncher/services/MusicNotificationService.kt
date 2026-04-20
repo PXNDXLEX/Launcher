@@ -11,6 +11,10 @@ import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 object GlobalState {
     val songTitle = mutableStateOf("Música detenida")
@@ -96,6 +100,12 @@ class MusicNotificationService : NotificationListenerService() {
                     GlobalState.popupApp.value = title
                     GlobalState.popupMessage.value = text
                     GlobalState.showPopup.value = true
+                    
+                    // ARREGLO INYECTADO: Auto-ocultar notificación después de 2.5 segundos
+                    CoroutineScope(Dispatchers.Main).launch {
+                        delay(2500)
+                        GlobalState.showPopup.value = false
+                    }
                 }
             }
         } catch (e: Exception) { e.printStackTrace() }
