@@ -758,41 +758,8 @@ fun drawVehicleBitmap(type: String, color: Int): Bitmap {
 
     when (type) {
         "FLECHA" -> { val path = Path().apply { moveTo(size / 2f / scale, 10f); lineTo((size - 20f) / scale, (size - 15f) / scale); lineTo(size / 2f / scale, (size - 30f) / scale); lineTo(20f / scale, (size - 15f) / scale); close() }; canvas.drawPath(path, bodyPaint) }
-        "SEDAN" -> { 
-            // Espejos laterales
-            canvas.drawRoundRect(22f, 38f, 32f, 46f, 3f, 3f, bodyPaint)
-            canvas.drawRoundRect(68f, 38f, 78f, 46f, 3f, 3f, bodyPaint)
-            // Carrocería principal (tu Kia Rio Stylus)
-            canvas.drawRoundRect(26f, 10f, 74f, 90f, 18f, 18f, bodyPaint)
-            // Cristales (crean el efecto del techo)
-            canvas.drawRoundRect(31f, 28f, 69f, 44f, 6f, 6f, glassPaint) // Parabrisas
-            canvas.drawRoundRect(28f, 47f, 33f, 63f, 2f, 2f, glassPaint) // Ventana lateral izq
-            canvas.drawRoundRect(67f, 47f, 72f, 63f, 2f, 2f, glassPaint) // Ventana lateral der
-            canvas.drawRoundRect(33f, 66f, 67f, 78f, 5f, 5f, glassPaint) // Vidrio trasero
-            // Luces
-            canvas.drawOval(30f, 9f, 42f, 15f, lightPaint) // Faro delantero izq
-            canvas.drawOval(58f, 9f, 70f, 15f, lightPaint) // Faro delantero der
-            canvas.drawOval(30f, 86f, 42f, 91f, tailLightPaint) // Stop rojo izq
-            canvas.drawOval(58f, 86f, 70f, 91f, tailLightPaint) // Stop rojo der
-        }
-
-        "HATCHBACK" -> { 
-            // Espejos laterales
-            canvas.drawRoundRect(22f, 40f, 32f, 48f, 3f, 3f, bodyPaint)
-            canvas.drawRoundRect(68f, 40f, 78f, 48f, 3f, 3f, bodyPaint)
-            // Carrocería principal (Más corta y redondeada)
-            canvas.drawRoundRect(26f, 15f, 74f, 85f, 16f, 16f, bodyPaint)
-            // Cristales
-            canvas.drawRoundRect(31f, 32f, 69f, 48f, 6f, 6f, glassPaint) // Parabrisas
-            canvas.drawRoundRect(28f, 51f, 33f, 71f, 2f, 2f, glassPaint) // Ventana lateral izq
-            canvas.drawRoundRect(67f, 51f, 72f, 71f, 2f, 2f, glassPaint) // Ventana lateral der
-            canvas.drawRoundRect(31f, 74f, 69f, 82f, 4f, 4f, glassPaint) // Vidrio trasero pegado al borde
-            // Luces
-            canvas.drawOval(30f, 14f, 42f, 20f, lightPaint) // Faro delantero izq
-            canvas.drawOval(58f, 14f, 70f, 20f, lightPaint) // Faro delantero der
-            canvas.drawOval(30f, 81f, 42f, 86f, tailLightPaint) // Stop rojo izq
-            canvas.drawOval(58f, 81f, 70f, 86f, tailLightPaint) // Stop rojo der
-        }
+        "SEDAN" -> { canvas.drawRoundRect(25f, 10f, 75f, 90f, 15f, 15f, bodyPaint); canvas.drawRoundRect(30f, 30f, 70f, 45f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 65f, 70f, 75f, 5f, 5f, glassPaint); canvas.drawCircle(35f, 15f, 6f, lightPaint); canvas.drawCircle(65f, 15f, 6f, lightPaint) }
+        "HATCHBACK" -> { canvas.drawRoundRect(25f, 20f, 75f, 85f, 12f, 12f, bodyPaint); canvas.drawRoundRect(30f, 40f, 70f, 55f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 75f, 70f, 82f, 3f, 3f, glassPaint); canvas.drawCircle(35f, 25f, 6f, lightPaint); canvas.drawCircle(65f, 25f, 6f, lightPaint) }
     }
     return bitmap
 }
