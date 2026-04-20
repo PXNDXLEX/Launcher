@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.tuusuario.carlauncher.services.GlobalState
-import com.tuusuario.carlauncher.ui.map.CustomMapSource
+import com.tuusuario.carlauncher.ui.map.CartoDarkSource
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
@@ -311,9 +311,8 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                     
                     estimatedSize = "Calculando peso exacto..."
                     coroutineScope.launch {
-                        // Usamos la fuente BYPASS para evitar el TileSourcePolicyException
                         val dummyMap = MapView(context)
-                        dummyMap.setTileSource(CustomMapSource.create())
+                        dummyMap.setTileSource(CartoDarkSource.create())
                         val cm = CacheManager(dummyMap)
                         val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } 
                         estimatedSize = "${(tiles * 18L) / 1024L} MB" 
@@ -338,9 +337,8 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
             text = { Text("Se descargarán todos los mapas de calles y carreteras (Zoom 10 al 16) en un radio de 10KM a la redonda de tu posición.\n\nPeso aproximado: $estimatedSize") },
             confirmButton = {
                 Button(onClick = {
-                    // Implementación del BYPASS para la descarga
                     val dummyMap = MapView(context)
-                    dummyMap.setTileSource(CustomMapSource.create())
+                    dummyMap.setTileSource(CartoDarkSource.create())
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
                     cm.downloadAreaAsync(context, downloadBox!!, 10, 16)
@@ -364,23 +362,23 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
             "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
             "DASHBOARD" -> {
                 if (isLandscape) {
+                    // ARREGLO: Restaurados los tamaños originales. El mapa recupera el 60% del ancho.
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.40f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Column(modifier = Modifier.weight(0.60f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            // AURA SE LLEVA EL 70% DE LA ALTURA
-                            Box(modifier = Modifier.weight(0.70f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.30f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        Box(modifier = Modifier.weight(0.60f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                        Column(modifier = Modifier.weight(0.40f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }
                     }
                 } else {
+                    // ARREGLO: En vertical, el mapa recupera el 55% del alto
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.40f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Row(modifier = Modifier.weight(0.60f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            // AURA SE LLEVA EL 65% DEL ANCHO
-                            Box(modifier = Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.35f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        Box(modifier = Modifier.weight(0.55f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                        Row(modifier = Modifier.weight(0.45f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }
