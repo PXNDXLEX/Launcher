@@ -514,7 +514,7 @@ fun SpeedometerDraw(
                                 (activeColor.green*255).toInt(), 
                                 (activeColor.blue*255).toInt()
                             )
-                            style = android.graphics.Paint.Style.FILL
+                            this.style = android.graphics.Paint.Style.FILL // ¡INYECCIÓN APLICADA AQUÍ!
                             isAntiAlias = true
                         }
                         canvas.nativeCanvas.drawArc(radarRect, sliceStart, sliceSweep, true, paint)
