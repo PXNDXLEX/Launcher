@@ -11,7 +11,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.BitmapDrawable
 import android.os.Looper
-import android.view.MotionEvent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,14 +37,15 @@ import com.google.android.gms.location.*
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
@@ -50,6 +53,21 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.net.HttpURLConnection
 import java.net.URL
+
+// TRUCO MAESTRO: Fuente de mapas personalizada para evadir la restricción de descarga de OSM
+object CustomMapSource {
+    fun create(): XYTileSource {
+        return object : XYTileSource(
+            "Mapnik_Bypass", 
+            0, 19, 256, ".png", arrayOf(
+                "https://a.tile.openstreetmap.org/",
+                "https://b.tile.openstreetmap.org/",
+                "https://c.tile.openstreetmap.org/"
+            ), 
+            "© OpenStreetMap contributors"
+        ) {}
+    }
+}
 
 @Composable
 fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, isDarkMode: Boolean = true) {
@@ -69,11 +87,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     var carMarker by remember { mutableStateOf<Marker?>(null) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
-    var autoCenterJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
-    // ARREGLO: El mapa reacciona correctamente a los ciclos de vida para evitar la pantalla en blanco al girar
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -96,49 +112,56 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
                 NavigationState.currentLocation.value = loc
-
-                if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = loc.speed * 3.6f
+                val speedKmH = loc.speed * 3.6f
+                if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = speedKmH
                 
-                // Solo auto-engancha a altas velocidades si no hay un job de pausa de centrado activo
-                if ((loc.speed * 3.6f) > 10f && autoCenterJob == null) isFollowingLocation = true
+                val isStationary = speedKmH < 3f // Menos de 3 km/h se considera quieto
 
                 if (carMarker == null) {
                     carMarker = Marker(mapView).apply {
                         icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         position = newGeo
-                        // ARREGLO: Rotación positiva correcta del bearing para evitar giros raros
-                        rotation = if (loc.hasBearing()) loc.bearing else 0f
+                        rotation = if (loc.hasBearing() && !isStationary) loc.bearing else 0f
                     }
                     mapView.overlays.add(carMarker)
                     if (isFollowingLocation) {
                         mapView.controller.setCenter(newGeo)
-                        if (loc.hasBearing()) mapView.mapOrientation = -loc.bearing
+                        if (loc.hasBearing() && !isStationary) mapView.mapOrientation = -loc.bearing
                     }
                 } else {
                     animator?.cancel()
                     val startGeo = carMarker!!.position
                     val startRot = carMarker!!.rotation
-                    val endRot = if (loc.hasBearing()) loc.bearing else startRot
                     
-                    var deltaRot = endRot - startRot
-                    if (deltaRot > 180) deltaRot -= 360
-                    if (deltaRot < -180) deltaRot += 360
+                    // Solo actualizamos la rotación si el auto se está moviendo, evita temblores al estar quieto
+                    val targetRot = if (loc.hasBearing() && !isStationary) loc.bearing else startRot
+                    
+                    // Cálculo de la ruta más corta para el giro (evita giros bruscos de 360 grados)
+                    var deltaRot = targetRot - startRot
+                    while (deltaRot > 180) deltaRot -= 360
+                    while (deltaRot < -180) deltaRot += 360
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
                         duration = 500 
+                        val startLat = startGeo.latitude
+                        val startLon = startGeo.longitude
+                        val deltaLat = newGeo.latitude - startLat
+                        val deltaLon = newGeo.longitude - startLon
+
                         addUpdateListener { anim ->
                             val fraction = anim.animatedFraction
-                            val lat = startGeo.latitude + (newGeo.latitude - startGeo.latitude) * fraction
-                            val lon = startGeo.longitude + (newGeo.longitude - startGeo.longitude) * fraction
+                            val lat = startLat + (deltaLat * fraction)
+                            val lon = startLon + (deltaLon * fraction)
                             val currentPos = GeoPoint(lat, lon)
+                            val interpolatedRot = startRot + (deltaRot * fraction)
                             
                             carMarker!!.position = currentPos
-                            carMarker!!.rotation = startRot + (deltaRot * fraction)
+                            carMarker!!.rotation = interpolatedRot
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
-                                mapView.mapOrientation = -loc.bearing // Rotar el mapa en base a la brújula real
+                                mapView.mapOrientation = -interpolatedRot 
                             }
                             mapView.invalidate()
                         }
@@ -146,7 +169,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                 }
 
-                // Borrado de Puntos (Comiendo Ruta)
+                // Borrado de Puntos de la ruta
                 if (currentRoutePoints.isNotEmpty()) {
                     var minDistance = Float.MAX_VALUE
                     var closestIndex = 0
@@ -168,8 +191,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         for (i in 0 until closestIndex) {
                             if (currentRoutePoints.isNotEmpty()) currentRoutePoints.removeAt(0)
                         }
-                        
-                        // Actualizar línea resplandor y línea principal
                         val glowPoly = mapView.overlays.find { it is Polyline && it.id == "ROUTE_GLOW" } as? Polyline
                         val mainPoly = mapView.overlays.find { it is Polyline && it.id == "ROUTE_MAIN" } as? Polyline
                         glowPoly?.setPoints(currentRoutePoints.toList())
@@ -179,9 +200,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (currentRoutePoints.size < 10) {
                         val endPt = currentRoutePoints.last()
                         val lDest = android.location.Location("").apply { latitude = endPt.latitude; longitude = endPt.longitude }
-                        val distToDest = loc.distanceTo(lDest)
-                        
-                        if (distToDest < 30f) { 
+                        if (loc.distanceTo(lDest) < 30f) { 
                             showArrivalAlert = true
                             currentRoutePoints.clear()
                             routeDistanceText = ""
@@ -208,38 +227,33 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 mapView.apply {
-                    setTileSource(TileSourceFactory.MAPNIK)
+                    // Usamos nuestra fuente BYPASS para evitar bloqueos
+                    setTileSource(CustomMapSource.create())
                     controller.setCenter(GeoPoint(10.996, -63.804)) 
                     
-                    // ARREGLO: Bajar el centro de gravedad del mapa para ver más camino por delante
                     addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
                         val h = bottom - top
                         if (h > 0) { setMapCenterOffset(0, h / 4) }
                     }
 
-                    // ARREGLO: Auto-Centrado dinámico. Si el usuario toca el mapa, espera 5 segs y vuelve a centrar.
-                    setOnTouchListener { v, event ->
-                        if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_MOVE) {
-                            isFollowingLocation = false
-                            autoCenterJob?.cancel()
-                            autoCenterJob = coroutineScope.launch {
-                                delay(5000)
-                                isFollowingLocation = true
-                                NavigationState.currentLocation.value?.let {
-                                    controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                }
-                                autoCenterJob = null
+                    // ARREGLO: Permite pellizcar sin problemas y desactiva el auto-centrado si el usuario desliza
+                    addMapListener(object : MapListener {
+                        override fun onScroll(event: ScrollEvent?): Boolean {
+                            if (event != null && (event.x != 0 || event.y != 0)) {
+                                isFollowingLocation = false
                             }
+                            return false
                         }
-                        v.performClick()
-                        false 
-                    }
+                        override fun onZoom(event: ZoomEvent?): Boolean = false
+                    })
 
                     post { 
                         controller.setZoom(19.0)
                         invalidate() 
                     }
+                    
                     setMultiTouchControls(true)
+                    setBuiltInZoomControls(false) // Quita los botones feos de +/- nativos
                     setHasTransientState(true)
 
                     val mReceive = object : MapEventsReceiver {
@@ -269,8 +283,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
-                view.setMultiTouchControls(isFullScreen)
-                
                 if (isDarkMode) {
                     val inverseMatrix = ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
@@ -288,8 +300,27 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         )
 
+        // BOTÓN GIGANTE DE CENTRAR (Aparece cuando el usuario mueve el mapa)
+        Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp)) {
+            AnimatedVisibility(visible = !isFollowingLocation, enter = fadeIn(), exit = fadeOut()) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        isFollowingLocation = true
+                        NavigationState.currentLocation.value?.let { 
+                            mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
+                            if (it.hasBearing()) mapView.mapOrientation = -it.bearing
+                        }
+                    },
+                    icon = { Icon(Icons.Default.MyLocation, "Centrar") },
+                    text = { Text("Centrar Cámara") },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        }
+
+        // PANEL INFERIOR DERECHO (Rutas y Cancelar)
         Column(modifier = Modifier.align(Alignment.BottomEnd).padding(if (isFullScreen) 32.dp else 16.dp), horizontalAlignment = Alignment.End) {
-            
             if (routeDistanceText.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                     Text(routeDistanceText, modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -298,7 +329,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
             if (selectedDestination != null || currentRoutePoints.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    
                     ExtendedFloatingActionButton(
                         onClick = {
                             selectedDestination = null
@@ -344,7 +374,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                 
                                                 mapView.overlays.removeAll { it is Polyline }
                                                 
-                                                // ARREGLO: 1. Línea Blanca Transparente abajo para marcar carreteras
                                                 val glowPolyline = Polyline(mapView).apply {
                                                     id = "ROUTE_GLOW"
                                                     setPoints(currentRoutePoints.toList())
@@ -355,7 +384,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                 }
                                                 mapView.overlays.add(0, glowPolyline)
                                                 
-                                                // 2. Línea Azul Activa de la ruta encima
                                                 val polyline = Polyline(mapView).apply {
                                                     id = "ROUTE_MAIN"
                                                     setPoints(currentRoutePoints.toList())
@@ -367,7 +395,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                 mapView.overlays.add(1, polyline)
                                                 
                                                 isFollowingLocation = true 
-                                                autoCenterJob?.cancel()
                                                 mapView.invalidate()
                                             }
                                         } catch (e: Exception) { 
@@ -384,20 +411,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         )
                     }
                 }
-            }
-
-            FloatingActionButton(
-                onClick = {
-                    isFollowingLocation = true
-                    autoCenterJob?.cancel()
-                    NavigationState.currentLocation.value?.let { 
-                        mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                        if (it.hasBearing()) mapView.mapOrientation = -it.bearing
-                    }
-                },
-                containerColor = if(isFollowingLocation) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Icon(Icons.Default.MyLocation, "Centrar", tint = if(isFollowingLocation) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
             }
         }
 

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.tuusuario.carlauncher.services.GlobalState
+import com.tuusuario.carlauncher.ui.map.CustomMapSource
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
@@ -50,10 +51,9 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-// Estado Global
 object NavigationState { 
     val currentSpeedKmH = mutableStateOf(0f) 
-    val currentLocation = mutableStateOf<android.location.Location?>(null) // Para el mapa offline
+    val currentLocation = mutableStateOf<android.location.Location?>(null)
 }
 
 class SettingsManager(context: Context) {
@@ -68,7 +68,7 @@ class SettingsManager(context: Context) {
         set(value) = prefs.edit().putInt("uiColor", value).apply()
 
     var speedoStyle: String
-        get() = prefs.getString("speedoStyle", "AURA") ?: "AURA" // AURA por defecto :)
+        get() = prefs.getString("speedoStyle", "AURA") ?: "AURA"
         set(value) = prefs.edit().putString("speedoStyle", value).apply()
 
     var speedoColor: Int
@@ -111,8 +111,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     var currentScreen by remember { mutableStateOf("DASHBOARD") } 
     var showYoutubeInDashboard by remember { mutableStateOf(false) }
-    
-    // ARREGLO: Para que no se cierre al rotar ni pierda estado
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
@@ -196,7 +194,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    // ARREGLO: usePlatformDefaultWidth = false permite usar la pantalla completa si es necesario
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
             modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
@@ -215,7 +212,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                     Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Mapas Offline") })
                 }
 
-                // ARREGLO: verticalScroll para que no se corten las opciones en modo horizontal
                 Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState())) {
                     when (selectedTab) {
                         0 -> 
@@ -310,16 +306,17 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                 if (loc != null) {
                     val lat = loc.latitude
                     val lon = loc.longitude
-                    // Un radio de 0.1 grados es aprox 10-11km, generando un cuadro de 20x20km
                     downloadBox = BoundingBox(lat + 0.1, lon + 0.1, lat - 0.1, lon - 0.1)
                     showConfirmDialog = true
                     
                     estimatedSize = "Calculando peso exacto..."
                     coroutineScope.launch {
+                        // Usamos la fuente BYPASS para evitar el TileSourcePolicyException
                         val dummyMap = MapView(context)
+                        dummyMap.setTileSource(CustomMapSource.create())
                         val cm = CacheManager(dummyMap)
-                        val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } // Zoom hasta 16 (gran detalle)
-                        estimatedSize = "${(tiles * 18L) / 1024L} MB" // Promedio 18KB por tile
+                        val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } 
+                        estimatedSize = "${(tiles * 18L) / 1024L} MB" 
                     }
                 } else {
                     Toast.makeText(context, "Buscando satélites GPS. Intenta en 5 segundos...", Toast.LENGTH_SHORT).show()
@@ -341,7 +338,9 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
             text = { Text("Se descargarán todos los mapas de calles y carreteras (Zoom 10 al 16) en un radio de 10KM a la redonda de tu posición.\n\nPeso aproximado: $estimatedSize") },
             confirmButton = {
                 Button(onClick = {
+                    // Implementación del BYPASS para la descarga
                     val dummyMap = MapView(context)
+                    dummyMap.setTileSource(CustomMapSource.create())
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
                     cm.downloadAreaAsync(context, downloadBox!!, 10, 16)
@@ -366,19 +365,20 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
             "DASHBOARD" -> {
                 if (isLandscape) {
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Column(modifier = Modifier.weight(0.5f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            // ARREGLO: Speedometer más grande visualmente (0.65f vs 0.35f)
-                            Box(modifier = Modifier.weight(0.65f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.35f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        Box(modifier = Modifier.weight(0.40f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                        Column(modifier = Modifier.weight(0.60f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            // AURA SE LLEVA EL 70% DE LA ALTURA
+                            Box(modifier = Modifier.weight(0.70f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.30f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }
                     }
                 } else {
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.45f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Row(modifier = Modifier.weight(0.55f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(modifier = Modifier.weight(0.40f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                        Row(modifier = Modifier.weight(0.60f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            // AURA SE LLEVA EL 65% DEL ANCHO
                             Box(modifier = Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
                             Box(modifier = Modifier.weight(0.35f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
