@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.tuusuario.carlauncher.services.GlobalState
-import com.tuusuario.carlauncher.ui.map.CartoDarkSource
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
@@ -44,6 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.osmdroid.tileprovider.cachemanager.CacheManager
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.views.MapView
 import java.time.LocalDateTime
@@ -54,6 +54,19 @@ import kotlin.math.roundToInt
 object NavigationState { 
     val currentSpeedKmH = mutableStateOf(0f) 
     val currentLocation = mutableStateOf<android.location.Location?>(null)
+}
+
+// Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
+object CustomMapSource {
+    fun create(): XYTileSource {
+        return object : XYTileSource(
+            "Mapnik_Bypass", 0, 19, 256, ".png", arrayOf(
+                "https://a.tile.openstreetmap.org/",
+                "https://b.tile.openstreetmap.org/",
+                "https://c.tile.openstreetmap.org/"
+            ), "© OpenStreetMap contributors"
+        ) {}
+    }
 }
 
 class SettingsManager(context: Context) {
@@ -312,7 +325,7 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                     estimatedSize = "Calculando peso exacto..."
                     coroutineScope.launch {
                         val dummyMap = MapView(context)
-                        dummyMap.setTileSource(CartoDarkSource.create())
+                        dummyMap.setTileSource(CustomMapSource.create()) // BYPASS ACTIVO
                         val cm = CacheManager(dummyMap)
                         val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } 
                         estimatedSize = "${(tiles * 18L) / 1024L} MB" 
@@ -338,7 +351,7 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
             confirmButton = {
                 Button(onClick = {
                     val dummyMap = MapView(context)
-                    dummyMap.setTileSource(CartoDarkSource.create())
+                    dummyMap.setTileSource(CustomMapSource.create()) // BYPASS ACTIVO
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
                     cm.downloadAreaAsync(context, downloadBox!!, 10, 16)
@@ -362,7 +375,6 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
             "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
             "DASHBOARD" -> {
                 if (isLandscape) {
-                    // ARREGLO: Restaurados los tamaños originales. El mapa recupera el 60% del ancho.
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(modifier = Modifier.weight(0.60f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
                         Column(modifier = Modifier.weight(0.40f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -373,7 +385,6 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
                         }
                     }
                 } else {
-                    // ARREGLO: En vertical, el mapa recupera el 55% del alto
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(modifier = Modifier.weight(0.55f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
                         Row(modifier = Modifier.weight(0.45f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
