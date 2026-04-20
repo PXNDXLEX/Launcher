@@ -81,7 +81,7 @@ fun SpeedometerWidget() {
     val tickColor = if (isLight) Color.Black.copy(alpha = 0.6f) else Color.DarkGray
     val backgroundColor = MaterialTheme.colorScheme.background
 
-    // LÓGICA DE COLOR REACTIVO MULTI-ETAPAS
+    // --- NUEVA LÓGICA DE COLOR REACTIVO MULTI-ETAPAS (40 -> 80 -> 90 -> 150) ---
     val c0 = lerp(baseColor, Color.Black, 0.8f)
     val c1 = baseColor
     val c2 = lerp(baseColor, Color.White, 0.6f)
@@ -111,7 +111,7 @@ fun SpeedometerWidget() {
             modifier = Modifier.size(boxSize)
         )
 
-        // Textos superpuestos según el estilo con sombras repotenciadas
+        // Textos superpuestos según el estilo
         when (style) {
             "RACING" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.1f).dp)) {
@@ -128,7 +128,7 @@ fun SpeedometerWidget() {
             }
             "AURA" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = 10.dp)) {
-                    val textShadow = if (!isLight) Shadow(color = baseColor.copy(alpha = 0.8f), offset = Offset(0f, 0f), blurRadius = 15f) else null
+                    val textShadow = if (!isLight) Shadow(color = baseColor.copy(alpha = 0.4f), offset = Offset(0f, 0f), blurRadius = 25f) else null
                     Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow))
                     Box(modifier = Modifier.padding(top = 4.dp).background(baseColor, shape = RoundedCornerShape(16.dp)).padding(horizontal = 16.dp, vertical = 4.dp)) {
                         Text(text = "KM/H", color = Color.White, fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
@@ -137,28 +137,26 @@ fun SpeedometerWidget() {
             }
             "VORTEX" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-15).dp)) {
-                    val textShadow = if (!isLight) Shadow(color = baseColor.copy(alpha = 0.6f), offset = Offset(0f, 0f), blurRadius = 20f) else null
-                    Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = textShadow))
+                    Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic))
                     Text(text = "KM/H", color = textColor.copy(alpha = 0.5f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 8.sp)
                 }
             }
             "QUANTUM" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-20).dp)) {
-                    val textShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.7f), blurRadius = 15f) else null
-                    Text(text = speed.toInt().toString().padStart(3, '0'), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Light, style = TextStyle(fontFamily = FontFamily.Monospace, shadow = textShadow))
+                    Text(text = speed.toInt().toString().padStart(3, '0'), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Light, style = TextStyle(fontFamily = FontFamily.Monospace))
                     Text(text = "K M / H", color = reactiveColorText, fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
                 }
             }
             "PULSAR" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-10).dp)) {
-                    val pulseShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.8f), blurRadius = 20f) else null
+                    val pulseShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 30f) else null
                     Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Bold, style = TextStyle(shadow = pulseShadow))
-                    Text(text = "KM/H", color = reactiveColorText.copy(alpha = 0.9f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp)
+                    Text(text = "KM/H", color = reactiveColorText.copy(alpha = 0.8f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp)
                 }
             }
             "PLASMA" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-10).dp)) {
-                    val plasmaShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.8f), blurRadius = 15f) else null
+                    val plasmaShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 25f) else null
                     Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = plasmaShadow))
                     Box(modifier = Modifier.padding(top = 4.dp).background(if (isLight) Color.Black.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 4.dp)) {
                         Text(text = "KM/H", color = reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 5.sp)
@@ -177,8 +175,8 @@ fun SpeedometerWidget() {
             }
             "KAIJU" -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-10).dp)) {
-                    val textShadow = if (!isLight) Shadow(color = reactiveColorText, blurRadius = 15f) else null
-                    Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow))
+                    val textShadow = if (!isLight) Shadow(color = reactiveColorText, blurRadius = 30f) else null
+                    Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow)) // En un dispositivo real, aquí puedes aplicar un Stroke al texto
                     Text(text = "K M / H", color = reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 10.sp)
                 }
             }
@@ -219,6 +217,7 @@ fun SpeedometerDraw(
     val outlineColor = Color.Black.copy(alpha = 0.85f)
     val speedProgress by rememberUpdatedState((speed / maxSpeed).coerceIn(0f, 1f))
     
+    // Acumuladores de tiempo y movimiento fluido
     var cumTime by remember { mutableStateOf(0f) }
     var cumRadar by remember { mutableStateOf(0f) }
     var cumVortex by remember { mutableStateOf(0f) }
@@ -252,10 +251,8 @@ fun SpeedometerDraw(
     Canvas(modifier = modifier) {
         val spProg = speedProgress
         val center = Offset(size.width / 2, size.height / 2)
-        
-        // MOTOR DE FUSIÓN LUMINOSA: Hace que los colores sumen luz en modo oscuro (Neón puro)
-        val glowBlendMode = if (isLight) BlendMode.SrcOver else BlendMode.Plus
 
+        // --- Lógica general de color reactivo compartida ---
         val c0 = lerp(activeColor, Color.Black, 0.8f)
         val c1 = activeColor
         val c2 = lerp(activeColor, Color.White, 0.6f)
@@ -317,7 +314,7 @@ fun SpeedometerDraw(
                 val mainRadius = radius * 0.75f
 
                 val auraPulse = (sin(cumTime * 3f) * 0.05f)
-                val baseAuraAlpha = if (isLight) 0.15f else 0.4f
+                val baseAuraAlpha = if (isLight) 0.15f else 0.2f
                 val auraAlpha = (baseAuraAlpha + (spProg * 0.4f) + auraPulse).coerceIn(0f, 1f)
                 val auraRadius = mainRadius + 20f + (spProg * 40f)
                 
@@ -326,7 +323,7 @@ fun SpeedometerDraw(
                     center = center,
                     radius = auraRadius
                 )
-                drawCircle(brush = auraBrush, radius = auraRadius, center = center, blendMode = glowBlendMode)
+                drawCircle(brush = auraBrush, radius = auraRadius, center = center)
 
                 rotate(degrees = cumVortex * 57.3f, pivot = center) {
                     drawCircle(
@@ -367,7 +364,7 @@ fun SpeedometerDraw(
                     val endY = (center.y + outerR * sin(rad)).toFloat()
 
                     if (isLit) {
-                        if (!isLight) drawLine(color = activeColor.copy(alpha = 0.4f), start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = 12f, cap = StrokeCap.Round, blendMode = glowBlendMode)
+                        if (!isLight) drawLine(color = activeColor.copy(alpha = 0.4f), start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = 12f, cap = StrokeCap.Round)
                         drawLine(color = activeColor, start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = 4f, cap = StrokeCap.Round)
                     } else {
                         val inactiveBarColor = if (isLight) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f)
@@ -389,7 +386,7 @@ fun SpeedometerDraw(
                     val dotRad = Math.toRadians((startAngle + (sweepAngle * spProg)).toDouble())
                     val dotX = (center.x + (mainRadius + 18f) * cos(dotRad)).toFloat()
                     val dotY = (center.y + (mainRadius + 18f) * sin(dotRad)).toFloat()
-                    if (!isLight) drawCircle(color = activeColor.copy(alpha = 0.5f), radius = 12f, center = Offset(dotX, dotY), blendMode = glowBlendMode)
+                    if (!isLight) drawCircle(color = activeColor.copy(alpha = 0.5f), radius = 12f, center = Offset(dotX, dotY))
                     drawCircle(color = Color.White, radius = 6f, center = Offset(dotX, dotY))
                 }
                 
@@ -413,7 +410,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.DEFAULT_BOLD
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + 5f, paint) 
                     }
@@ -434,7 +430,7 @@ fun SpeedometerDraw(
                     val sx = (center.x + rawR * cos(starAngle + cumVortex)).toFloat()
                     val sy = (center.y + rawR * sin(starAngle + cumVortex)).toFloat()
                     val starColor = if (isLight) Color.Black.copy(alpha = alpha) else Color.White.copy(alpha = alpha)
-                    drawCircle(color = starColor, radius = if (isLight) 2f else 1.5f, center = Offset(sx, sy), blendMode = glowBlendMode)
+                    drawCircle(color = starColor, radius = if (isLight) 2f else 1.5f, center = Offset(sx, sy))
                 }
 
                 rotate(degrees = -cumVortex * 0.8f * 57.3f, pivot = center) {
@@ -442,8 +438,7 @@ fun SpeedometerDraw(
                         color = reactiveColor.copy(alpha = 0.3f + (spProg * 0.4f)),
                         radius = mainRadius * 0.5f,
                         center = center,
-                        style = Stroke(width = 15f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(40f, 20f, 10f, 20f))),
-                        blendMode = glowBlendMode
+                        style = Stroke(width = 15f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(40f, 20f, 10f, 20f)))
                     )
                 }
                 rotate(degrees = cumVortex * 2.3f * 57.3f, pivot = center) {
@@ -451,8 +446,7 @@ fun SpeedometerDraw(
                         color = reactiveColor.copy(alpha = 0.5f),
                         radius = mainRadius * 0.85f,
                         center = center,
-                        style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 15f))),
-                        blendMode = glowBlendMode
+                        style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 15f)))
                     )
                 }
 
@@ -489,7 +483,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.DEFAULT_BOLD
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + 5f, paint) 
                     }
@@ -521,7 +514,7 @@ fun SpeedometerDraw(
                                 (activeColor.green*255).toInt(), 
                                 (activeColor.blue*255).toInt()
                             )
-                            this.style = android.graphics.Paint.Style.FILL // INYECCIÓN CORREGIDA Y ÚNICA
+                            this.style = android.graphics.Paint.Style.FILL
                             isAntiAlias = true
                         }
                         canvas.nativeCanvas.drawArc(radarRect, sliceStart, sliceSweep, true, paint)
@@ -543,7 +536,7 @@ fun SpeedometerDraw(
                     if (x == (-waveWidth/2).toInt()) {
                         prevX = px; prevY = py
                     } else {
-                        drawLine(color = reactiveColor, start = Offset(prevX, prevY), end = Offset(px, py), strokeWidth = 2f, blendMode = glowBlendMode)
+                        drawLine(color = reactiveColor, start = Offset(prevX, prevY), end = Offset(px, py), strokeWidth = 2f)
                         prevX = px; prevY = py
                     }
                 }
@@ -595,7 +588,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.MONOSPACE
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + 5f, paint) 
                     }
@@ -616,7 +608,7 @@ fun SpeedometerDraw(
                     center = center,
                     radius = orbRadius
                 )
-                drawCircle(brush = orbGradient, radius = orbRadius, center = center, blendMode = glowBlendMode)
+                drawCircle(brush = orbGradient, radius = orbRadius, center = center)
 
                 val numRipples = 3
                 for (i in 0 until numRipples) {
@@ -667,7 +659,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.DEFAULT_BOLD
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY, paint) 
                     }
@@ -686,7 +677,7 @@ fun SpeedometerDraw(
                     center = center,
                     radius = coreRadius * 1.5f
                 )
-                drawCircle(brush = coreGrad, radius = coreRadius * 1.5f, center = center, blendMode = glowBlendMode)
+                drawCircle(brush = coreGrad, radius = coreRadius * 1.5f, center = center)
 
                 val numBolts = (6f + spProg * 14f).toInt()
                 for (i in 0 until numBolts) {
@@ -702,7 +693,7 @@ fun SpeedometerDraw(
                         val nextX = (center.x + r * cos(a)).toFloat()
                         val nextY = (center.y + r * sin(a)).toFloat()
                         
-                        drawLine(color = reactiveColor, start = Offset(currentX, currentY), end = Offset(nextX, nextY), strokeWidth = 1.5f + (Math.random()*2).toFloat(), blendMode = glowBlendMode)
+                        drawLine(color = reactiveColor, start = Offset(currentX, currentY), end = Offset(nextX, nextY), strokeWidth = 1.5f + (Math.random()*2).toFloat())
                         currentX = nextX
                         currentY = nextY
                     }
@@ -735,7 +726,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.DEFAULT_BOLD
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY, paint) 
                     }
@@ -760,8 +750,7 @@ fun SpeedometerDraw(
                             color = reactiveColor.copy(alpha = (0.1f + (spProg * 0.4f)) * noise),
                             start = Offset((center.x + innerR * cos(angle)).toFloat(), (center.y + innerR * sin(angle)).toFloat()),
                             end = Offset((center.x + outerR * cos(angle)).toFloat(), (center.y + outerR * sin(angle)).toFloat()),
-                            strokeWidth = 1f + (noise * 2f),
-                            blendMode = glowBlendMode
+                            strokeWidth = 1f + (noise * 2f)
                         )
                     }
                 }
@@ -820,7 +809,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY, paint) 
                     }
@@ -840,7 +828,7 @@ fun SpeedometerDraw(
                     center = center,
                     radius = atomicRad
                 )
-                drawCircle(brush = coreGrad, radius = atomicRad, center = center, blendMode = glowBlendMode)
+                drawCircle(brush = coreGrad, radius = atomicRad, center = center)
 
                 val numPlates = 15
                 val plateStep = sweepAngle / numPlates
@@ -900,7 +888,6 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.create("impact", android.graphics.Typeface.BOLD)
-                            if (!isLight && isLit) setShadowLayer(15f, 0f, 0f, color)
                         }
                         canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY, paint) 
                     }
