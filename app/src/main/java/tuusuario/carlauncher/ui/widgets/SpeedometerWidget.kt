@@ -426,7 +426,7 @@ fun SpeedometerDraw(
                 val arcTopLeft = Offset(center.x - mainRadius, center.y - mainRadius)
 
                 val impactColor = if (isLight) Color.Black else Color.White
-                val energyColor = if (isLight) baseColor else reactiveColor
+                val energyColor = if (isLight) activeColor else reactiveColor
 
                 val numLines = (40f + (spProg * 60f)).toInt()
                 for (i in 0 until numLines) {
@@ -520,7 +520,7 @@ fun SpeedometerDraw(
                             val strokePaint = android.graphics.Paint(paint).apply {
                                 style = android.graphics.Paint.Style.STROKE
                                 strokeWidth = radius * 0.01f
-                                color = android.graphics.Color.argb((baseColor.alpha*255).toInt(), (baseColor.red*255).toInt(), (baseColor.green*255).toInt(), (baseColor.blue*255).toInt())
+                                color = android.graphics.Color.argb((activeColor.alpha*255).toInt(), (activeColor.red*255).toInt(), (activeColor.green*255).toInt(), (activeColor.blue*255).toInt())
                             }
                             canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + (radius * 0.03f), strokePaint)
                         }
@@ -1066,7 +1066,7 @@ fun SpeedometerDraw(
                                 (activeColor.green*255).toInt(), 
                                 (activeColor.blue*255).toInt()
                             )
-                            this.style = android.graphics.Paint.Style.FILL
+                            setStyle(android.graphics.Paint.Style.FILL)
                             isAntiAlias = true
                         }
                         canvas.nativeCanvas.drawArc(radarRect, sliceStart, sliceSweep, true, paint)
