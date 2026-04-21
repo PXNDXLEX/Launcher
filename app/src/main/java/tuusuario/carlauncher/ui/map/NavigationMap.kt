@@ -35,7 +35,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -63,7 +63,7 @@ import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory 
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
@@ -93,7 +93,7 @@ class FavoritesManager(context: Context) {
         if (list.none { it.name == place.name }) {
             list.add(place)
             val array = JSONArray()
-            list.forEach { 
+            list.forEach {
                 val obj = JSONObject()
                 obj.put("name", it.name); obj.put("address", it.address); obj.put("lat", it.lat); obj.put("lon", it.lon); obj.put("iconType", it.iconType)
                 array.put(obj)
@@ -110,30 +110,27 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = LocalFocusManager.current
     val vehicleType = AppSettings.vehicleType.value
-    val uiColor = AppSettings.uiColor.value 
+    val uiColor = AppSettings.uiColor.value
     val favManager = remember { FavoritesManager(context) }
-
     val coroutineScope = rememberCoroutineScope()
     val mapView = remember { MapView(context) }
-    
+
     var isMapDarkMode by remember { mutableStateOf(isDarkMode) }
-    
+
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave by remember { mutableStateOf("") }
     var favoriteLocationToSave by remember { mutableStateOf<GeoPoint?>(null) }
     var selectedIconType by remember { mutableStateOf("Star") }
-
     var selectedDestination by remember { mutableStateOf<GeoPoint?>(null) }
     var routeDistanceText by remember { mutableStateOf("") }
     val currentRoutePoints = remember { mutableStateListOf<GeoPoint>() }
     var isFollowingLocation by remember { mutableStateOf(true) }
-    
-    var showArrivalAlert by remember { mutableStateOf(false) }
 
+    var showArrivalAlert by remember { mutableStateOf(false) }
     var carMarker by remember { mutableStateOf<Marker?>(null) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
     var autoCenterJob by remember { mutableStateOf<Job?>(null) }
-    
+
     var currentMapRotation by remember { mutableStateOf(0f) }
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
@@ -165,11 +162,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
-                
+
                 NavigationState.currentLocation.value = loc
                 val speedKmH = loc.speed * 3.6f
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = speedKmH
-                val isStationary = speedKmH < 3f 
+                val isStationary = speedKmH < 3f
 
                 if (carMarker == null) {
                     carMarker = Marker(mapView).apply {
@@ -177,9 +174,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         isFlat = true
                         position = newGeo
-                        rotation = if (loc.hasBearing() && !isStationary) loc.bearing else 0f
+                        rotation = if (loc.hasBearing() && !isStationary) {
+                            loc.bearing - mapView.mapOrientation
+                        } else 0f
                     }
                     mapView.overlays.add(carMarker)
+
                     if (isFollowingLocation) {
                         mapView.controller.setCenter(newGeo)
                         if (loc.hasBearing() && !isStationary) {
@@ -191,16 +191,20 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     animator?.cancel()
                     val startGeo = carMarker!!.position
                     val startRot = carMarker!!.rotation
-                    val targetRot = if (loc.hasBearing() && !isStationary) loc.bearing else startRot
-                    
-                    var deltaRot = targetRot - startRot
+
+                    val gpsBearing = if (loc.hasBearing() && !isStationary) loc.bearing else startRot
+
+                    // CORRECCIÓN PRINCIPAL: Compensar la rotación del mapa
+                    val targetMarkerRot = gpsBearing - mapView.mapOrientation
+
+                    var deltaRot = targetMarkerRot - startRot
                     while (deltaRot > 180) deltaRot -= 360
                     while (deltaRot < -180) deltaRot += 360
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                        duration = 500 
+                        duration = 500
                         interpolator = LinearInterpolator()
-                        
+
                         val startLat = startGeo.latitude
                         val startLon = startGeo.longitude
                         val deltaLat = newGeo.latitude - startLat
@@ -210,14 +214,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             val fraction = anim.animatedFraction
                             val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
                             val interpolatedRot = startRot + (deltaRot * fraction)
-                            
+
                             carMarker!!.position = currentPos
                             carMarker!!.rotation = interpolatedRot
-                            
+
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
-                                mapView.mapOrientation = -interpolatedRot 
-                                currentMapRotation = -interpolatedRot
+                                mapView.mapOrientation = -gpsBearing
+                                currentMapRotation = -gpsBearing
                             }
                             mapView.invalidate()
                         }
@@ -225,11 +229,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                 }
 
+                // Lógica de ruta (sin cambios)
                 if (currentRoutePoints.isNotEmpty()) {
                     var minDistance = Float.MAX_VALUE
                     var closestIndex = 0
-                    val searchLimit = minOf(15, currentRoutePoints.size) 
-                    
+                    val searchLimit = minOf(15, currentRoutePoints.size)
+
                     for (i in 0 until searchLimit) {
                         val pt = currentRoutePoints[i]
                         val l1 = android.location.Location("").apply { latitude = loc.latitude; longitude = loc.longitude }
@@ -249,7 +254,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (currentRoutePoints.size < 10) {
                         val endPt = currentRoutePoints.last()
                         val lDest = android.location.Location("").apply { latitude = endPt.latitude; longitude = endPt.longitude }
-                        if (loc.distanceTo(lDest) < 30f) { 
+                        if (loc.distanceTo(lDest) < 30f) {
                             showArrivalAlert = true
                             currentRoutePoints.clear()
                             routeDistanceText = ""
@@ -265,7 +270,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
         }
-        onDispose { 
+
+        onDispose {
             fusedLocationClient.removeLocationUpdates(locationCallback)
             animator?.cancel()
         }
@@ -278,8 +284,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 mapView.apply {
                     setTileSource(TileSourceFactory.MAPNIK)
                     isTilesScaledToDpi = true
-                    controller.setCenter(GeoPoint(10.996, -63.804)) 
-                    
+                    controller.setCenter(GeoPoint(10.996, -63.804))
+
                     addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
                         val h = bottom - top
                         if (h > 0) { setMapCenterOffset(0, h / 4) }
@@ -289,7 +295,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     rotationGestureOverlay.isEnabled = true
                     overlays.add(rotationGestureOverlay)
 
-                    // ESCUDO TÁCTIL: Cancela inmediatamente el seguimiento del GPS en cuanto tocas la pantalla
                     setOnTouchListener { _, event ->
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
@@ -307,7 +312,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 }
                             }
                         }
-                        false // Retornamos false para permitir que el gesto de pellizco continúe procesándose
+                        false
                     }
 
                     addMapListener(object : MapListener {
@@ -315,7 +320,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             if (event != null && (event.x != 0 || event.y != 0)) {
                                 isFollowingLocation = false
                                 currentMapRotation = this@apply.mapOrientation
-                                
+
                                 autoCenterJob?.cancel()
                                 autoCenterJob = coroutineScope.launch {
                                     delay(6000)
@@ -328,6 +333,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             }
                             return false
                         }
+
                         override fun onZoom(event: ZoomEvent?): Boolean {
                             isFollowingLocation = false
                             autoCenterJob?.cancel()
@@ -342,12 +348,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                     })
 
-                    post { 
+                    post {
                         controller.setZoom(19.0)
-                        invalidate() 
+                        invalidate()
                     }
-                    
-                    // Esto tiene que estar SOLO aquí en el Factory, no en el update.
+
                     setMultiTouchControls(true)
                     setBuiltInZoomControls(false)
                     setHasTransientState(true)
@@ -359,24 +364,23 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             showFavorites = false
                             return false
                         }
+
                         override fun longPressHelper(p: GeoPoint?): Boolean {
-                            if (currentRoutePoints.isNotEmpty()) {
-                                return true 
-                            }
-                            
+                            if (currentRoutePoints.isNotEmpty()) return true
+
                             if (p != null) {
                                 selectedDestination = p
                                 routeDistanceText = ""
-                                isFollowingLocation = false 
+                                isFollowingLocation = false
                                 overlays.removeAll { it is Marker && it.id == "DEST" }
-                                
+
                                 val marker = Marker(mapView).apply {
                                     position = p
                                     id = "DEST"
                                     icon = BitmapDrawable(ctx.resources, drawCustomPin(uiColor))
                                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                                     title = "Destino Seleccionado"
-                                    
+
                                     setOnMarkerClickListener { _, _ ->
                                         favoriteLocationToSave = p
                                         favoriteNameToSave = "Mi Lugar"
@@ -395,9 +399,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
-                // NOTA: Se eliminó el setMultiTouchControls(true) de aquí porque borraba el gesto
-                // de pellizco cada vez que la pantalla se actualizaba, arruinando el zoom.
-                
                 if (isMapDarkMode) {
                     val inverseMatrix = ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
@@ -409,16 +410,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 } else {
                     view.overlayManager.tilesOverlay.setColorFilter(null)
                 }
-                
+
                 carMarker?.icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                 view.invalidate()
             }
         )
 
-        // BARRA DE BÚSQUEDA Y FAVORITOS SUPERIOR
+        // ==================== BARRA DE BÚSQUEDA Y FAVORITOS ====================
         Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(horizontal = 8.dp)) {
-                IconButton(onClick = { 
+                IconButton(onClick = {
                     showFavorites = !showFavorites
                     if(showFavorites) {
                         val loc = NavigationState.currentLocation.value
@@ -430,7 +431,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 dist = res[0] / 1000.0
                             }
                             fav.copy(distanceKm = dist)
-                        }.sortedBy { it.distanceKm } 
+                        }.sortedBy { it.distanceKm }
                         searchResults = favs
                     } else {
                         searchResults = emptyList()
@@ -438,7 +439,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }) {
                     Icon(if(showFavorites) Icons.Default.Star else Icons.Default.StarBorder, "Favoritos", tint = Color(uiColor))
                 }
-                
+
                 TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -454,14 +455,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 try {
                                     val query = URLEncoder.encode(searchQuery, "UTF-8")
                                     val loc = NavigationState.currentLocation.value
-                                    
+
                                     val urlStr = buildString {
                                         append("https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=10&addressdetails=1")
                                         if (loc != null) {
-                                            append("&lat=${loc.latitude}&lon=${loc.longitude}") 
+                                            append("&lat=${loc.latitude}&lon=${loc.longitude}")
                                         }
                                     }
-                                    
+
                                     val result = withContext(Dispatchers.IO) {
                                         val conn = URL(urlStr).openConnection() as HttpURLConnection
                                         conn.setRequestProperty("User-Agent", "CarLauncher")
@@ -473,14 +474,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         val obj = jsonArray.getJSONObject(i)
                                         val lat = obj.getDouble("lat")
                                         val lon = obj.getDouble("lon")
-                                        
+
                                         var dist = 0.0
                                         loc?.let {
                                             val res = FloatArray(1)
                                             android.location.Location.distanceBetween(it.latitude, it.longitude, lat, lon, res)
                                             dist = res[0] / 1000.0
                                         }
-
                                         val displayName = obj.getString("display_name")
                                         val parts = displayName.split(",", limit = 2)
                                         val placeName = parts.getOrNull(0)?.trim() ?: "Lugar"
@@ -507,10 +507,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             searchQuery = place.name
                             val p = GeoPoint(place.lat, place.lon)
                             selectedDestination = p
-                            
+
                             isFollowingLocation = false
                             autoCenterJob?.cancel()
-
                             mapView.controller.animateTo(p)
                             mapView.overlays.removeAll { it is Marker && it.id == "DEST" }
                             val m = Marker(mapView).apply { position = p; id = "DEST"; icon = BitmapDrawable(context.resources, drawCustomPin(uiColor)); setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) }
@@ -519,7 +518,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             searchResults = emptyList()
                             showFavorites = false
                         }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            
+
                             val icon = when (place.iconType) {
                                 "Home" -> Icons.Default.Home
                                 "Work" -> Icons.Default.Work
@@ -529,14 +528,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             }
                             Icon(icon, null, tint = Color(uiColor), modifier = Modifier.size(28.dp))
                             Spacer(modifier = Modifier.width(12.dp))
-                            
+
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(place.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (place.address.isNotEmpty()) {
                                     Text(place.address, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
-
                             if (place.distanceKm > 0.0) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(String.format("%.1f km", place.distanceKm), fontWeight = FontWeight.Bold, color = Color(uiColor), fontSize = 14.sp)
@@ -548,9 +546,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        // CONTROLES FLOTANTES (Abajo Derecha)
+        // ==================== CONTROLES FLOTANTES ====================
         Column(modifier = Modifier.align(Alignment.BottomEnd).padding(if (isFullScreen) 32.dp else 16.dp), horizontalAlignment = Alignment.End) {
-            
+
             FloatingActionButton(
                 onClick = { isMapDarkMode = !isMapDarkMode },
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -574,7 +572,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     onClick = {
                         isFollowingLocation = true
                         autoCenterJob?.cancel()
-                        NavigationState.currentLocation.value?.let { 
+                        NavigationState.currentLocation.value?.let {
                             mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
                             if (it.hasBearing()) mapView.mapOrientation = -it.bearing
                         }
@@ -603,7 +601,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
                             mapView.invalidate()
                         },
-                        icon = { Icon(Icons.Default.Close, "Cancelar") }, text = { Text("Cancelar") }, 
+                        icon = { Icon(Icons.Default.Close, "Cancelar") }, text = { Text("Cancelar") },
                         containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError
                     )
 
@@ -628,14 +626,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                 val route = routes.getJSONObject(0)
                                                 val distanceMeters = route.getDouble("distance")
                                                 routeDistanceText = if (distanceMeters > 1000) String.format("%.1f km restantes", distanceMeters / 1000) else "${distanceMeters.toInt()} m restantes"
-
                                                 val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
                                                 currentRoutePoints.clear()
                                                 for (i in 0 until coordinates.length()) {
                                                     val pt = coordinates.getJSONArray(i)
                                                     currentRoutePoints.add(GeoPoint(pt.getDouble(1), pt.getDouble(0)))
                                                 }
-                                                
+
                                                 mapView.overlays.removeAll { it is Polyline }
                                                 val polyline = Polyline(mapView).apply {
                                                     id = "ROUTE_MAIN"
@@ -646,18 +643,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                     outlinePaint.strokeJoin = Paint.Join.ROUND
                                                 }
                                                 mapView.overlays.add(0, polyline)
-                                                isFollowingLocation = true 
+                                                isFollowingLocation = true
                                                 autoCenterJob?.cancel()
                                                 mapView.invalidate()
                                             }
-                                        } catch (e: Exception) { 
+                                        } catch (e: Exception) {
                                             val startGeo = GeoPoint(start.latitude, start.longitude)
                                             val dist = startGeo.distanceToAsDouble(dest)
                                             routeDistanceText = "Ruta Offline: ${String.format("%.1f km (Linea Recta)", dist / 1000)}"
                                             currentRoutePoints.clear()
                                             currentRoutePoints.add(startGeo)
                                             currentRoutePoints.add(dest)
-
                                             mapView.overlays.removeAll { it is Polyline }
                                             val polyline = Polyline(mapView).apply {
                                                 id = "ROUTE_MAIN"
@@ -667,7 +663,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                                 outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
                                             }
                                             mapView.overlays.add(0, polyline)
-                                            isFollowingLocation = true 
+                                            isFollowingLocation = true
                                             autoCenterJob?.cancel()
                                             mapView.invalidate()
                                             Toast.makeText(context, "Sin Internet: Activando Ruta Directa Offline", Toast.LENGTH_LONG).show()
@@ -677,7 +673,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     }
                                 }
                             },
-                            icon = { Icon(Icons.Default.Directions, "Trazar") }, text = { Text("Ir") }, 
+                            icon = { Icon(Icons.Default.Directions, "Trazar") }, text = { Text("Ir") },
                             containerColor = MaterialTheme.colorScheme.tertiary
                         )
                     }
@@ -685,7 +681,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        // DIÁLOGO PARA GUARDAR FAVORITO
+        // ==================== DIÁLOGO GUARDAR FAVORITO ====================
         if (showSaveFavoriteDialog && favoriteLocationToSave != null) {
             AlertDialog(
                 onDismissRequest = { showSaveFavoriteDialog = false },
@@ -719,6 +715,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             )
         }
 
+        // ==================== ALERTA DE LLEGADA ====================
         AnimatedVisibility(
             visible = showArrivalAlert,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -742,7 +739,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             }
         }
-        
+
         LaunchedEffect(showArrivalAlert) {
             if (showArrivalAlert) {
                 delay(4000)
@@ -752,6 +749,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     }
 }
 
+// ==================== FUNCIONES DE DIBUJO ====================
 fun drawCustomPin(color: Int): Bitmap {
     val size = 90
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -761,7 +759,7 @@ fun drawCustomPin(color: Int): Bitmap {
     canvas.drawPath(path, paint)
     paint.color = android.graphics.Color.WHITE
     canvas.drawCircle(45f, 35f, 12f, paint)
-    return bitmap 
+    return bitmap
 }
 
 fun drawVehicleBitmap(type: String, color: Int): Bitmap {
@@ -773,7 +771,6 @@ fun drawVehicleBitmap(type: String, color: Int): Bitmap {
     val lightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.parseColor("#FFF59D"); style = Paint.Style.FILL }
     val scale = 1.2f
     canvas.scale(scale, scale)
-
     when (type) {
         "FLECHA" -> { val path = Path().apply { moveTo(size / 2f / scale, 10f); lineTo((size - 20f) / scale, (size - 15f) / scale); lineTo(size / 2f / scale, (size - 30f) / scale); lineTo(20f / scale, (size - 15f) / scale); close() }; canvas.drawPath(path, bodyPaint) }
         "SEDAN" -> { canvas.drawRoundRect(25f, 10f, 75f, 90f, 15f, 15f, bodyPaint); canvas.drawRoundRect(30f, 30f, 70f, 45f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 65f, 70f, 75f, 5f, 5f, glassPaint); canvas.drawCircle(35f, 15f, 6f, lightPaint); canvas.drawCircle(65f, 15f, 6f, lightPaint) }
