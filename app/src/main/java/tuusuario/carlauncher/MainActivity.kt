@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,7 +47,8 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            var isDarkMode by remember { mutableStateOf(true) }
+            // FIX: Usar rememberSaveable para que no se olvide el tema al rotar
+            var isDarkMode by rememberSaveable { mutableStateOf(true) }
 
             // MAGIA SENSORIAL: "FULL_SENSOR" lee el hardware del teléfono ignorando el candado de Android
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
@@ -68,8 +70,13 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     
-    var locationGranted by remember { mutableStateOf(false) }
-    var notificationsGranted by remember { mutableStateOf(false) }
+    // FIX: Inicializar con el valor REAL para evitar el parpadeo. Si ya está concedido, nace en true.
+    var locationGranted by rememberSaveable { 
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) 
+    }
+    var notificationsGranted by rememberSaveable { 
+        mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) 
+    }
 
     val checkPermissions = {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED

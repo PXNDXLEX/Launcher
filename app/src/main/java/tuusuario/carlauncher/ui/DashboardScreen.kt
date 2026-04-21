@@ -122,8 +122,9 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     
     LaunchedEffect(Unit) { AppSettings.initialize(context) }
 
-    var currentScreen by remember { mutableStateOf("DASHBOARD") } 
-    var showYoutubeInDashboard by remember { mutableStateOf(false) }
+    // FIX: rememberSaveable impide que te saque de la pantalla actual o reinicie YouTube al rotar
+    var currentScreen by rememberSaveable { mutableStateOf("DASHBOARD") } 
+    var showYoutubeInDashboard by rememberSaveable { mutableStateOf(false) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
