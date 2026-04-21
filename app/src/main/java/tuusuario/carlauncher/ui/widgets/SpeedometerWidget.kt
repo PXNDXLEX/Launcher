@@ -99,7 +99,8 @@ fun SpeedometerWidget() {
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         // Aseguramos que el Canvas sea siempre perfectamente cuadrado para evitar achatamientos
-        val boxSize = min(maxWidth, maxHeight) * 0.95f 
+        // AUMENTADO DE 0.95f A 1.20f PARA ELIMINAR EL ESPACIO VACÍO
+        val boxSize = min(maxWidth, maxHeight) * 1.20f 
         
         SpeedometerDraw(
             speed = animatedSpeed, 
