@@ -102,7 +102,6 @@ fun SpeedometerWidget() {
         else -> c3
     }
 
-    // --- CÁLCULO DEL TEMBLOR GENERAL ---
     val isHighSpeed = animatedSpeed >= 50f
     val shakeMult = if (isHighSpeed) ((animatedSpeed - 50f) * 0.08f + 3f) else 0f
     val shakeX = if ((style == "SHONEN" || style == "OMNIMON") && isHighSpeed) (Math.random() * shakeMult * 2 - shakeMult).toFloat() else 0f
@@ -127,7 +126,6 @@ fun SpeedometerWidget() {
                 .offset(x = shakeX.dp, y = shakeY.dp)
         )
 
-        // Textos superpuestos con el mismo temblor
         Box(modifier = Modifier.offset(x = shakeX.dp, y = shakeY.dp)) {
             when (style) {
                 "OMNIMON" -> {
@@ -1059,16 +1057,16 @@ fun SpeedometerDraw(
                         val sliceStart = radarAngleDeg - (sweepWidth * (i.toFloat() / numSlices))
                         val sliceSweep = -(sweepWidth / numSlices)
                         
-                        val paint = android.graphics.Paint().apply {
-                            color = android.graphics.Color.argb(
-                                (90f * (1f - (i.toFloat() / numSlices))).toInt(), 
-                                (activeColor.red*255).toInt(), 
-                                (activeColor.green*255).toInt(), 
-                                (activeColor.blue*255).toInt()
-                            )
-                            setStyle(android.graphics.Paint.Style.FILL)
-                            isAntiAlias = true
-                        }
+                        val paint = android.graphics.Paint()
+                        paint.color = android.graphics.Color.argb(
+                            (90f * (1f - (i.toFloat() / numSlices))).toInt(), 
+                            (activeColor.red*255).toInt(), 
+                            (activeColor.green*255).toInt(), 
+                            (activeColor.blue*255).toInt()
+                        )
+                        paint.style = android.graphics.Paint.Style.FILL
+                        paint.isAntiAlias = true
+                        
                         canvas.nativeCanvas.drawArc(radarRect, sliceStart, sliceSweep, true, paint)
                     }
                 }
