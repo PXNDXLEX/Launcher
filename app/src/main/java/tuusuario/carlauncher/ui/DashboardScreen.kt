@@ -252,7 +252,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Estilo del Tablero") {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU").forEach { type ->
+                                        listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA").forEach { type ->
                                             FilterChip(selected = AppSettings.speedoStyle.value == type, onClick = { AppSettings.saveSpeedoStyle(type) }, label = { Text(type) })
                                         }
                                     }
