@@ -69,49 +69,6 @@ object CustomMapSource {
     }
 }
 
-class SettingsManager(context: Context) {
-    private val prefs = context.getSharedPreferences("CarLauncherSettings", Context.MODE_PRIVATE)
-    
-    var vehicleType: String
-        get() = prefs.getString("vehicleType", "FLECHA") ?: "FLECHA"
-        set(value) = prefs.edit().putString("vehicleType", value).apply()
-        
-    var uiColor: Int
-        get() = prefs.getInt("uiColor", Color(0xFF007AFF).toArgb()) 
-        set(value) = prefs.edit().putInt("uiColor", value).apply()
-
-    var speedoStyle: String
-        get() = prefs.getString("speedoStyle", "AURA") ?: "AURA"
-        set(value) = prefs.edit().putString("speedoStyle", value).apply()
-
-    var speedoColor: Int
-        get() = prefs.getInt("speedoColor", Color(0xFFE91E63).toArgb())
-        set(value) = prefs.edit().putInt("speedoColor", value).apply()
-}
-
-object AppSettings {
-    val vehicleType = mutableStateOf("FLECHA")
-    val uiColor = mutableStateOf(Color(0xFF007AFF).toArgb())
-    val speedoStyle = mutableStateOf("AURA")
-    val speedoColor = mutableStateOf(Color(0xFFE91E63).toArgb())
-    
-    private var settingsManager: SettingsManager? = null
-
-    fun initialize(context: Context) {
-        if (settingsManager == null) {
-            settingsManager = SettingsManager(context)
-            vehicleType.value = settingsManager!!.vehicleType
-            uiColor.value = settingsManager!!.uiColor
-            speedoStyle.value = settingsManager!!.speedoStyle
-            speedoColor.value = settingsManager!!.speedoColor
-        }
-    }
-    fun saveVehicleType(type: String) { vehicleType.value = type; settingsManager?.vehicleType = type }
-    fun saveUiColor(color: Int) { uiColor.value = color; settingsManager?.uiColor = color }
-    fun saveSpeedoStyle(style: String) { speedoStyle.value = style; settingsManager?.speedoStyle = style }
-    fun saveSpeedoColor(color: Int) { speedoColor.value = color; settingsManager?.speedoColor = color }
-}
-
 @Composable
 fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var currentTime by remember { mutableStateOf("") }
@@ -120,7 +77,8 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     
-    LaunchedEffect(Unit) { AppSettings.initialize(context) }
+    // Leemos el color activo directamente del AppSettings global
+    val activeUiColor = Color(AppSettings.uiColor.value)
 
     // FIX: rememberSaveable impide que te saque de la pantalla actual o reinicie YouTube al rotar
     var currentScreen by rememberSaveable { mutableStateOf("DASHBOARD") } 
@@ -128,7 +86,6 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
-    val activeUiColor = Color(AppSettings.uiColor.value)
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -202,6 +159,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PremiumSettingsDialog(onDismiss: () -> Unit) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -231,12 +189,38 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                         0 -> 
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Color de Interfaz y Mapas") {
-                                    ColorPicker(selectedColor = AppSettings.uiColor.value, onColorSelected = { AppSettings.saveUiColor(it) })
+                                    ColorPicker(selectedColor = AppSettings.uiColor.value, onColorSelected = { AppSettings.setUiColor(it) })
                                 }
                                 SettingsSection("Ícono del Vehículo") {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        listOf("FLECHA", "SEDAN", "HATCHBACK").forEach { type ->
-                                            FilterChip(selected = AppSettings.vehicleType.value == type, onClick = { AppSettings.saveVehicleType(type) }, label = { Text(type) })
+                                    var expandedVehicle by remember { mutableStateOf(false) }
+                                    val vehicleOptions = listOf("FLECHA", "SEDAN", "HATCHBACK")
+                                    
+                                    ExposedDropdownMenuBox(
+                                        expanded = expandedVehicle,
+                                        onExpandedChange = { expandedVehicle = !expandedVehicle }
+                                    ) {
+                                        OutlinedTextField(
+                                            value = AppSettings.vehicleType.value,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text("Selecciona tu vehículo") },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedVehicle) },
+                                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = expandedVehicle,
+                                            onDismissRequest = { expandedVehicle = false }
+                                        ) {
+                                            vehicleOptions.forEach { selectionOption ->
+                                                DropdownMenuItem(
+                                                    text = { Text(selectionOption) },
+                                                    onClick = {
+                                                        AppSettings.setVehicleType(selectionOption)
+                                                        expandedVehicle = false
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -244,21 +228,47 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                     Button(
                                         onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
-                                    ) { Text("Quitar Limite de Batería (Música en 2do Plano)") }
+                                    ) { Text("Quitar Límite de Batería (Música en 2do Plano)") }
                                 }
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
                         1 -> 
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Estilo del Tablero") {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA").forEach { type ->
-                                            FilterChip(selected = AppSettings.speedoStyle.value == type, onClick = { AppSettings.saveSpeedoStyle(type) }, label = { Text(type) })
+                                    var expandedSpeedo by remember { mutableStateOf(false) }
+                                    val speedoOptions = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA")
+                                    
+                                    ExposedDropdownMenuBox(
+                                        expanded = expandedSpeedo,
+                                        onExpandedChange = { expandedSpeedo = !expandedSpeedo }
+                                    ) {
+                                        OutlinedTextField(
+                                            value = AppSettings.speedoStyle.value,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text("Diseño del Velocímetro") },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedSpeedo) },
+                                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = expandedSpeedo,
+                                            onDismissRequest = { expandedSpeedo = false }
+                                        ) {
+                                            speedoOptions.forEach { selectionOption ->
+                                                DropdownMenuItem(
+                                                    text = { Text(selectionOption) },
+                                                    onClick = {
+                                                        AppSettings.setSpeedoStyle(selectionOption)
+                                                        expandedSpeedo = false
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
                                 SettingsSection("Color de Retroiluminación (Independiente)") {
-                                    ColorPicker(selectedColor = AppSettings.speedoColor.value, onColorSelected = { AppSettings.saveSpeedoColor(it) })
+                                    ColorPicker(selectedColor = AppSettings.speedoColor.value, onColorSelected = { AppSettings.setSpeedoColor(it) })
                                 }
                                 Spacer(modifier = Modifier.height(20.dp))
                             }

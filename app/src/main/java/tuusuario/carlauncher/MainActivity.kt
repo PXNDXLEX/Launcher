@@ -28,6 +28,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.tuusuario.carlauncher.ui.DashboardScreen
+import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.services.MusicNotificationService
 
 class MainActivity : ComponentActivity() {
@@ -46,9 +47,12 @@ class MainActivity : ComponentActivity() {
             MusicNotificationService.reconnect(this)
         }
 
+        // ¡AQUÍ ESTÁ LA MAGIA! Iniciamos la base de datos permanente antes de arrancar la interfaz
+        AppSettings.init(this)
+
         setContent {
-            // FIX: Usar rememberSaveable para que no se olvide el tema al rotar
-            var isDarkMode by rememberSaveable { mutableStateOf(true) }
+            // Ahora leemos el estado directamente de nuestro AppSettings permanente
+            val isDarkMode by AppSettings.isDarkMode
 
             // MAGIA SENSORIAL: "FULL_SENSOR" lee el hardware del teléfono ignorando el candado de Android
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
@@ -57,7 +61,8 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     MainAppFlow(
                         isDarkMode = isDarkMode,
-                        onToggleTheme = { isDarkMode = !isDarkMode }
+                        // Al hacer clic, guardamos la configuración para siempre
+                        onToggleTheme = { AppSettings.setDarkMode(!isDarkMode) }
                     )
                 }
             }
