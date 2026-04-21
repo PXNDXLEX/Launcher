@@ -137,6 +137,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var showFavorites by remember { mutableStateOf(false) }
     var isSearching by remember { mutableStateOf(false) }
 
+    // === NUEVO: Umbral para evitar que el cursor se vuelva loco cuando estás parado ===
+    val MIN_SPEED_KMH_FOR_BEARING = 5f
+
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
     DisposableEffect(lifecycleOwner) {
@@ -153,8 +156,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
-            .setMinUpdateIntervalMillis(250)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 250)  // ya era rápido, lo dejamos en 250 ms
+            .setMinUpdateIntervalMillis(200)
             .setMinUpdateDistanceMeters(0f)
             .build()
 
@@ -166,6 +169,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 NavigationState.currentLocation.value = loc
                 val speedKmH = loc.speed * 3.6f
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = speedKmH
+
+                // Solo consideramos bearing válido si vas a 5 km/h o más
+                val hasValidBearing = loc.hasBearing() && speedKmH >= MIN_SPEED_KMH_FOR_BEARING
                 val isStationary = speedKmH < 3f
 
                 if (carMarker == null) {
@@ -174,7 +180,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         isFlat = true
                         position = newGeo
-                        rotation = if (loc.hasBearing() && !isStationary) {
+                        rotation = if (hasValidBearing) {
                             loc.bearing - mapView.mapOrientation
                         } else 0f
                     }
@@ -182,7 +188,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                     if (isFollowingLocation) {
                         mapView.controller.setCenter(newGeo)
-                        if (loc.hasBearing() && !isStationary) {
+                        if (hasValidBearing) {
                             mapView.mapOrientation = -loc.bearing
                             currentMapRotation = -loc.bearing
                         }
@@ -192,17 +198,20 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val startGeo = carMarker!!.position
                     val startRot = carMarker!!.rotation
 
-                    val gpsBearing = if (loc.hasBearing() && !isStationary) loc.bearing else startRot
+                    val gpsBearing = if (hasValidBearing) loc.bearing else startRot
 
-                    // CORRECCIÓN PRINCIPAL: Compensar la rotación del mapa
+                    // === CORRECCIÓN PRINCIPAL (ya estaba) + nueva lógica de velocidad ===
                     val targetMarkerRot = gpsBearing - mapView.mapOrientation
 
                     var deltaRot = targetMarkerRot - startRot
                     while (deltaRot > 180) deltaRot -= 360
                     while (deltaRot < -180) deltaRot += 360
 
+                    // === ANIMACIÓN MÁS RÁPIDA Y FLUIDA (300 ms en vez de 500) ===
+                    val animDuration = if (speedKmH > 30) 200L else 300L
+
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                        duration = 500
+                        duration = animDuration
                         interpolator = LinearInterpolator()
 
                         val startLat = startGeo.latitude
@@ -220,8 +229,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
-                                mapView.mapOrientation = -gpsBearing
-                                currentMapRotation = -gpsBearing
+                                if (hasValidBearing) {
+                                    mapView.mapOrientation = -gpsBearing
+                                    currentMapRotation = -gpsBearing
+                                }
                             }
                             mapView.invalidate()
                         }
@@ -416,7 +427,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         )
 
-        // ==================== BARRA DE BÚSQUEDA Y FAVORITOS ====================
+        // BARRA DE BÚSQUEDA Y FAVORITOS (sin cambios)
         Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(horizontal = 8.dp)) {
                 IconButton(onClick = {
@@ -546,7 +557,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        // ==================== CONTROLES FLOTANTES ====================
+        // CONTROLES FLOTANTES (sin cambios)
         Column(modifier = Modifier.align(Alignment.BottomEnd).padding(if (isFullScreen) 32.dp else 16.dp), horizontalAlignment = Alignment.End) {
 
             FloatingActionButton(
@@ -681,7 +692,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        // ==================== DIÁLOGO GUARDAR FAVORITO ====================
         if (showSaveFavoriteDialog && favoriteLocationToSave != null) {
             AlertDialog(
                 onDismissRequest = { showSaveFavoriteDialog = false },
@@ -715,7 +725,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             )
         }
 
-        // ==================== ALERTA DE LLEGADA ====================
         AnimatedVisibility(
             visible = showArrivalAlert,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -749,7 +758,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     }
 }
 
-// ==================== FUNCIONES DE DIBUJO ====================
 fun drawCustomPin(color: Int): Bitmap {
     val size = 90
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
