@@ -516,7 +516,7 @@ fun SpeedometerDraw(
                         
                         if (isLit && isLight) {
                             val strokePaint = android.graphics.Paint(paint).apply {
-                                style = android.graphics.Paint.Style.STROKE
+                                setStyle(android.graphics.Paint.Style.STROKE)
                                 strokeWidth = radius * 0.01f
                                 color = android.graphics.Color.argb((activeColor.alpha*255).toInt(), (activeColor.red*255).toInt(), (activeColor.green*255).toInt(), (activeColor.blue*255).toInt())
                             }
@@ -1057,16 +1057,16 @@ fun SpeedometerDraw(
                         val sliceStart = radarAngleDeg - (sweepWidth * (i.toFloat() / numSlices))
                         val sliceSweep = -(sweepWidth / numSlices)
                         
-                        val paint = android.graphics.Paint()
-                        paint.color = android.graphics.Color.argb(
-                            (90f * (1f - (i.toFloat() / numSlices))).toInt(), 
-                            (activeColor.red*255).toInt(), 
-                            (activeColor.green*255).toInt(), 
-                            (activeColor.blue*255).toInt()
-                        )
-                        paint.style = android.graphics.Paint.Style.FILL
-                        paint.isAntiAlias = true
-                        
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb(
+                                (90f * (1f - (i.toFloat() / numSlices))).toInt(), 
+                                (activeColor.red*255).toInt(), 
+                                (activeColor.green*255).toInt(), 
+                                (activeColor.blue*255).toInt()
+                            )
+                            setStyle(android.graphics.Paint.Style.FILL)
+                            isAntiAlias = true
+                        }
                         canvas.nativeCanvas.drawArc(radarRect, sliceStart, sliceSweep, true, paint)
                     }
                 }
