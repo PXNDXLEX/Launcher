@@ -261,8 +261,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             hasInitializedPosition = true
                         }
                         if (loc.hasBearing() && !isStationary) {
-                            mapView.mapOrientation = -loc.bearing
-                            currentMapRotation = -loc.bearing
+                            // CORRECCIÓN MATEMÁTICA: Usar 360f - loc.bearing para que apunte hacia adelante
+                            val newOrientation = 360f - loc.bearing
+                            mapView.mapOrientation = newOrientation
+                            currentMapRotation = newOrientation
                         }
                     }
                 } else {
@@ -302,8 +304,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
-                                mapView.mapOrientation = -interpolatedRot 
-                                currentMapRotation = -interpolatedRot
+                                // CORRECCIÓN MATEMÁTICA AQUÍ TAMBIÉN
+                                val newMapRot = 360f - interpolatedRot
+                                mapView.mapOrientation = newMapRot 
+                                currentMapRotation = newMapRot
                             }
                             mapView.invalidate()
                         }
@@ -403,7 +407,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     isFollowingLocation = true
                                     NavigationState.currentLocation.value?.let {
                                         controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        if (it.hasBearing()) mapOrientation = -it.bearing
+                                        if (it.hasBearing()) mapOrientation = 360f - it.bearing
                                     }
                                 }
                             }
@@ -423,7 +427,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     isFollowingLocation = true
                                     NavigationState.currentLocation.value?.let {
                                         controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        if (it.hasBearing()) mapOrientation = -it.bearing
+                                        if (it.hasBearing()) mapOrientation = 360f - it.bearing
                                     }
                                     autoCenterJob = null
                                 }
@@ -438,7 +442,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 isFollowingLocation = true
                                 NavigationState.currentLocation.value?.let {
                                     controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                    if (it.hasBearing()) mapOrientation = -it.bearing
+                                    if (it.hasBearing()) mapOrientation = 360f - it.bearing
                                 }
                             }
                             return false
@@ -670,7 +674,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         autoCenterJob?.cancel()
                         NavigationState.currentLocation.value?.let { 
                             mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                            if (it.hasBearing()) mapView.mapOrientation = -it.bearing
+                            if (it.hasBearing()) mapView.mapOrientation = 360f - it.bearing
                         }
                     },
                     icon = { Icon(Icons.Default.MyLocation, "Centrar") },
