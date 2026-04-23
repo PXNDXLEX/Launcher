@@ -1007,4 +1007,3 @@ fun drawVehicleBitmap(type: String, color: Int): Bitmap {
     }
     return bitmap
 }
-}
