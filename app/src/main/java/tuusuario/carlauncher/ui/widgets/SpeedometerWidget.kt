@@ -1003,11 +1003,11 @@ fun SpeedometerDraw(
                         }
                         
                         if (isLit && isLight) {
-                            val strokePaint = android.graphics.Paint(paint).apply {
-                                style = android.graphics.Paint.Style.STROKE
-                                strokeWidth = radius * 0.01f
-                                color = android.graphics.Color.argb((activeColor.alpha*255).toInt(), (activeColor.red*255).toInt(), (activeColor.green*255).toInt(), (activeColor.blue*255).toInt())
-                            }
+                            val strokePaint = android.graphics.Paint(paint)
+                            strokePaint.style = android.graphics.Paint.Style.STROKE
+                            strokePaint.strokeWidth = radius * 0.01f
+                            strokePaint.color = android.graphics.Color.argb((activeColor.alpha*255).toInt(), (activeColor.red*255).toInt(), (activeColor.green*255).toInt(), (activeColor.blue*255).toInt())
+                            
                             canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + (radius * 0.03f), strokePaint)
                         }
                         canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + (radius * 0.03f), paint) 
@@ -1147,6 +1147,419 @@ fun SpeedometerDraw(
                             typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                         }
                         canvas.nativeCanvas.drawText("T-${speedVal}", textX, textY + (radius * 0.03f), paintTick) 
+                    }
+                }
+            }
+
+            "QUANTUM" -> {
+                val sweepAngle = 260f
+                val startAngle = 140f
+                val mainRadius = radius * 0.70f
+                val arcSize = Size(mainRadius * 2, mainRadius * 2)
+                val arcTopLeft = Offset(center.x - mainRadius, center.y - mainRadius)
+
+                val radarAngleDeg = (cumRadar * 57.3f) % 360f
+                val sweepWidth = 35f 
+                val numSlices = 20
+                
+                drawIntoCanvas { canvas ->
+                    val innerArcR = mainRadius - (radius * 0.05f)
+                    val radarRect = android.graphics.RectF(center.x - innerArcR, center.y - innerArcR, center.x + innerArcR, center.y + innerArcR)
+                    
+                    for (i in 0 until numSlices) {
+                        val sliceStart = radarAngleDeg - (sweepWidth * (i.toFloat() / numSlices))
+                        val sliceSweep = -(sweepWidth / numSlices)
+                        
+                        val paint = android.graphics.Paint()
+                        paint.color = android.graphics.Color.argb(
+                            (90f * (1f - (i.toFloat() / numSlices))).toInt(), 
+                            (activeColor.red*255).toInt(), 
+                            (activeColor.green*255).toInt(), 
+                            (activeColor.blue*255).toInt()
+                        )
+                        paint.style = android.graphics.Paint.Style.FILL
+                        paint.isAntiAlias = true
+                        
+                        canvas.nativeCanvas.drawArc(radarRect, sliceStart, sliceSweep, true, paint)
+                    }
+                }
+
+                val waveWidth = radius * 0.5f
+                val waveAmp = (radius * 0.02f) + (spProg * (radius * 0.1f))
+                val waveFreq = 0.05f + (spProg * 0.1f)
+                
+                var prevX = 0f
+                var prevY = 0f
+                for (x in (-waveWidth/2).toInt()..(waveWidth/2).toInt()) {
+                    val yOffset = sin(x * waveFreq + cumWave) * waveAmp
+                    val dampen = 1f - abs(x) / (waveWidth/2f)
+                    val px = center.x + x
+                    val py = center.y + (radius * 0.25f) + (yOffset * dampen).toFloat()
+                    
+                    if (x == (-waveWidth/2).toInt()) {
+                        prevX = px; prevY = py
+                    } else {
+                        drawLine(color = reactiveColor, start = Offset(prevX, prevY), end = Offset(px, py), strokeWidth = radius * 0.015f)
+                        prevX = px; prevY = py
+                    }
+                }
+
+                val numSegments = 50
+                val segStep = sweepAngle / numSegments
+                for (i in 0..numSegments) {
+                    val currentAngle = startAngle + (i * segStep)
+                    val rad = Math.toRadians(currentAngle.toDouble())
+                    val valProgress = (i.toFloat() / numSegments) * maxSpeed
+                    val isLit = speed >= valProgress
+                    
+                    val innerR = mainRadius - if (isLit) (radius * 0.02f) else 0f
+                    val outerR = mainRadius + if (isLit) (radius * 0.06f) else (radius * 0.03f)
+                    
+                    val startX = (center.x + innerR * cos(rad)).toFloat()
+                    val startY = (center.y + innerR * sin(rad)).toFloat()
+                    val endX = (center.x + outerR * cos(rad)).toFloat()
+                    val endY = (center.y + outerR * sin(rad)).toFloat()
+                    
+                    drawLine(color = if (isLit) reactiveColor else inactiveColor, start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = if (isLit) radius * 0.02f else radius * 0.015f)
+                }
+
+                if (spProg > 0) {
+                    val dotRad = Math.toRadians((startAngle + (sweepAngle * spProg)).toDouble())
+                    val pX = (center.x + (mainRadius + (radius*0.1f)) * cos(dotRad)).toFloat()
+                    val pY = (center.y + (mainRadius + (radius*0.1f)) * sin(dotRad)).toFloat()
+                    drawCircle(color = Color.White, radius = radius * 0.03f, center = Offset(pX, pY))
+                    drawLine(color = reactiveColor, start = Offset((center.x + (mainRadius + (radius*0.02f)) * cos(dotRad)).toFloat(), (center.y + (mainRadius + (radius*0.02f)) * sin(dotRad)).toFloat()), end = Offset(pX, pY), strokeWidth = radius * 0.015f)
+                }
+
+                val numScaleValues = 4
+                val scaleStepAngle = sweepAngle / numScaleValues
+                val textRadius = mainRadius + (radius * 0.22f)
+
+                drawIntoCanvas { canvas ->
+                    for (i in 0..numScaleValues) {
+                        val currentAngle = startAngle + (i * scaleStepAngle)
+                        val angleRad = Math.toRadians(currentAngle.toDouble())
+                        val speedVal = Math.round(i * (maxSpeed / numScaleValues))
+                        val textX = (center.x + textRadius * cos(angleRad)).toFloat()
+                        val textY = (center.y + textRadius * sin(angleRad)).toFloat()
+                        val isLit = speed >= speedVal
+                        val numColor = if (isLit) reactiveColor else (if (isLight) Color(0xFF94A3B8) else Color(0xFF475569))
+
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb((numColor.alpha*255).toInt(), (numColor.red*255).toInt(), (numColor.green*255).toInt(), (numColor.blue*255).toInt())
+                            textSize = radius * 0.12f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                            typeface = android.graphics.Typeface.MONOSPACE
+                        }
+                        canvas.nativeCanvas.drawText(speedVal.toString(), textX, textY + (radius * 0.03f), paint) 
+                    }
+                }
+            }
+
+            "PULSAR" -> {
+                val sweepAngle = 260f
+                val startAngle = 140f
+                val mainRadius = radius * 0.65f
+                val arcSize = Size((mainRadius + (radius*0.15f))*2, (mainRadius + (radius*0.15f))*2)
+                val arcTopLeft = Offset(center.x - mainRadius - (radius*0.15f), center.y - mainRadius - (radius*0.15f))
+
+                val heartbeat = Math.pow(sin(cumPulse).toDouble(), 2.0).toFloat()
+                
+                val orbRadius = (radius * 0.2f) + (spProg * (radius * 0.15f)) + (heartbeat * (radius * 0.05f))
+                val orbGradient = Brush.radialGradient(
+                    colors = listOf(reactiveColor, reactiveColor.copy(alpha = 0.5f), Color.Transparent),
+                    center = center,
+                    radius = orbRadius
+                )
+                drawCircle(brush = orbGradient, radius = orbRadius, center = center)
+
+                val numRipples = 3
+                for (i in 0 until numRipples) {
+                    val rippleR = ((cumTime * (radius * 0.3f)) + (i * (mainRadius / numRipples))) % mainRadius
+                    val rippleAlpha = (1f - (rippleR / mainRadius)).coerceIn(0f, 1f)
+                    drawCircle(color = reactiveColor.copy(alpha = rippleAlpha), radius = rippleR, center = center, style = Stroke(width = radius * 0.015f))
+                }
+
+                val numBars = 60
+                val barStep = sweepAngle / numBars
+                for (i in 0..numBars) {
+                    val currentAngle = startAngle + (i * barStep)
+                    val rad = Math.toRadians(currentAngle.toDouble())
+                    val valProgress = (i.toFloat() / numBars) * maxSpeed
+                    val isLit = speed >= valProgress
+
+                    val barHeight = if (isLit) (radius * 0.08f) + (heartbeat * (radius * 0.04f) * (spProg + 0.2f)) else (radius * 0.03f)
+                    val innerR = mainRadius
+                    val outerR = mainRadius + barHeight
+
+                    val startX = (center.x + innerR * cos(rad)).toFloat()
+                    val startY = (center.y + innerR * sin(rad)).toFloat()
+                    val endX = (center.x + outerR * cos(rad)).toFloat()
+                    val endY = (center.y + outerR * sin(rad)).toFloat()
+                    
+                    drawLine(color = if (isLit) reactiveColor else inactiveColor, start = Offset(startX, startY), end = Offset(endX, endY), strokeWidth = if (isLit) radius * 0.02f else radius * 0.01f, cap = StrokeCap.Butt)
+                }
+
+                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = radius * 0.01f), size = arcSize, topLeft = arcTopLeft)
+                if (spProg > 0) {
+                    drawArc(color = reactiveColor, startAngle = startAngle, sweepAngle = sweepAngle * spProg, useCenter = false, style = Stroke(width = radius * 0.02f), size = arcSize, topLeft = arcTopLeft)
+                    val dotRad = Math.toRadians((startAngle + sweepAngle * spProg).toDouble())
+                    drawCircle(color = Color.White, radius = radius * 0.025f, center = Offset((center.x + (mainRadius + (radius*0.15f)) * cos(dotRad)).toFloat(), (center.y + (mainRadius + (radius*0.15f)) * sin(dotRad)).toFloat()))
+                }
+
+                drawIntoCanvas { canvas ->
+                    for (i in 0..5) {
+                        val angleRad = Math.toRadians((startAngle + (i * (sweepAngle / 5))).toDouble())
+                        val valSpd = Math.round(i * (maxSpeed / 5))
+                        val textX = (center.x + (mainRadius + (radius * 0.25f)) * cos(angleRad)).toFloat()
+                        val textY = (center.y + (mainRadius + (radius * 0.25f)) * sin(angleRad)).toFloat()
+                        val isLit = speed >= valSpd
+                        val numColor = if (isLit) reactiveColor else (if (isLight) Color(0xFF94A3B8) else Color(0xFF475569))
+
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb((numColor.alpha*255).toInt(), (numColor.red*255).toInt(), (numColor.green*255).toInt(), (numColor.blue*255).toInt())
+                            textSize = radius * 0.11f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+                        canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY + (radius * 0.03f), paint) 
+                    }
+                }
+            }
+
+            "PLASMA" -> {
+                val sweepAngle = 260f
+                val startAngle = 140f
+                val mainRadius = radius * 0.65f
+
+                val coreRadius = (radius * 0.12f) + (spProg * (radius * 0.08f)) + (sin(cumTime * 15f) * (radius * 0.02f))
+                val coreGrad = Brush.radialGradient(
+                    colors = listOf(Color.White, reactiveColor, Color.Transparent),
+                    center = center,
+                    radius = coreRadius * 1.5f
+                )
+                drawCircle(brush = coreGrad, radius = coreRadius * 1.5f, center = center)
+
+                val numBolts = (6f + spProg * 14f).toInt()
+                for (i in 0 until numBolts) {
+                    val baseAngle = (i * Math.PI * 2) / numBolts + cumTime * (0.3f + spProg * 0.5f)
+                    var currentX = center.x
+                    var currentY = center.y
+                    val steps = 5
+                    
+                    for (j in 1..steps) {
+                        val r = (mainRadius * j) / steps
+                        val wobble = sin(cumTime * (20f + spProg * 40f) + i * 13f + j * 4f) * 0.5f
+                        val a = baseAngle + wobble
+                        val nextX = (center.x + r * cos(a)).toFloat()
+                        val nextY = (center.y + r * sin(a)).toFloat()
+                        
+                        drawLine(color = reactiveColor, start = Offset(currentX, currentY), end = Offset(nextX, nextY), strokeWidth = (radius * 0.01f) + (Math.random()*(radius * 0.01f)).toFloat())
+                        currentX = nextX
+                        currentY = nextY
+                    }
+                    drawCircle(color = Color.White, radius = (radius * 0.01f) + (Math.random()*(radius * 0.01f)).toFloat(), center = Offset(currentX, currentY))
+                }
+
+                drawCircle(color = reactiveColor.copy(alpha = 0.25f), radius = mainRadius, center = center, style = Stroke(width = (radius * 0.02f) + sin(cumTime * 10f) * (radius * 0.01f)))
+
+                val trackRadius = mainRadius + (radius * 0.1f)
+                val trackSize = Size(trackRadius*2, trackRadius*2)
+                val trackTopLeft = Offset(center.x - trackRadius, center.y - trackRadius)
+
+                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = radius * 0.02f, cap = StrokeCap.Round), size = trackSize, topLeft = trackTopLeft)
+                
+                if (spProg > 0) {
+                    drawArc(color = reactiveColor, startAngle = startAngle, sweepAngle = sweepAngle * spProg, useCenter = false, style = Stroke(width = radius * 0.03f, cap = StrokeCap.Round), size = trackSize, topLeft = trackTopLeft)
+                    val pRad = Math.toRadians((startAngle + sweepAngle * spProg).toDouble())
+                    drawCircle(color = Color.White, radius = radius * 0.035f, center = Offset((center.x + trackRadius * cos(pRad)).toFloat(), (center.y + trackRadius * sin(pRad)).toFloat()))
+                }
+
+                drawIntoCanvas { canvas ->
+                    for (i in 0..5) {
+                        val angleRad = Math.toRadians((startAngle + (i * (sweepAngle / 5))).toDouble())
+                        val valSpd = Math.round(i * (maxSpeed / 5))
+                        val textX = (center.x + (trackRadius + (radius * 0.15f)) * cos(angleRad)).toFloat()
+                        val textY = (center.y + (trackRadius + (radius * 0.15f)) * sin(angleRad)).toFloat()
+                        val isLit = speed >= valSpd
+                        val numColor = if (isLit) reactiveColor else (if (isLight) Color(0xFF94A3B8) else Color(0xFF475569))
+
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb((numColor.alpha*255).toInt(), (numColor.red*255).toInt(), (numColor.green*255).toInt(), (numColor.blue*255).toInt())
+                            textSize = radius * 0.12f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+                        canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY + (radius * 0.03f), paint) 
+                    }
+                }
+            }
+
+            "ANIME" -> {
+                val sweepAngle = 240f
+                val startAngle = 150f
+                val mainRadius = radius * 0.70f
+                val arcSize = Size(mainRadius*2, mainRadius*2)
+                val arcTopLeft = Offset(center.x - mainRadius, center.y - mainRadius)
+
+                if (spProg > 0.05f) {
+                    val numLines = (50f + (spProg * 50f)).toInt()
+                    for (i in 0 until numLines) {
+                        val angle = (i * Math.PI * 2) / numLines + (cumWarp * 1.5f)
+                        val noise = sin(cumTime * 50f + i * 11f) * 0.5f + 0.5f
+                        val innerR = mainRadius * 0.4f + (noise * (radius * 0.1f))
+                        val outerR = mainRadius * 0.85f + (spProg * (radius * 0.15f) * noise)
+                        
+                        drawLine(
+                            color = reactiveColor.copy(alpha = (0.1f + (spProg * 0.4f)) * noise),
+                            start = Offset((center.x + innerR * cos(angle)).toFloat(), (center.y + innerR * sin(angle)).toFloat()),
+                            end = Offset((center.x + outerR * cos(angle)).toFloat(), (center.y + outerR * sin(angle)).toFloat()),
+                            strokeWidth = (radius * 0.005f) + (noise * (radius * 0.01f))
+                        )
+                    }
+                }
+
+                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = radius * 0.02f, cap = StrokeCap.Butt), size = arcSize, topLeft = arcTopLeft)
+
+                if (spProg > 0) {
+                    drawArc(color = reactiveColor, startAngle = startAngle, sweepAngle = sweepAngle * spProg, useCenter = false, style = Stroke(width = radius * 0.04f, cap = StrokeCap.Butt), size = arcSize, topLeft = arcTopLeft)
+                    
+                    val ptrRad = Math.toRadians((startAngle + sweepAngle * spProg).toDouble())
+                    val ptrX = (center.x + mainRadius * cos(ptrRad)).toFloat()
+                    val ptrY = (center.y + mainRadius * sin(ptrRad)).toFloat()
+                    
+                    val katanaPath = Path().apply {
+                        moveTo(0f, -(radius * 0.05f))
+                        lineTo(radius * 0.04f, radius * 0.08f)
+                        lineTo(0f, radius * 0.02f)
+                        lineTo(-(radius * 0.04f), radius * 0.08f)
+                        close()
+                    }
+                    
+                    withTransform({
+                        translate(left = ptrX, top = ptrY)
+                        rotate(degrees = (Math.toDegrees(ptrRad) + 90).toFloat())
+                    }) {
+                        drawPath(path = katanaPath, color = Color.White)
+                        drawLine(color = reactiveColor, start = Offset(0f, -(radius * 0.05f)), end = Offset(0f, radius * 0.02f), strokeWidth = radius * 0.01f)
+                    }
+                }
+
+                val numSegs = 10
+                for (i in 0..numSegs) {
+                    val rad = Math.toRadians((startAngle + (i * (sweepAngle/numSegs))).toDouble())
+                    val valSpd = (i.toFloat() / numSegs) * maxSpeed
+                    val isLit = speed >= valSpd
+                    drawLine(
+                        color = if (isLit) Color.White else inactiveColor,
+                        start = Offset((center.x + (mainRadius - (radius * 0.08f)) * cos(rad)).toFloat(), (center.y + (mainRadius - (radius * 0.08f)) * sin(rad)).toFloat()),
+                        end = Offset((center.x + (mainRadius - (radius * 0.02f)) * cos(rad)).toFloat(), (center.y + (mainRadius - (radius * 0.02f)) * sin(rad)).toFloat()),
+                        strokeWidth = radius * 0.03f
+                    )
+                }
+
+                drawIntoCanvas { canvas ->
+                    for (i in 0..5) {
+                        val angleRad = Math.toRadians((startAngle + (i * (sweepAngle / 5))).toDouble())
+                        val valSpd = Math.round(i * (maxSpeed / 5))
+                        val textX = (center.x + (mainRadius + (radius * 0.15f)) * cos(angleRad)).toFloat()
+                        val textY = (center.y + (mainRadius + (radius * 0.15f)) * sin(angleRad)).toFloat()
+                        val isLit = speed >= valSpd
+                        val numColor = if (isLit) reactiveColor else (if (isLight) Color(0xFF94A3B8) else Color(0xFF475569))
+
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb((numColor.alpha*255).toInt(), (numColor.red*255).toInt(), (numColor.green*255).toInt(), (numColor.blue*255).toInt())
+                            textSize = radius * 0.12f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
+                        }
+                        canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY + (radius * 0.03f), paint) 
+                    }
+                }
+            }
+
+            "KAIJU" -> {
+                val sweepAngle = 200f
+                val startAngle = 170f
+                val mainRadius = radius * 0.60f
+
+                val coreNoise = sin(cumTime * 30f) * (radius * 0.03f)
+                val atomicRad = (radius * 0.18f) + (spProg * (radius * 0.1f)) + coreNoise
+                val coreGrad = Brush.radialGradient(
+                    colors = listOf(Color.White, reactiveColor, Color.Transparent),
+                    center = center,
+                    radius = atomicRad
+                )
+                drawCircle(brush = coreGrad, radius = atomicRad, center = center)
+
+                val numPlates = 15
+                val plateStep = sweepAngle / numPlates
+                
+                for (i in 0..numPlates) {
+                    val angle = startAngle + (i * plateStep)
+                    val rad = Math.toRadians(angle.toDouble())
+                    val valSpd = (i.toFloat() / numPlates) * maxSpeed
+                    val isLit = speed >= valSpd
+
+                    val midDist = 1f - abs((i.toFloat() / numPlates) - 0.5f) * 2f 
+                    val basePlateHeight = (radius * 0.08f) + (midDist * (radius * 0.12f))
+                    val activePlateHeight = basePlateHeight + (if (isLit) (Math.random() * (radius * 0.04f)).toFloat() else 0f)
+
+                    val innerR = mainRadius
+                    val outerR = mainRadius + activePlateHeight
+
+                    val radL = Math.toRadians((angle - 3f).toDouble())
+                    val radR = Math.toRadians((angle + 3f).toDouble())
+
+                    val platePath = Path().apply {
+                        moveTo((center.x + innerR * cos(radL)).toFloat(), (center.y + innerR * sin(radL)).toFloat())
+                        lineTo((center.x + outerR * cos(rad)).toFloat(), (center.y + outerR * sin(rad)).toFloat())
+                        lineTo((center.x + innerR * cos(radR)).toFloat(), (center.y + innerR * sin(radR)).toFloat())
+                        close()
+                    }
+
+                    if (isLit) {
+                        drawPath(path = platePath, color = reactiveColor)
+                        drawPath(path = platePath, color = Color.White, style = Stroke(width = radius * 0.005f))
+                    } else {
+                        drawPath(path = platePath, color = inactiveColor)
+                        drawPath(path = platePath, color = if (isLight) Color.Black.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.1f), style = Stroke(width = radius * 0.005f))
+                    }
+                }
+
+                val trackRadius = mainRadius - (radius * 0.03f)
+                val trackSize = Size(trackRadius*2, trackRadius*2)
+                val trackTopLeft = Offset(center.x - trackRadius, center.y - trackRadius)
+
+                drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = radius * 0.03f, cap = StrokeCap.Round), size = trackSize, topLeft = trackTopLeft)
+                if (spProg > 0) {
+                    drawArc(color = reactiveColor, startAngle = startAngle, sweepAngle = sweepAngle * spProg, useCenter = false, style = Stroke(width = radius * 0.02f), size = trackSize, topLeft = trackTopLeft)
+                }
+
+                drawIntoCanvas { canvas ->
+                    for (i in 0..5) {
+                        val angleRad = Math.toRadians((startAngle + (i * (sweepAngle / 5))).toDouble())
+                        val valSpd = Math.round(i * (maxSpeed / 5))
+                        
+                        val textRadPos = mainRadius + (radius * 0.15f) + ( (1f - abs((i.toFloat() / 5f) - 0.5f) * 2f) * (radius * 0.12f) )
+                        val textX = (center.x + textRadPos * cos(angleRad)).toFloat()
+                        val textY = (center.y + textRadPos * sin(angleRad)).toFloat()
+                        
+                        val isLit = speed >= valSpd
+                        val numColor = if (isLit) reactiveColor else (if (isLight) Color(0xFF94A3B8) else Color(0xFF475569))
+
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb((numColor.alpha*255).toInt(), (numColor.red*255).toInt(), (numColor.green*255).toInt(), (numColor.blue*255).toInt())
+                            textSize = radius * 0.12f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                            typeface = android.graphics.Typeface.create("impact", android.graphics.Typeface.BOLD)
+                        }
+                        canvas.nativeCanvas.drawText(valSpd.toString(), textX, textY + (radius * 0.04f), paint) 
                     }
                 }
             }
