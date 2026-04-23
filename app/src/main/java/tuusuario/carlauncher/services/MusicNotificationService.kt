@@ -24,6 +24,9 @@ object GlobalState {
     val isPlaying = mutableStateOf(false)
     var mediaController: MediaController? = null
     
+    val songDuration = mutableStateOf(0L)   // duración total en ms
+    val songPosition = mutableStateOf(0L)   // posición actual en ms
+    
     val showPopup = mutableStateOf(false)
     val popupMessage = mutableStateOf("")
     val popupApp = mutableStateOf("")
@@ -33,6 +36,7 @@ object GlobalState {
     }
     fun skipToNext() { mediaController?.transportControls?.skipToNext() }
     fun skipToPrevious() { mediaController?.transportControls?.skipToPrevious() }
+    fun seekTo(positionMs: Long) { mediaController?.transportControls?.seekTo(positionMs) }
 }
 
 class MusicNotificationService : NotificationListenerService() {
@@ -77,6 +81,13 @@ class MusicNotificationService : NotificationListenerService() {
                     GlobalState.mediaController = controller
                     val state = controller.playbackState
                     GlobalState.isPlaying.value = state?.state == PlaybackState.STATE_PLAYING
+                    
+                    // Extraer posición actual y duración
+                    state?.let { GlobalState.songPosition.value = it.position }
+                    controller.metadata?.let { meta ->
+                        val dur = meta.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION)
+                        if (dur > 0) GlobalState.songDuration.value = dur
+                    }
                 }
 
                 val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "Sin título"

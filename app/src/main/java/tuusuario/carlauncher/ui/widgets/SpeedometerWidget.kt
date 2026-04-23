@@ -3,6 +3,7 @@ package com.tuusuario.carlauncher.ui.widgets
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Looper
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -259,6 +260,29 @@ fun SpeedometerDraw(
     val customShape = AppSettings.customSpeedoShape.value
     val customNeedle = AppSettings.customSpeedoNeedle.value
     val customThickness = AppSettings.customSpeedoThickness.value
+    val customBgUri = AppSettings.customSpeedoBgUri.value
+    val customBgOpacity = AppSettings.customSpeedoBgOpacity.value
+    
+    val context = LocalContext.current
+
+    var customBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(customBgUri) {
+        if (customBgUri.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val uri = Uri.parse(customBgUri)
+                    val stream = context.contentResolver.openInputStream(uri)
+                    customBgBitmap = stream?.let { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+                    stream?.close()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    customBgBitmap = null
+                }
+            }
+        } else {
+            customBgBitmap = null
+        }
+    }
 
     var omnimonBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(Unit) {
@@ -326,6 +350,17 @@ fun SpeedometerDraw(
         
         when (style) {
             "CUSTOM" -> {
+                // Dibujar imagen de fondo si existe
+                customBgBitmap?.let { bitmap ->
+                    val imgSize = radius * 2f
+                    drawImage(
+                        image = bitmap,
+                        dstOffset = IntOffset((center.x - radius).toInt(), (center.y - radius).toInt()),
+                        dstSize = IntSize((imgSize).toInt(), (imgSize).toInt()),
+                        alpha = customBgOpacity
+                    )
+                }
+                
                 val sweepAngle = 240f
                 val startAngle = 150f
                 val trackRadius = radius * 0.85f

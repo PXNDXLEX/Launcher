@@ -254,9 +254,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     carMarker = Marker(mapView).apply {
                         icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        isFlat = true // Permite que gire con el mapa de forma realista
+                        isFlat = true
                         position = newGeo
-                        rotation = targetBearing
+                        rotation = 0f // SIEMPRE apunta hacia arriba; el mapa rota alrededor
                     }
                     mapView.overlays.add(carMarker)
                     
@@ -277,40 +277,38 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     animator?.cancel()
                     val startGeo = carMarker!!.position
                     
-                    var startRot = carMarker!!.rotation % 360f
-                    if (startRot < 0) startRot += 360f
-                    
-                    var deltaRot = targetBearing - startRot
-                    if (deltaRot > 180f) deltaRot -= 360f
-                    if (deltaRot < -180f) deltaRot += 360f
+                    val startLat = startGeo.latitude
+                    val startLon = startGeo.longitude
+                    val deltaLat = newGeo.latitude - startLat
+                    val deltaLon = newGeo.longitude - startLon
+
+                    // Calcular la rotación del mapa suavemente
+                    var startMapRot = currentMapRotation % 360f
+                    if (startMapRot < 0) startMapRot += 360f
+                    val targetMapRot = if (!isStationary && loc.hasBearing()) 360f - targetBearing else startMapRot
+                    var deltaMapRot = targetMapRot - startMapRot
+                    if (deltaMapRot > 180f) deltaMapRot -= 360f
+                    if (deltaMapRot < -180f) deltaMapRot += 360f
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
                         duration = 500 
                         interpolator = LinearInterpolator()
-                        
-                        val startLat = startGeo.latitude
-                        val startLon = startGeo.longitude
-                        val deltaLat = newGeo.latitude - startLat
-                        val deltaLon = newGeo.longitude - startLon
 
                         addUpdateListener { anim ->
                             val fraction = anim.animatedFraction
                             val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
                             
-                            // Mantenemos el resultado matemáticamente estricto
-                            var interpolatedRot = startRot + (deltaRot * fraction)
-                            interpolatedRot %= 360f
-                            if (interpolatedRot < 0) interpolatedRot += 360f
-                            
                             carMarker!!.position = currentPos
-                            carMarker!!.rotation = interpolatedRot
+                            carMarker!!.rotation = 0f // SIEMPRE fijo mirando arriba
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
                                 mapView.setMapCenterOffset(0, mapView.height / 4)
-                                val newMapRot = 360f - interpolatedRot
-                                mapView.mapOrientation = newMapRot 
-                                currentMapRotation = newMapRot
+                                var interpMapRot = startMapRot + (deltaMapRot * fraction)
+                                interpMapRot %= 360f
+                                if (interpMapRot < 0) interpMapRot += 360f
+                                mapView.mapOrientation = interpMapRot
+                                currentMapRotation = interpMapRot
                             }
                             mapView.invalidate()
                         }

@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -51,6 +53,9 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 object NavigationState { 
     val currentSpeedKmH = mutableStateOf(0f) 
@@ -199,8 +204,21 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Configuración del Vehículo", fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            )
+                        )
+                        .padding(16.dp), 
+                    verticalAlignment = Alignment.CenterVertically, 
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Configuración del Launcher", fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
                 }
 
@@ -210,8 +228,21 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                     Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Mapas Offline") })
                 }
 
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(300)) + slideInHorizontally(
+                            initialOffsetX = { if (targetState > initialState) it / 4 else -it / 4 },
+                            animationSpec = tween(300)
+                        ) togetherWith fadeOut(animationSpec = tween(200)) + slideOutHorizontally(
+                            targetOffsetX = { if (targetState > initialState) -it / 4 else it / 4 },
+                            animationSpec = tween(200)
+                        )
+                    },
+                    label = "SettingsTabAnimation"
+                ) { tab ->
                 Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState())) {
-                    when (selectedTab) {
+                    when (tab) {
                         0 -> 
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Color de Interfaz y Mapas") {
@@ -327,6 +358,42 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                                 valueRange = 0.02f..0.15f
                                             )
                                         }
+                                        SettingsSection("Imagen de Fondo") {
+                                            val bgPickerLauncher = rememberLauncherForActivityResult(
+                                                contract = ActivityResultContracts.GetContent()
+                                            ) { uri: Uri? ->
+                                                uri?.let {
+                                                    // Persistir permiso de lectura
+                                                    try {
+                                                        context.contentResolver.takePersistableUriPermission(
+                                                            it, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                        )
+                                                    } catch (_: Exception) {}
+                                                    AppSettings.setCustomSpeedoBgUri(it.toString())
+                                                }
+                                            }
+                                            
+                                            Button(
+                                                onClick = { bgPickerLauncher.launch("image/*") },
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                            ) {
+                                                Icon(Icons.Default.Image, null)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(if (AppSettings.customSpeedoBgUri.value.isNotEmpty()) "Cambiar Imagen" else "Seleccionar Imagen")
+                                            }
+                                            if (AppSettings.customSpeedoBgUri.value.isNotEmpty()) {
+                                                TextButton(onClick = { AppSettings.setCustomSpeedoBgUri("") }) {
+                                                    Text("Quitar Imagen", color = MaterialTheme.colorScheme.error)
+                                                }
+                                            }
+                                        }
+                                        SettingsSection("Opacidad del Fondo") {
+                                            Slider(
+                                                value = AppSettings.customSpeedoBgOpacity.value,
+                                                onValueChange = { AppSettings.setCustomSpeedoBgOpacity(it) },
+                                                valueRange = 0.1f..1.0f
+                                            )
+                                        }
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -334,6 +401,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                         2 -> 
                             OfflineMapDownloader(context, coroutineScope)
                     }
+                }
                 }
             }
         }

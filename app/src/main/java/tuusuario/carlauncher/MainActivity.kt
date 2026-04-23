@@ -111,7 +111,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Configuración de tu Kia Rio", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+            Text("Configuración de Launcher", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(24.dp))
             if (!locationGranted) {
                 Text("1. Necesitamos acceso al GPS para el velocímetro y el mapa.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)

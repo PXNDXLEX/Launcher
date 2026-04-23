@@ -18,6 +18,8 @@ object AppSettings {
     val customSpeedoShape = mutableStateOf("ARC")
     val customSpeedoNeedle = mutableStateOf("PLASMA")
     val customSpeedoThickness = mutableStateOf(0.08f)
+    val customSpeedoBgUri = mutableStateOf("")    // URI de imagen de fondo
+    val customSpeedoBgOpacity = mutableStateOf(0.5f) // opacidad del fondo
 
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
@@ -36,6 +38,8 @@ object AppSettings {
         customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
         customSpeedoNeedle.value = prefs?.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
         customSpeedoThickness.value = prefs?.getFloat("customSpeedoThickness", 0.08f) ?: 0.08f
+        customSpeedoBgUri.value = prefs?.getString("customSpeedoBgUri", "") ?: ""
+        customSpeedoBgOpacity.value = prefs?.getFloat("customSpeedoBgOpacity", 0.5f) ?: 0.5f
         
         isInitialized = true
     }
@@ -84,5 +88,15 @@ object AppSettings {
     fun setCustomSpeedoThickness(thickness: Float) {
         customSpeedoThickness.value = thickness
         prefs?.edit()?.putFloat("customSpeedoThickness", thickness)?.apply()
+    }
+
+    fun setCustomSpeedoBgUri(uri: String) {
+        customSpeedoBgUri.value = uri
+        prefs?.edit()?.putString("customSpeedoBgUri", uri)?.apply()
+    }
+
+    fun setCustomSpeedoBgOpacity(opacity: Float) {
+        customSpeedoBgOpacity.value = opacity
+        prefs?.edit()?.putFloat("customSpeedoBgOpacity", opacity)?.apply()
     }
 }
