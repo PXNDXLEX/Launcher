@@ -31,7 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
 import com.tuusuario.carlauncher.services.DashcamManager
+import com.tuusuario.carlauncher.services.RouteTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,33 +47,69 @@ fun DashcamGalleryScreen() {
     val scope = rememberCoroutineScope()
 
     var videos by remember { mutableStateOf<List<File>>(emptyList()) }
-    var addresses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var loadingAddressFor by remember { mutableStateOf<String?>(null) }
+    // Mapa de videoId → info del .ref.json (coordenada de inicio + fecha/hora)
+    var videoRefs by remember { mutableStateOf<Map<String, VideoRefInfo>>(emptyMap()) }
+    var loadingRouteFor by remember { mutableStateOf<String?>(null) }
 
     // ── Estado de selección ──
     var selectionMode by remember { mutableStateOf(false) }
-    var selectedVideos by remember { mutableStateOf(setOf<String>()) }  // paths seleccionados
+    var selectedVideos by remember { mutableStateOf(setOf<String>()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     fun reloadVideos() {
         val dir = DashcamManager.getVideosDir()
         videos = dir.listFiles { file -> file.extension == "mp4" }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
+
+        // Leer .ref.json de cada video para mostrar info inicial
+        val refs = mutableMapOf<String, VideoRefInfo>()
+        videos.forEach { video ->
+            val videoId = video.nameWithoutExtension.removePrefix("VID_")
+            val refFile = File(DashcamManager.getMetadataDir(), "VID_${videoId}.ref.json")
+            if (refFile.exists()) {
+                try {
+                    val json = JSONObject(refFile.readText())
+                    refs[videoId] = VideoRefInfo(
+                        date = json.optString("date", ""),
+                        startTime = json.optString("startTime", ""),
+                        startLat = if (json.has("startLat")) json.getDouble("startLat") else null,
+                        startLon = if (json.has("startLon")) json.getDouble("startLon") else null
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+        videoRefs = refs
     }
 
     fun deleteFiles(filePaths: Set<String>) {
         filePaths.forEach { path ->
             val videoFile = File(path)
             val videoId = videoFile.nameWithoutExtension.removePrefix("VID_")
-            // Borrar el video
             videoFile.delete()
-            // Borrar el JSON de metadatos asociado
-            val metaFile = File(DashcamManager.getVideosDir(), "Metadata/VID_${videoId}.json")
-            if (metaFile.exists()) metaFile.delete()
+            // Borrar el .ref.json asociado
+            val refFile = File(DashcamManager.getMetadataDir(), "VID_${videoId}.ref.json")
+            if (refFile.exists()) refFile.delete()
+            // Borrar también el JSON legacy si existiera
+            val legacyMeta = File(DashcamManager.getMetadataDir(), "VID_${videoId}.json")
+            if (legacyMeta.exists()) legacyMeta.delete()
         }
         selectedVideos = emptySet()
         selectionMode = false
         reloadVideos()
+    }
+
+    fun shareVideo(video: File) {
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", video)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "video/mp4"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Compartir video via..."))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Error al compartir: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     LaunchedEffect(Unit) { reloadVideos() }
@@ -113,7 +151,6 @@ fun DashcamGalleryScreen() {
 
             Row {
                 if (selectionMode) {
-                    // Seleccionar / deseleccionar todo
                     val allSelected = selectedVideos.size == videos.size && videos.isNotEmpty()
                     TextButton(
                         onClick = {
@@ -126,7 +163,6 @@ fun DashcamGalleryScreen() {
                     ) {
                         Text(if (allSelected) "Ninguno" else "Todos", fontSize = 13.sp)
                     }
-                    // Borrar seleccionados
                     IconButton(
                         onClick = { if (selectedVideos.isNotEmpty()) showDeleteConfirm = true },
                         enabled = selectedVideos.isNotEmpty()
@@ -140,12 +176,10 @@ fun DashcamGalleryScreen() {
                                 MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.3f)
                         )
                     }
-                    // Cancelar selección
                     IconButton(onClick = { selectionMode = false; selectedVideos = emptySet() }) {
                         Icon(Icons.Default.Close, "Cancelar", tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
                 } else if (videos.isNotEmpty()) {
-                    // Activar modo selección
                     IconButton(onClick = { selectionMode = true }) {
                         Icon(
                             Icons.Default.CheckBox,
@@ -178,21 +212,22 @@ fun DashcamGalleryScreen() {
                 items(videos.size) { i ->
                     val video = videos[i]
                     val isSelected = selectedVideos.contains(video.absolutePath)
+                    val videoId = video.nameWithoutExtension.removePrefix("VID_")
+                    val refInfo = videoRefs[videoId]
 
                     VideoCard(
                         video = video,
-                        address = addresses[video.nameWithoutExtension.removePrefix("VID_")],
-                        isLoading = loadingAddressFor == video.nameWithoutExtension.removePrefix("VID_"),
+                        refInfo = refInfo,
+                        isLoading = loadingRouteFor == videoId,
                         selectionMode = selectionMode,
                         isSelected = isSelected,
                         onPlayClick = {
                             if (selectionMode) {
-                                // En modo selección, el clic toggle-ea la selección
                                 if (isSelected) selectedVideos = selectedVideos - video.absolutePath
                                 else selectedVideos = selectedVideos + video.absolutePath
                             } else {
                                 try {
-                                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    val uri = FileProvider.getUriForFile(
                                         context, "${context.packageName}.provider", video
                                     )
                                     val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -214,51 +249,64 @@ fun DashcamGalleryScreen() {
                             selectedVideos = selectedVideos + video.absolutePath
                         },
                         onShowRouteClick = {
-                            val videoId = video.nameWithoutExtension.removePrefix("VID_")
-                            loadingAddressFor = videoId
+                            // Vincular con la ruta del historial usando fecha+hora del .ref.json
+                            val ref = refInfo ?: return@VideoCard
+                            if (ref.date.isEmpty() || ref.startTime.isEmpty()) return@VideoCard
+
+                            loadingRouteFor = videoId
                             scope.launch {
                                 try {
-                                    val metadataDir = File(DashcamManager.getVideosDir(), "Metadata")
-                                    val jsonFile = File(metadataDir, "VID_${videoId}.json")
-                                    if (jsonFile.exists()) {
-                                        val json = JSONObject(jsonFile.readText())
-                                        val pointsArray = json.getJSONArray("points")
-                                        val parsedPoints =
-                                            mutableListOf<com.tuusuario.carlauncher.services.RoutePoint>()
-                                        for (j in 0 until pointsArray.length()) {
-                                            val pt = pointsArray.getJSONObject(j)
-                                            parsedPoints.add(
-                                                com.tuusuario.carlauncher.services.RoutePoint(
-                                                    lat = pt.getDouble("lat"),
-                                                    lon = pt.getDouble("lon"),
-                                                    timestamp = pt.getString("timestamp")
-                                                )
-                                            )
-                                        }
-                                        withContext(Dispatchers.Main) {
-                                            if (parsedPoints.isNotEmpty()) {
-                                                com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value =
-                                                    parsedPoints
-                                            } else {
-                                                addresses =
-                                                    addresses + (videoId to "Sin datos GPS registrados")
+                                    val route = withContext(Dispatchers.IO) {
+                                        RouteTracker.loadRoute(ref.date)
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        if (route != null) {
+                                            // Obtener todos los puntos del día y filtrar los del rango del video
+                                            val allPoints = RouteTracker.getAllPoints(route)
+                                            // El video dura máx. 4 minutos; tomar puntos desde startTime hasta +4min
+                                            val startH = ref.startTime.substring(0, 2).toIntOrNull() ?: 0
+                                            val startM = ref.startTime.substring(3, 5).toIntOrNull() ?: 0
+                                            val startS = ref.startTime.substring(6, 8).toIntOrNull() ?: 0
+                                            val startTotalSec = startH * 3600 + startM * 60 + startS
+                                            val endTotalSec = startTotalSec + (4 * 60) // 4 min max
+
+                                            val videoPoints = allPoints.filter { pt ->
+                                                try {
+                                                    val tH = pt.timestamp.substring(0, 2).toInt()
+                                                    val tM = pt.timestamp.substring(3, 5).toInt()
+                                                    val tS = pt.timestamp.substring(6, 8).toInt()
+                                                    val tTotal = tH * 3600 + tM * 60 + tS
+                                                    tTotal in startTotalSec..endTotalSec
+                                                } catch (_: Exception) { false }
                                             }
-                                        }
-                                    } else {
-                                        withContext(Dispatchers.Main) {
-                                            addresses = addresses + (videoId to "No tiene metadatos de ruta")
+
+                                            if (videoPoints.isNotEmpty()) {
+                                                com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value = videoPoints
+                                            } else {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "No se encontraron puntos GPS en ese rango horario",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        } else {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "No hay ruta guardada para el ${ref.date}",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
                                         }
                                     }
                                 } catch (e: Exception) {
                                     withContext(Dispatchers.Main) {
-                                        addresses = addresses + (videoId to "Error al leer ruta")
+                                        android.widget.Toast.makeText(context, "Error al leer ruta", android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 }
-                                loadingAddressFor = null
+                                loadingRouteFor = null
                             }
                         },
+                        onShareClick = { shareVideo(video) },
                         onDeleteClick = {
-                            // Borrado rápido individual (sin modo selección)
                             selectedVideos = setOf(video.absolutePath)
                             showDeleteConfirm = true
                         }
@@ -279,9 +327,9 @@ fun DashcamGalleryScreen() {
             text = {
                 Text(
                     if (count == 1)
-                        "Se borrará el video y sus datos de ruta GPS de forma permanente. Esta acción no se puede deshacer."
+                        "Se borrará el video y sus datos de forma permanente. Esta acción no se puede deshacer."
                     else
-                        "Se borrarán $count videos y sus datos de ruta GPS de forma permanente. Esta acción no se puede deshacer."
+                        "Se borrarán $count videos y sus datos de forma permanente. Esta acción no se puede deshacer."
                 )
             },
             confirmButton = {
@@ -300,7 +348,6 @@ fun DashcamGalleryScreen() {
             dismissButton = {
                 TextButton(onClick = {
                     showDeleteConfirm = false
-                    // Si era borrado individual fuera de selectionMode, limpiar
                     if (!selectionMode) selectedVideos = emptySet()
                 }) {
                     Text("Cancelar")
@@ -310,17 +357,33 @@ fun DashcamGalleryScreen() {
     }
 }
 
-// ── Card de video con soporte de selección y borrado ──
+// ── Modelo de datos del .ref.json ──
+data class VideoRefInfo(
+    val date: String,       // yyyy-MM-dd
+    val startTime: String,  // HH:mm:ss
+    val startLat: Double?,
+    val startLon: Double?
+) {
+    fun hasLocation() = startLat != null && startLon != null
+
+    fun locationText(): String {
+        if (startLat == null || startLon == null) return ""
+        return "📍 ${String.format("%.4f", startLat)}, ${String.format("%.4f", startLon)}"
+    }
+}
+
+// ── Card de video ──
 @Composable
 private fun VideoCard(
     video: File,
-    address: String?,
+    refInfo: VideoRefInfo?,
     isLoading: Boolean,
     selectionMode: Boolean,
     isSelected: Boolean,
     onPlayClick: () -> Unit,
     onLongClick: () -> Unit,
     onShowRouteClick: () -> Unit,
+    onShareClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     val cardColor by animateColorAsState(
@@ -404,11 +467,12 @@ private fun VideoCard(
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (address != null) {
+                // Mostrar coordenada de inicio si existe
+                if (refInfo?.hasLocation() == true) {
                     Text(
-                        address,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
+                        refInfo.locationText(),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -416,7 +480,8 @@ private fun VideoCard(
 
             // Acciones (ocultas en modo selección)
             if (!selectionMode) {
-                if (address == null) {
+                // Botón Ver Ruta (solo si hay .ref.json con fecha)
+                if (refInfo != null && refInfo.date.isNotEmpty()) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     } else {
@@ -425,7 +490,19 @@ private fun VideoCard(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(2.dp))
+                // Botón Compartir
+                IconButton(
+                    onClick = onShareClick,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Share, "Compartir",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                // Botón Borrar
                 IconButton(
                     onClick = onDeleteClick,
                     modifier = Modifier.size(36.dp)

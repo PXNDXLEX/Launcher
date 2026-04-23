@@ -2,6 +2,7 @@ package com.tuusuario.carlauncher.services
 
 import android.content.Context
 import android.location.Location
+import android.os.Environment
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -43,10 +44,13 @@ object RouteTracker {
 
     /**
      * Must be called once with the Application context before any recording happens.
-     * Uses app-internal storage so no WRITE_EXTERNAL_STORAGE permission is needed.
+     * Uses external public Documents storage so data persists across app reinstalls.
      */
     fun init(context: Context) {
-        val base = File(context.filesDir, "CarLauncher/Rutas")
+        val base = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            "CarLauncher/Rutas"
+        )
         if (!base.exists()) base.mkdirs()
         routesDir = base
 
@@ -54,58 +58,40 @@ object RouteTracker {
         if (!trash.exists()) trash.mkdirs()
         trashDir = trash
 
-        // Migrate old external storage files if they exist
-        migrateOldStorage()
+        // Migrate files from old internal storage if they exist
+        migrateFromInternalStorage(context)
     }
 
     private fun getRoutesDir(): File = routesDir ?: throw IllegalStateException("RouteTracker not initialized. Call init(context) first.")
     private fun getTrashDir(): File = trashDir ?: throw IllegalStateException("RouteTracker not initialized. Call init(context) first.")
 
     /**
-     * Migrate files from old Documents/CarLauncher/Rutas location if any exist.
+     * One-time migration: if routes exist in old internal filesDir, copy them to external storage.
      */
-    private fun migrateOldStorage() {
+    private fun migrateFromInternalStorage(context: Context) {
         try {
-            val oldDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), "CarLauncher/Rutas")
-            if (oldDir.exists()) {
-                oldDir.listFiles()?.filter { it.name.endsWith(".json") }?.forEach { oldFile ->
-                    val newFile = File(getRoutesDir(), oldFile.name)
-                    if (!newFile.exists()) {
-                        // Try to convert old format (flat points) to new format (segments)
-                        try {
-                            val json = JSONObject(oldFile.readText())
-                            if (!json.has("segments") && json.has("points")) {
-                                // Old format: convert all points into one segment
-                                val oldPoints = json.getJSONArray("points")
-                                if (oldPoints.length() > 0) {
-                                    val firstPt = oldPoints.getJSONObject(0)
-                                    val lastPt = oldPoints.getJSONObject(oldPoints.length() - 1)
-                                    
-                                    val segment = JSONObject()
-                                    segment.put("startTime", firstPt.getString("timestamp").substring(0, 5))
-                                    segment.put("endTime", lastPt.getString("timestamp").substring(0, 5))
-                                    segment.put("points", oldPoints)
-                                    
-                                    val segments = JSONArray()
-                                    segments.put(segment)
-                                    
-                                    val newJson = JSONObject()
-                                    newJson.put("date", json.getString("date"))
-                                    newJson.put("segments", segments)
-                                    newJson.put("isDeleted", json.optBoolean("isDeleted", false))
-                                    if (json.has("deletedAt")) newJson.put("deletedAt", json.getString("deletedAt"))
-                                    
-                                    newFile.writeText(newJson.toString(2))
-                                }
-                            } else {
-                                oldFile.copyTo(newFile)
-                            }
-                        } catch (e: Exception) {
-                            oldFile.copyTo(newFile)
-                        }
-                    }
+            val oldBase = File(context.filesDir, "CarLauncher/Rutas")
+            if (!oldBase.exists()) return
+            val externalBase = getRoutesDir()
+            val externalTrash = getTrashDir()
+
+            // Copy main route files
+            oldBase.listFiles()?.filter { it.name.startsWith("ruta_") && it.name.endsWith(".json") }?.forEach { oldFile ->
+                val newFile = File(externalBase, oldFile.name)
+                if (!newFile.exists()) oldFile.copyTo(newFile, overwrite = false)
+            }
+
+            // Copy trash files
+            val oldTrash = File(oldBase, "Papelera")
+            if (oldTrash.exists()) {
+                oldTrash.listFiles()?.filter { it.name.startsWith("ruta_") && it.name.endsWith(".json") }?.forEach { oldFile ->
+                    val newFile = File(externalTrash, oldFile.name)
+                    if (!newFile.exists()) oldFile.copyTo(newFile, overwrite = false)
                 }
             }
+
+            // Remove old internal directory after migration
+            oldBase.deleteRecursively()
         } catch (e: Exception) {
             e.printStackTrace()
         }

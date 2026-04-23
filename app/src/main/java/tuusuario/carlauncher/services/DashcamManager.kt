@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.*
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -33,6 +34,24 @@ object DashcamManager {
     var currentVideoId: String? = null
     var activePreview = mutableStateOf<CameraPreview?>(null)
 
+    // Última coordenada GPS conocida (actualizada por DashcamRouteTracker en cada fix)
+    var lastKnownLat: Double? = null
+    var lastKnownLon: Double? = null
+
+    // Indica si el .ref.json del video en curso ya tiene coordenada guardada
+    private var refHasLocation: Boolean = false
+
+    fun updateLastKnownLocation(lat: Double, lon: Double) {
+        lastKnownLat = lat
+        lastKnownLon = lon
+
+        // Si estamos grabando y el ref.json todavía no tiene coordenada, actualizarlo ahora
+        val vid = currentVideoId
+        if (isRecording.value && vid != null && !refHasLocation) {
+            writeRefJson(vid)
+        }
+    }
+
     fun getVideosDir(): File {
         val dir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
@@ -40,6 +59,43 @@ object DashcamManager {
         )
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    fun getMetadataDir(): File {
+        val dir = File(getVideosDir(), "Metadata")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    /**
+     * Escribe un archivo .ref.json ligero vinculando el video con la ruta del historial.
+     * Solo guarda la fecha, hora de inicio y coordenada inicial. Los puntos completos de
+     * la ruta se leen de RouteTracker cuando el usuario pulsa "Ver Ruta".
+     */
+    private fun writeRefJson(videoId: String) {
+        try {
+            val date = "${videoId.substring(0, 4)}-${videoId.substring(4, 6)}-${videoId.substring(6, 8)}"
+            val startTime = "${videoId.substring(9, 11)}:${videoId.substring(11, 13)}:${videoId.substring(13, 15)}"
+
+            val json = JSONObject()
+            json.put("videoId", videoId)
+            json.put("date", date)
+            json.put("startTime", startTime)
+
+            val lat = lastKnownLat
+            val lon = lastKnownLon
+            if (lat != null && lon != null) {
+                json.put("startLat", lat)
+                json.put("startLon", lon)
+                refHasLocation = true
+            }
+
+            val file = File(getMetadataDir(), "VID_${videoId}.ref.json")
+            file.writeText(json.toString(2))
+            Log.i("Dashcam", "Ref JSON: date=$date time=$startTime lat=$lat lon=$lon")
+        } catch (e: Exception) {
+            Log.e("Dashcam", "Error escribiendo ref.json", e)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -96,7 +152,12 @@ object DashcamManager {
                             is VideoRecordEvent.Start -> {
                                 isRecording.value = true
                                 currentVideoId = videoId
-                                DashcamRouteTracker.startSession(videoId)
+                                refHasLocation = false // Reset para intentar obtener coords
+
+                                // Guardar referencia ligera vinculando video ↔ ruta del historial
+                                // Si lastKnownLat/Lon son null, el ref se actualizará en el primer fix GPS
+                                writeRefJson(videoId)
+
                                 Log.i("Dashcam", "Grabación iniciada: $videoId")
 
                                 // Auto-stop a los 4 minutos
@@ -128,7 +189,6 @@ object DashcamManager {
                                 }
 
                                 isStopping.set(false) // Listo para siguiente grabación
-                                DashcamRouteTracker.stopSession()
                             }
                         }
                     }
