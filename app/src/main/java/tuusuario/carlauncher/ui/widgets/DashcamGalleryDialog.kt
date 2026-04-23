@@ -50,8 +50,7 @@ fun DashcamGalleryScreen() {
 
     // ── Estado de selección ──
     var selectionMode by remember { mutableStateOf(false) }
-    // Usamos mutableStateListOf para asegurar compatibilidad con versiones antiguas de Compose
-    val selectedVideos = remember { mutableStateListOf<String>() } 
+    var selectedVideos by remember { mutableStateOf(setOf<String>()) }  // paths seleccionados
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     fun reloadVideos() {
@@ -60,17 +59,17 @@ fun DashcamGalleryScreen() {
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
 
-    fun deleteFiles(filePaths: List<String>) {
+    fun deleteFiles(filePaths: Set<String>) {
         filePaths.forEach { path ->
             val videoFile = File(path)
             val videoId = videoFile.nameWithoutExtension.removePrefix("VID_")
             // Borrar el video
-            if (videoFile.exists()) videoFile.delete()
+            videoFile.delete()
             // Borrar el JSON de metadatos asociado
             val metaFile = File(DashcamManager.getVideosDir(), "Metadata/VID_${videoId}.json")
             if (metaFile.exists()) metaFile.delete()
         }
-        selectedVideos.clear()
+        selectedVideos = emptySet()
         selectionMode = false
         reloadVideos()
     }
@@ -118,12 +117,8 @@ fun DashcamGalleryScreen() {
                     val allSelected = selectedVideos.size == videos.size && videos.isNotEmpty()
                     TextButton(
                         onClick = {
-                            if (allSelected) {
-                                selectedVideos.clear()
-                            } else {
-                                selectedVideos.clear()
-                                selectedVideos.addAll(videos.map { it.absolutePath })
-                            }
+                            if (allSelected) selectedVideos = emptySet()
+                            else { selectedVideos = videos.map { it.absolutePath }.toSet() }
                         },
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -146,7 +141,7 @@ fun DashcamGalleryScreen() {
                         )
                     }
                     // Cancelar selección
-                    IconButton(onClick = { selectionMode = false; selectedVideos.clear() }) {
+                    IconButton(onClick = { selectionMode = false; selectedVideos = emptySet() }) {
                         Icon(Icons.Default.Close, "Cancelar", tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
                 } else if (videos.isNotEmpty()) {
@@ -193,11 +188,8 @@ fun DashcamGalleryScreen() {
                         onPlayClick = {
                             if (selectionMode) {
                                 // En modo selección, el clic toggle-ea la selección
-                                if (isSelected) {
-                                    selectedVideos.remove(video.absolutePath)
-                                } else {
-                                    selectedVideos.add(video.absolutePath)
-                                }
+                                if (isSelected) selectedVideos = selectedVideos - video.absolutePath
+                                else selectedVideos = selectedVideos + video.absolutePath
                             } else {
                                 try {
                                     val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -219,9 +211,7 @@ fun DashcamGalleryScreen() {
                         },
                         onLongClick = {
                             selectionMode = true
-                            if (!selectedVideos.contains(video.absolutePath)) {
-                                selectedVideos.add(video.absolutePath)
-                            }
+                            selectedVideos = selectedVideos + video.absolutePath
                         },
                         onShowRouteClick = {
                             val videoId = video.nameWithoutExtension.removePrefix("VID_")
@@ -269,8 +259,7 @@ fun DashcamGalleryScreen() {
                         },
                         onDeleteClick = {
                             // Borrado rápido individual (sin modo selección)
-                            selectedVideos.clear()
-                            selectedVideos.add(video.absolutePath)
+                            selectedVideos = setOf(video.absolutePath)
                             showDeleteConfirm = true
                         }
                     )
@@ -284,7 +273,7 @@ fun DashcamGalleryScreen() {
     if (showDeleteConfirm) {
         val count = selectedVideos.size
         AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false; if (!selectionMode) selectedVideos.clear() },
+            onDismissRequest = { showDeleteConfirm = false; if (!selectionMode) selectedVideos = emptySet() },
             icon = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Borrar ${if (count == 1) "video" else "$count videos"}") },
             text = {
@@ -299,7 +288,7 @@ fun DashcamGalleryScreen() {
                 Button(
                     onClick = {
                         showDeleteConfirm = false
-                        deleteFiles(selectedVideos.toList())
+                        deleteFiles(selectedVideos)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
@@ -312,7 +301,7 @@ fun DashcamGalleryScreen() {
                 TextButton(onClick = {
                     showDeleteConfirm = false
                     // Si era borrado individual fuera de selectionMode, limpiar
-                    if (!selectionMode) selectedVideos.clear()
+                    if (!selectionMode) selectedVideos = emptySet()
                 }) {
                     Text("Cancelar")
                 }
@@ -339,7 +328,8 @@ private fun VideoCard(
             MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
         else
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        animationSpec = tween(200)
+        animationSpec = tween(200),
+        label = "cardColor"
     )
 
     val borderColor by animateColorAsState(
@@ -347,7 +337,8 @@ private fun VideoCard(
             MaterialTheme.colorScheme.primary
         else
             Color.Transparent,
-        animationSpec = tween(200)
+        animationSpec = tween(200),
+        label = "borderColor"
     )
 
     Card(
