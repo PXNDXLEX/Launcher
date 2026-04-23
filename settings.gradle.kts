@@ -10,7 +10,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://packages.arthenica.com/maven") }
     }
 }
 rootProject.name = "CarLauncher"

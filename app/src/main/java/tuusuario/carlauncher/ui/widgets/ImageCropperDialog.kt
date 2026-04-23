@@ -111,18 +111,9 @@ fun ImageCropperDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                var gifDuration by remember { mutableStateOf(3) }
                 val controlsContent = @Composable {
                     if (isGif) {
-                        Text("Duración del GIF (Segundos): $gifDuration s", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
-                        Slider(
-                            value = gifDuration.toFloat(),
-                            onValueChange = { gifDuration = it.toInt() },
-                            valueRange = 1f..10f,
-                            steps = 9,
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                        )
+                        Text("Nota: Los GIFs se usarán completos para mantener la animación.", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
                     }
                     
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -153,44 +144,10 @@ fun ImageCropperDialog(
                             onClick = {
                                 if ((sourceAndroidBitmap != null || isGif) && !isProcessing) {
                                     isProcessing = true
-                                    val outPath = File(context.filesDir, outputFileName.replace(".png", ".gif")).absolutePath
                                     if (isGif) {
-                                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                                            try {
-                                                // Get original gif path
-                                                val cacheFile = File(context.cacheDir, "temp_input.gif")
-                                                val ins = context.contentResolver.openInputStream(imageUri)
-                                                if (ins != null) {
-                                                    val os = FileOutputStream(cacheFile)
-                                                    ins.copyTo(os)
-                                                    ins.close()
-                                                    os.close()
-                                                    
-                                                    // Usar FFmpeg para recortar y ajustar la duración
-                                                    // Calculamos el crop equivalente. scale, offsetX, offsetY
-                                                    // Al ser complejo mapear la coordenada UI exacta al video, usaremos un scale basico
-                                                    // Para hacerlo circular, FFmpeg tiene geq filter.
-                                                    
-                                                    val wStr = "iw"
-                                                    val hStr = "ih"
-                                                    // Comando para recortar cuadrado central y hacerlo circular si aplica, y cortar duracion
-                                                    val shapeFilter = if (cropShape == CropShape.CIRCLE) {
-                                                        ",geq=r='r(X,Y)':a='if(gt(hypot(X-W/2,Y-H/2),min(W,H)/2),0,alpha(X,Y))'"
-                                                    } else ""
-                                                    
-                                                    val cmd = "-y -t $gifDuration -i ${cacheFile.absolutePath} -vf \"crop=min(iw\\,ih):min(iw\\,ih)$shapeFilter,scale=256:256\" $outPath"
-                                                    
-                                                    com.arthenica.ffmpegkit.FFmpegKit.execute(cmd)
-                                                }
-                                                
-                                                withContext(Dispatchers.Main) {
-                                                    onCropped(outPath)
-                                                    isProcessing = false
-                                                }
-                                            } catch(e: Exception) {
-                                                withContext(Dispatchers.Main) { isProcessing = false }
-                                            }
-                                        }
+                                        val result = saveOriginalGif(context, imageUri, outputFileName.replace(".png", ".gif"))
+                                        if (result != null) onCropped(result)
+                                        isProcessing = false
                                     } else {
                                         val result = cropAndSave(context, sourceAndroidBitmap!!, scale, offsetX, offsetY, cropShape, outputFileName)
                                         if (result != null) onCropped(result)
