@@ -97,251 +97,186 @@ fun ImageCropperDialog(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        "Recortar Imagen",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = Color.White
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Cerrar", tint = Color.White.copy(alpha = 0.7f))
-                    }
-                }
-
-                if (isGif) {
-                    Text(
-                        "Nota: Los GIFs se usarán completos para mantener la animación.",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                    Text("Recortar Imagen", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar", tint = Color.White.copy(alpha = 0.7f)) }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Selector de forma
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilterChip(
-                        selected = cropShape == CropShape.CIRCLE,
-                        onClick = { cropShape = CropShape.CIRCLE },
-                        label = { Text("Círculo") },
-                        leadingIcon = {
-                            Icon(Icons.Default.Circle, null, modifier = Modifier.size(16.dp))
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                var gifDuration by remember { mutableStateOf(3) }
+                val controlsContent = @Composable {
+                    if (isGif) {
+                        Text("Duración del GIF (Segundos): $gifDuration s", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        Slider(
+                            value = gifDuration.toFloat(),
+                            onValueChange = { gifDuration = it.toInt() },
+                            valueRange = 1f..10f,
+                            steps = 9,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                         )
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    FilterChip(
-                        selected = cropShape == CropShape.SQUARE,
-                        onClick = { cropShape = CropShape.SQUARE },
-                        label = { Text("Cuadrado") },
-                        leadingIcon = {
-                            Icon(Icons.Default.CropSquare, null, modifier = Modifier.size(16.dp))
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    )
-                }
+                    }
+                    
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        FilterChip(selected = cropShape == CropShape.CIRCLE, onClick = { cropShape = CropShape.CIRCLE }, label = { Text("Círculo") }, leadingIcon = { Icon(Icons.Default.Circle, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        FilterChip(selected = cropShape == CropShape.SQUARE, onClick = { cropShape = CropShape.SQUARE }, label = { Text("Cuadrado") }, leadingIcon = { Icon(Icons.Default.CropSquare, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                    }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                // Vista previa con Canvas
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .background(Color(0xFF0D0D1A), RoundedCornerShape(16.dp))
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(0.5f, 5f)
-                                offsetX += pan.x
-                                offsetY += pan.y
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (sourceBitmap != null) {
-                        Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                            val canvasSize = size
-                            val cropSize = minOf(canvasSize.width, canvasSize.height) * 0.8f
-                            val cropCenter = Offset(canvasSize.width / 2f, canvasSize.height / 2f)
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Default.ZoomOut, null, tint = Color.White.copy(alpha = 0.6f))
+                        Slider(value = scale, onValueChange = { scale = it }, valueRange = 0.5f..5f, modifier = Modifier.weight(1f).padding(horizontal = 8.dp), colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary))
+                        Icon(Icons.Default.ZoomIn, null, tint = Color.White.copy(alpha = 0.6f))
+                    }
 
-                            val img = sourceBitmap!!
-                            val imgW = img.width.toFloat()
-                            val imgH = img.height.toFloat()
+                    TextButton(onClick = { scale = 1f; offsetX = 0f; offsetY = 0f }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Icon(Icons.Default.RestartAlt, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Resetear posición", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+                    }
 
-                            // Calcular tamaño de la imagen escalada para llenar el crop area
-                            val baseScale = cropSize / minOf(imgW, imgH)
-                            val finalScale = baseScale * scale
-                            val drawW = imgW * finalScale
-                            val drawH = imgH * finalScale
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                            val imgLeft = cropCenter.x - drawW / 2f + offsetX
-                            val imgTop = cropCenter.y - drawH / 2f + offsetY
-
-                            // Dibujar imagen
-                            drawImage(
-                                image = img,
-                                dstOffset = IntOffset(imgLeft.toInt(), imgTop.toInt()),
-                                dstSize = IntSize(drawW.toInt(), drawH.toInt())
-                            )
-
-                            // Overlay oscuro fuera del crop
-                            val overlayPath = Path().apply {
-                                addRect(Rect(0f, 0f, canvasSize.width, canvasSize.height))
-                            }
-                            val cropPath = Path().apply {
-                                when (cropShape) {
-                                    CropShape.CIRCLE -> {
-                                        addOval(
-                                            Rect(
-                                                cropCenter.x - cropSize / 2f,
-                                                cropCenter.y - cropSize / 2f,
-                                                cropCenter.x + cropSize / 2f,
-                                                cropCenter.y + cropSize / 2f
-                                            )
-                                        )
-                                    }
-                                    CropShape.SQUARE -> {
-                                        addRect(
-                                            Rect(
-                                                cropCenter.x - cropSize / 2f,
-                                                cropCenter.y - cropSize / 2f,
-                                                cropCenter.x + cropSize / 2f,
-                                                cropCenter.y + cropSize / 2f
-                                            )
-                                        )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Cancelar") }
+                        Button(
+                            onClick = {
+                                if ((sourceAndroidBitmap != null || isGif) && !isProcessing) {
+                                    isProcessing = true
+                                    val outPath = File(context.filesDir, outputFileName.replace(".png", ".gif")).absolutePath
+                                    if (isGif) {
+                                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                                            try {
+                                                // Get original gif path
+                                                val cacheFile = File(context.cacheDir, "temp_input.gif")
+                                                val ins = context.contentResolver.openInputStream(imageUri)
+                                                if (ins != null) {
+                                                    val os = FileOutputStream(cacheFile)
+                                                    ins.copyTo(os)
+                                                    ins.close()
+                                                    os.close()
+                                                    
+                                                    // Usar FFmpeg para recortar y ajustar la duración
+                                                    // Calculamos el crop equivalente. scale, offsetX, offsetY
+                                                    // Al ser complejo mapear la coordenada UI exacta al video, usaremos un scale basico
+                                                    // Para hacerlo circular, FFmpeg tiene geq filter.
+                                                    
+                                                    val wStr = "iw"
+                                                    val hStr = "ih"
+                                                    // Comando para recortar cuadrado central y hacerlo circular si aplica, y cortar duracion
+                                                    val shapeFilter = if (cropShape == CropShape.CIRCLE) {
+                                                        ",geq=r='r(X,Y)':a='if(gt(hypot(X-W/2,Y-H/2),min(W,H)/2),0,alpha(X,Y))'"
+                                                    } else ""
+                                                    
+                                                    val cmd = "-y -t $gifDuration -i ${cacheFile.absolutePath} -vf \"crop=min(iw\\,ih):min(iw\\,ih)$shapeFilter,scale=256:256\" $outPath"
+                                                    
+                                                    com.arthenica.ffmpegkit.FFmpegKit.execute(cmd)
+                                                }
+                                                
+                                                withContext(Dispatchers.Main) {
+                                                    onCropped(outPath)
+                                                    isProcessing = false
+                                                }
+                                            } catch(e: Exception) {
+                                                withContext(Dispatchers.Main) { isProcessing = false }
+                                            }
+                                        }
+                                    } else {
+                                        val result = cropAndSave(context, sourceAndroidBitmap!!, scale, offsetX, offsetY, cropShape, outputFileName)
+                                        if (result != null) onCropped(result)
+                                        isProcessing = false
                                     }
                                 }
-                            }
-
-                            // Dibujar overlay fuera del recorte
-                            clipPath(cropPath, clipOp = ClipOp.Difference) {
-                                drawRect(Color.Black.copy(alpha = 0.7f))
-                            }
-
-                            // Borde del crop
-                            when (cropShape) {
-                                CropShape.CIRCLE -> {
-                                    drawCircle(
-                                        color = Color.White.copy(alpha = 0.8f),
-                                        radius = cropSize / 2f,
-                                        center = cropCenter,
-                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
-                                    )
-                                }
-                                CropShape.SQUARE -> {
-                                    drawRect(
-                                        color = Color.White.copy(alpha = 0.8f),
-                                        topLeft = Offset(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f),
-                                        size = Size(cropSize, cropSize),
-                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
-                                    )
-                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = (sourceBitmap != null || isGif) && !isProcessing
+                        ) {
+                            if (isProcessing) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Check, null)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Confirmar")
                             }
                         }
-                    } else {
-                        CircularProgressIndicator(color = Color.White)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Controles de zoom
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(Icons.Default.ZoomOut, null, tint = Color.White.copy(alpha = 0.6f))
-                    Slider(
-                        value = scale,
-                        onValueChange = { scale = it },
-                        valueRange = 0.5f..5f,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Icon(Icons.Default.ZoomIn, null, tint = Color.White.copy(alpha = 0.6f))
-                }
-
-                // Botón reset
-                TextButton(onClick = { scale = 1f; offsetX = 0f; offsetY = 0f }) {
-                    Icon(Icons.Default.RestartAlt, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Resetear posición", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Botones de acción
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                val canvasContent = @Composable {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color(0xFF0D0D1A), RoundedCornerShape(16.dp))
+                            .pointerInput(Unit) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    scale = (scale * zoom).coerceIn(0.5f, 5f)
+                                    offsetX += pan.x
+                                    offsetY += pan.y
+                                }
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("Cancelar")
-                    }
-                    Button(
-                        onClick = {
-                            if ((sourceAndroidBitmap != null || isGif) && !isProcessing) {
-                                isProcessing = true
-                                if (isGif) {
-                                    // Guardar el GIF original
-                                    val result = saveOriginalGif(context, imageUri, outputFileName.replace(".png", ".gif"))
-                                    if (result != null) onCropped(result)
-                                    isProcessing = false
+                        if (sourceBitmap != null) {
+                            Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                                val canvasSize = size
+                                val cropSize = minOf(canvasSize.width, canvasSize.height) * 0.8f
+                                val cropCenter = Offset(canvasSize.width / 2f, canvasSize.height / 2f)
+
+                                val img = sourceBitmap!!
+                                val imgW = img.width.toFloat()
+                                val imgH = img.height.toFloat()
+
+                                val baseScale = cropSize / minOf(imgW, imgH)
+                                val finalScale = baseScale * scale
+                                val drawW = imgW * finalScale
+                                val drawH = imgH * finalScale
+
+                                val imgLeft = cropCenter.x - drawW / 2f + offsetX
+                                val imgTop = cropCenter.y - drawH / 2f + offsetY
+
+                                drawImage(img, dstOffset = IntOffset(imgLeft.toInt(), imgTop.toInt()), dstSize = IntSize(drawW.toInt(), drawH.toInt()))
+
+                                val cropPath = Path().apply {
+                                    if (cropShape == CropShape.CIRCLE) {
+                                        addOval(Rect(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f, cropCenter.x + cropSize / 2f, cropCenter.y + cropSize / 2f))
+                                    } else {
+                                        addRect(Rect(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f, cropCenter.x + cropSize / 2f, cropCenter.y + cropSize / 2f))
+                                    }
+                                }
+
+                                clipPath(cropPath, clipOp = ClipOp.Difference) { drawRect(Color.Black.copy(alpha = 0.7f)) }
+
+                                if (cropShape == CropShape.CIRCLE) {
+                                    drawCircle(color = Color.White.copy(alpha = 0.8f), radius = cropSize / 2f, center = cropCenter, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
                                 } else {
-                                    // Recortar imagen estática
-                                    val result = cropAndSave(
-                                        context = context,
-                                        sourceBitmap = sourceAndroidBitmap!!,
-                                        scale = scale,
-                                        offsetX = offsetX,
-                                        offsetY = offsetY,
-                                        cropShape = cropShape,
-                                        outputFileName = outputFileName
-                                    )
-                                    if (result != null) onCropped(result)
-                                    isProcessing = false
+                                    drawRect(color = Color.White.copy(alpha = 0.8f), topLeft = Offset(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f), size = Size(cropSize, cropSize), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
                                 }
                             }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = (sourceBitmap != null || isGif) && !isProcessing
-                    ) {
-                        if (isProcessing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
                         } else {
-                            Icon(Icons.Default.Check, null)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Confirmar")
+                            CircularProgressIndicator(color = Color.White)
                         }
+                    }
+                }
+
+                if (isLandscape) {
+                    Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight()) { canvasContent() }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.width(260.dp), verticalArrangement = Arrangement.Center) { controlsContent() }
+                    }
+                } else {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { canvasContent() }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        controlsContent()
                     }
                 }
             }

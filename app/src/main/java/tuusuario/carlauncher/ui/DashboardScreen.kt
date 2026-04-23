@@ -60,6 +60,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 object NavigationState { 
     val currentSpeedKmH = mutableStateOf(0f) 
     val currentLocation = mutableStateOf<android.location.Location?>(null)
+    val selectedHistoryRoute = mutableStateOf<com.tuusuario.carlauncher.services.DailyRoute?>(null)
 }
 
 // Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
@@ -142,6 +143,24 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
+        // ── BOTÓN DASHCAM ──
+        val lifecycleOwner = LocalLifecycleOwner.current
+        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = if (isLandscape) Alignment.BottomEnd else Alignment.TopEnd) {
+            FloatingActionButton(
+                onClick = {
+                    if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) {
+                        com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
+                    } else {
+                        com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
+                    }
+                },
+                containerColor = if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+            ) {
+                Icon(if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
+            }
+        }
+
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
@@ -198,6 +217,8 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
     var expandedSection by remember { mutableStateOf("") }
     var showSpeedoCropper by remember { mutableStateOf(false) }
     var showVehicleCropper by remember { mutableStateOf(false) }
+    var showRouteHistoryDialog by remember { mutableStateOf(false) }
+    var showDashcamGalleryDialog by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
     val speedoBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -256,16 +277,18 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             isExpanded = expandedSection == "vehicle_type",
                             onClick = { expandedSection = if (expandedSection == "vehicle_type") "" else "vehicle_type" }
                         ) {
-                            listOf("FLECHA", "SEDAN", "HATCHBACK", "CUSTOM").forEach { option ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                        .background(if (AppSettings.vehicleType.value == option) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
-                                        .clickable { AppSettings.setVehicleType(option) }.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(selected = AppSettings.vehicleType.value == option, onClick = { AppSettings.setVehicleType(option) }, colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("FLECHA", "SEDAN", "HATCHBACK", "CUSTOM").forEach { option ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                            .background(if (AppSettings.vehicleType.value == option) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                                            .clickable { AppSettings.setVehicleType(option) }.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(selected = AppSettings.vehicleType.value == option, onClick = { AppSettings.setVehicleType(option) }, colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
+                                    }
                                 }
                             }
                         }
@@ -425,6 +448,9 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             isExpanded = expandedSection == "offline_maps",
                             onClick = { expandedSection = if (expandedSection == "offline_maps") "" else "offline_maps" }
                         ) { OfflineMapDownloader(context, coroutineScope) }
+                        SettingsDivider()
+                        SettingsRow(Icons.Default.History, "Registro de Rutas", "Ver historiales guardados",
+                            onClick = { showRouteHistoryDialog = true })
                     }
 
                     // ── SISTEMA ──
@@ -433,10 +459,24 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) })
                     }
 
+                    // ── DASHCAM ──
+                    SettingsGroupCard("Dashcam") {
+                        SettingsRow(Icons.Default.VideoLibrary, "Videos (Dashcam)", "Ver videos guardados",
+                            onClick = { showDashcamGalleryDialog = true })
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
+    }
+
+    if (showRouteHistoryDialog) {
+        RouteHistoryDialog(onDismiss = { showRouteHistoryDialog = false })
+    }
+
+    if (showDashcamGalleryDialog) {
+        com.tuusuario.carlauncher.ui.widgets.DashcamGalleryDialog(onDismiss = { showDashcamGalleryDialog = false })
     }
 
     // Croppers
@@ -455,6 +495,85 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
             onCropped = { path -> AppSettings.setCustomVehicleIconPath(path); showVehicleCropper = false; pendingCropUri = null },
             onDismiss = { showVehicleCropper = false; pendingCropUri = null }
         )
+    }
+}
+
+@Composable
+fun RouteHistoryDialog(onDismiss: () -> Unit) {
+    var routes by remember { mutableStateOf(com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()) }
+    var showingTrash by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(if (showingTrash) "Papelera (Rutas)" else "Registro de Rutas", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Row {
+                        IconButton(onClick = { showingTrash = !showingTrash }) { Icon(if (showingTrash) Icons.Default.List else Icons.Default.DeleteOutline, "Alternar Papelera", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+                    }
+                }
+
+                val displayedRoutes = routes.filter { it.isDeleted == showingTrash }
+
+                if (displayedRoutes.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(if (showingTrash) "La papelera está vacía" else "No hay rutas registradas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(displayedRoutes.size) { i ->
+                            val route = displayedRoutes[i]
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    if (!showingTrash) {
+                                        NavigationState.selectedHistoryRoute.value = route
+                                        onDismiss()
+                                    }
+                                },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Ruta del ${route.date}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Text("${route.points.size} puntos registrados", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if (showingTrash && route.deletedAt != null) {
+                                            Text("Borrado: ${route.deletedAt?.split("T")?.get(0)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                    if (showingTrash) {
+                                        IconButton(onClick = {
+                                            route.isDeleted = false
+                                            route.deletedAt = null
+                                            com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
+                                            routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+                                        }) { Icon(Icons.Default.Restore, "Restaurar", tint = MaterialTheme.colorScheme.primary) }
+                                    } else {
+                                        IconButton(onClick = {
+                                            route.isDeleted = true
+                                            route.deletedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                            com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
+                                            routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+                                        }) { Icon(Icons.Default.Delete, "Borrar", tint = MaterialTheme.colorScheme.error) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -617,12 +736,10 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
                     val idx = speedoOptions.indexOf(AppSettings.speedoStyle.value)
                     val newIdx = if (idx - 1 < 0) speedoOptions.size - 1 else idx - 1
                     AppSettings.setSpeedoStyle(speedoOptions[newIdx])
-                    Toast.makeText(context, "Estilo: ${speedoOptions[newIdx]}", Toast.LENGTH_SHORT).show()
                 } else if (swipeOffsetX < -100f) {
                     val idx = speedoOptions.indexOf(AppSettings.speedoStyle.value)
                     val newIdx = (idx + 1) % speedoOptions.size
                     AppSettings.setSpeedoStyle(speedoOptions[newIdx])
-                    Toast.makeText(context, "Estilo: ${speedoOptions[newIdx]}", Toast.LENGTH_SHORT).show()
                 }
                 swipeOffsetX = 0f
             }

@@ -144,6 +144,30 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var showFavorites by remember { mutableStateOf(false) }
     var isSearching by remember { mutableStateOf(false) }
 
+    val customIconPath = AppSettings.customVehicleIconPath.value
+    LaunchedEffect(vehicleType, customIconPath, uiColor) {
+        carMarker?.let { marker ->
+            val iconBitmap = if (vehicleType == "CUSTOM" && customIconPath.isNotEmpty()) {
+                try {
+                    val file = java.io.File(customIconPath)
+                    if (file.exists()) {
+                        val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                        android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
+                    } else {
+                        drawVehicleBitmap("SEDAN", uiColor)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    drawVehicleBitmap("SEDAN", uiColor)
+                }
+            } else {
+                drawVehicleBitmap(vehicleType, uiColor)
+            }
+            marker.icon = android.graphics.drawable.BitmapDrawable(context.resources, iconBitmap)
+            mapView.invalidate()
+        }
+    }
+
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
     // Función unificada para calcular/recalcular rutas
@@ -246,6 +270,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     targetBearing = loc.bearing
                     lastKnownBearing = targetBearing
                 }
+
+                // Registrar ruta automáticamente
+                com.tuusuario.carlauncher.services.RouteTracker.onLocationUpdate(loc)
+                com.tuusuario.carlauncher.services.DashcamRouteTracker.onLocationUpdate(loc)
 
                 NavigationState.currentLocation.value = loc
                 val speedKmH = loc.speed * 3.6f
@@ -459,6 +487,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                         override fun onZoom(event: ZoomEvent?): Boolean {
                             isFollowingLocation = false
+                            currentMapRotation = this@apply.mapOrientation
+                            
                             autoCenterJob?.cancel()
                             autoCenterJob = coroutineScope.launch {
                                 delay(6000)
@@ -521,21 +551,70 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             },
             update = { view ->
                 if (isMapDarkMode) {
-                    val inverseMatrix = ColorMatrix(floatArrayOf(
+                    val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
                         0.0f, -1.0f, 0.0f, 0.0f, 255f,
                         0.0f, 0.0f, -1.0f, 0.0f, 255f,
                         0.0f, 0.0f, 0.0f, 1.0f, 0.0f
                     ))
-                    view.overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(inverseMatrix))
+                    view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
                 } else {
                     view.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 
-                carMarker?.icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
+                // Renderizar la ruta histórica si hay una seleccionada
+                val selectedRoute = NavigationState.selectedHistoryRoute.value
+                val existingHistoryPolyline = view.overlays.find { it is Polyline && it.id == "ROUTE_HISTORY" }
+                
+                if (selectedRoute != null) {
+                    if (existingHistoryPolyline == null) {
+                        val pts = selectedRoute.points.map { GeoPoint(it.lat, it.lon) }
+                        if (pts.isNotEmpty()) {
+                            val polyline = Polyline(view).apply {
+                                id = "ROUTE_HISTORY"
+                                setPoints(pts)
+                                outlinePaint.color = android.graphics.Color.parseColor("#4CAF50") // Verde
+                                outlinePaint.strokeWidth = 14f
+                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                            }
+                            view.overlays.add(polyline)
+                            
+                            // Centrar en la ruta
+                            isFollowingLocation = false
+                            autoCenterJob?.cancel()
+                            view.controller.animateTo(pts.first())
+                            view.controller.setZoom(16.0)
+                            view.mapOrientation = 0f
+                            currentMapRotation = 0f
+                        }
+                    }
+                } else {
+                    if (existingHistoryPolyline != null) {
+                        view.overlays.remove(existingHistoryPolyline)
+                    }
+                }
+
                 view.invalidate()
             }
         )
+
+        // UI elements sobre el mapa
+        Column(
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).offset(y = (-40).dp),
+            horizontalAlignment = Alignment.End
+        ) {
+            // Botón para cerrar la vista de ruta histórica
+            if (NavigationState.selectedHistoryRoute.value != null) {
+                androidx.compose.material3.ExtendedFloatingActionButton(
+                    onClick = { NavigationState.selectedHistoryRoute.value = null; isFollowingLocation = true },
+                    icon = { Icon(Icons.Default.Close, "Cerrar Ruta") },
+                    text = { Text("Cerrar Ruta Histórica") },
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
 
         // BARRA DE BÚSQUEDA Y FAVORITOS SUPERIOR
         Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp)) {

@@ -49,6 +49,9 @@ class MainActivity : ComponentActivity() {
 
         // ¡AQUÍ ESTÁ LA MAGIA! Iniciamos la base de datos permanente antes de arrancar la interfaz
         AppSettings.init(this)
+        
+        // Limpiar rutas antiguas de la papelera
+        com.tuusuario.carlauncher.services.RouteTracker.cleanupOldTrash()
 
         setContent {
             // Ahora leemos el estado directamente de nuestro AppSettings permanente
@@ -82,10 +85,18 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
     var notificationsGranted by rememberSaveable { 
         mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) 
     }
+    var cameraGranted by rememberSaveable {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    }
+    var audioGranted by rememberSaveable {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+    }
 
     val checkPermissions = {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+        cameraGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        audioGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -103,9 +114,9 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val locationLauncher = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { checkPermissions() }
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { checkPermissions() }
 
-    if (!locationGranted || !notificationsGranted) {
+    if (!locationGranted || !notificationsGranted || !cameraGranted || !audioGranted) {
         Column(
             modifier = Modifier.fillMaxSize().padding(32.dp),
             verticalArrangement = Arrangement.Center,
@@ -113,12 +124,18 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         ) {
             Text("Configuración de Launcher", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(24.dp))
-            if (!locationGranted) {
-                Text("1. Necesitamos acceso al GPS para el velocímetro y el mapa.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+            if (!locationGranted || !cameraGranted || !audioGranted) {
+                Text("1. Necesitamos acceso al GPS (Mapa/Velocímetro) y a la Cámara/Micrófono (Dashcam).", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }) { Text("Permitir GPS") }
+                Button(onClick = { 
+                    permissionLauncher.launch(arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.CAMERA,
+                        Manifest.permission.RECORD_AUDIO
+                    )) 
+                }) { Text("Permitir Accesos") }
             } else if (!notificationsGranted) {
-                Text("2. GPS Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                Text("2. Todo Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Abrir Ajustes") }
             }
