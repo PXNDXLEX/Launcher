@@ -46,6 +46,13 @@ import java.net.URL
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
+import android.os.Build
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 
 @Composable
 fun SpeedometerWidget() {
@@ -111,6 +118,28 @@ fun SpeedometerWidget() {
     BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val boxSize = min(maxWidth, maxHeight) * 1.20f 
         
+        val customBgPath = AppSettings.customSpeedoBgPath.value
+        val isGif = customBgPath.endsWith(".gif", ignoreCase = true)
+
+        if (style == "CUSTOM" && isGif && customBgPath.isNotEmpty()) {
+            val customBgOpacity = AppSettings.customSpeedoBgOpacity.value
+            val customShape = AppSettings.customSpeedoShape.value
+            
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(java.io.File(customBgPath))
+                    .build(),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(boxSize * 0.85f) // Ajustar al tamaño del track
+                    .alpha(customBgOpacity)
+                    .then(
+                        if (customShape == "CIRCLE") Modifier.clip(CircleShape) else Modifier
+                    ),
+                contentScale = coil.layout.ContentScale.Crop
+            )
+        }
+
         SpeedometerDraw(
             speed = animatedSpeed, 
             maxSpeed = 220f, 
@@ -359,15 +388,18 @@ fun SpeedometerDraw(
         
         when (style) {
             "CUSTOM" -> {
-                // Dibujar imagen de fondo si existe
-                customBgBitmap?.let { bitmap ->
-                    val imgSize = radius * 2f
-                    drawImage(
-                        image = bitmap,
-                        dstOffset = IntOffset((center.x - radius).toInt(), (center.y - radius).toInt()),
-                        dstSize = IntSize((imgSize).toInt(), (imgSize).toInt()),
-                        alpha = customBgOpacity
-                    )
+                // Dibujar imagen de fondo si existe y NO es un GIF (los GIFs se manejan en el Box superior)
+                val isGif = customBgPath.endsWith(".gif", ignoreCase = true)
+                if (!isGif) {
+                    customBgBitmap?.let { bitmap ->
+                        val imgSize = radius * 2f
+                        drawImage(
+                            image = bitmap,
+                            dstOffset = IntOffset((center.x - radius).toInt(), (center.y - radius).toInt()),
+                            dstSize = IntSize((imgSize).toInt(), (imgSize).toInt()),
+                            alpha = customBgOpacity
+                        )
+                    }
                 }
                 
                 val sweepAngle = 240f

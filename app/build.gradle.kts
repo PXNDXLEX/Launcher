@@ -39,5 +39,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
     // ¡OPEN STREET MAPS (OSMDroid)! Libre y sin tarjetas de crédito
-    implementation("org.osmdroid:osmdroid-android:6.1.18")
+    // Coil for Image & GIF support
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-gif:2.6.0")
 }

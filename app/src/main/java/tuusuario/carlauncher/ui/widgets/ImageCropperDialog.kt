@@ -61,11 +61,15 @@ fun ImageCropperDialog(
     var sourceBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var sourceAndroidBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var isGif by remember { mutableStateOf(false) }
 
     // Cargar la imagen al abrir
     LaunchedEffect(imageUri) {
         withContext(Dispatchers.IO) {
             try {
+                val mimeType = context.contentResolver.getType(imageUri)
+                isGif = mimeType == "image/gif"
+                
                 val stream = context.contentResolver.openInputStream(imageUri)
                 val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
                 val bmp = BitmapFactory.decodeStream(stream, null, options)
@@ -108,6 +112,15 @@ fun ImageCropperDialog(
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, "Cerrar", tint = Color.White.copy(alpha = 0.7f))
                     }
+                }
+
+                if (isGif) {
+                    Text(
+                        "Nota: Los GIFs se usarán completos para mantener la animación.",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -292,26 +305,31 @@ fun ImageCropperDialog(
                     }
                     Button(
                         onClick = {
-                            if (sourceAndroidBitmap != null && !isProcessing) {
+                            if ((sourceAndroidBitmap != null || isGif) && !isProcessing) {
                                 isProcessing = true
-                                // Crop and save
-                                val result = cropAndSave(
-                                    context = context,
-                                    sourceBitmap = sourceAndroidBitmap!!,
-                                    scale = scale,
-                                    offsetX = offsetX,
-                                    offsetY = offsetY,
-                                    cropShape = cropShape,
-                                    outputFileName = outputFileName
-                                )
-                                if (result != null) {
-                                    onCropped(result)
+                                if (isGif) {
+                                    // Guardar el GIF original
+                                    val result = saveOriginalGif(context, imageUri, outputFileName.replace(".png", ".gif"))
+                                    if (result != null) onCropped(result)
+                                    isProcessing = false
+                                } else {
+                                    // Recortar imagen estática
+                                    val result = cropAndSave(
+                                        context = context,
+                                        sourceBitmap = sourceAndroidBitmap!!,
+                                        scale = scale,
+                                        offsetX = offsetX,
+                                        offsetY = offsetY,
+                                        cropShape = cropShape,
+                                        outputFileName = outputFileName
+                                    )
+                                    if (result != null) onCropped(result)
+                                    isProcessing = false
                                 }
-                                isProcessing = false
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = sourceBitmap != null && !isProcessing
+                        enabled = (sourceBitmap != null || isGif) && !isProcessing
                     ) {
                         if (isProcessing) {
                             CircularProgressIndicator(
@@ -390,5 +408,23 @@ private fun cropAndSave(
     } catch (e: Exception) {
         e.printStackTrace()
         return null
+    }
+}
+
+/**
+ * Guarda el archivo GIF original en filesDir.
+ */
+private fun saveOriginalGif(context: Context, uri: Uri, outputFileName: String): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri)
+        val file = File(context.filesDir, outputFileName)
+        val outputStream = FileOutputStream(file)
+        inputStream?.copyTo(outputStream)
+        inputStream?.close()
+        outputStream.close()
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }
