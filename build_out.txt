@@ -1,0 +1,4 @@
+
+C:\Users\Panda\Documents\Launcher>﻿@rem Gradle Wrapper script for Windows 
+"﻿@rem" no se reconoce como un comando interno o externo,
+programa o archivo por lotes ejecutable.
