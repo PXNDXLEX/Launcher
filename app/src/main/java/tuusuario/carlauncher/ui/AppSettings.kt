@@ -9,9 +9,15 @@ object AppSettings {
     // Variables de estado que la UI observa
     val speedoStyle = mutableStateOf("PREMIUM")
     val speedoColor = mutableStateOf(Color.parseColor("#007AFF"))
-    val vehicleType = mutableStateOf("SEDAN") // El Kia Rio es un Sedan de corazón
+    val vehicleType = mutableStateOf("SEDAN") // Universal vehicle type
     val uiColor = mutableStateOf(Color.parseColor("#007AFF"))
     val isDarkMode = mutableStateOf(true)
+    val isMapDarkMode = mutableStateOf(true)
+    
+    // Custom Speedometer settings
+    val customSpeedoShape = mutableStateOf("ARC")
+    val customSpeedoNeedle = mutableStateOf("PLASMA")
+    val customSpeedoThickness = mutableStateOf(0.08f)
 
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
@@ -26,6 +32,10 @@ object AppSettings {
         vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
         uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
+        isMapDarkMode.value = prefs?.getBoolean("isMapDarkMode", true) ?: true
+        customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
+        customSpeedoNeedle.value = prefs?.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
+        customSpeedoThickness.value = prefs?.getFloat("customSpeedoThickness", 0.08f) ?: 0.08f
         
         isInitialized = true
     }
@@ -54,5 +64,25 @@ object AppSettings {
     fun setDarkMode(isDark: Boolean) {
         isDarkMode.value = isDark
         prefs?.edit()?.putBoolean("isDarkMode", isDark)?.apply()
+    }
+
+    fun setMapDarkMode(isDark: Boolean) {
+        isMapDarkMode.value = isDark
+        prefs?.edit()?.putBoolean("isMapDarkMode", isDark)?.apply()
+    }
+
+    fun setCustomSpeedoShape(shape: String) {
+        customSpeedoShape.value = shape
+        prefs?.edit()?.putString("customSpeedoShape", shape)?.apply()
+    }
+
+    fun setCustomSpeedoNeedle(needle: String) {
+        customSpeedoNeedle.value = needle
+        prefs?.edit()?.putString("customSpeedoNeedle", needle)?.apply()
+    }
+
+    fun setCustomSpeedoThickness(thickness: Float) {
+        customSpeedoThickness.value = thickness
+        prefs?.edit()?.putFloat("customSpeedoThickness", thickness)?.apply()
     }
 }

@@ -20,10 +20,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.animation.*
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.tuusuario.carlauncher.services.GlobalState
 
 @Composable
@@ -35,10 +43,33 @@ fun MusicPlayerWidget() {
 
     // Forzamos el texto a blanco para que siempre contraste con el fondo oscuro
     val textColor = Color.White 
+    
+    var isExpanded by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    var autoCloseJob by remember { mutableStateOf<Job?>(null) }
+    var sliderPosition by remember { mutableStateOf(0f) }
+
+    fun resetAutoCloseTimer() {
+        autoCloseJob?.cancel()
+        if (isExpanded) {
+            autoCloseJob = coroutineScope.launch {
+                delay(5000)
+                isExpanded = false
+            }
+        }
+    }
+
+    LaunchedEffect(isExpanded) {
+        if (isExpanded) resetAutoCloseTimer()
+        else autoCloseJob?.cancel()
+    }
 
     // Box es perfecto para superponer elementos (Fondo -> Sombra -> Textos)
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize().clickable { 
+            isExpanded = true 
+            resetAutoCloseTimer()
+        }
     ) {
         // 1. CAPA DE FONDO (CARÁTULA DEL ÁLBUM)
         if (albumArt != null) {
@@ -118,8 +149,82 @@ fun MusicPlayerWidget() {
                     ) 
                 }
                 
-                IconButton(onClick = { GlobalState.skipToNext() }) { 
+                IconButton(onClick = { 
+                    GlobalState.skipToNext() 
+                    resetAutoCloseTimer()
+                }) { 
                     Icon(Icons.Default.SkipNext, "Siguiente", tint = textColor, modifier = Modifier.size(40.dp)) 
+                }
+            }
+        }
+        
+        // 4. CAPA DE EXPANSIÓN (POP-UP MAXIMIZADO)
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = fadeOut() + scaleOut(targetScale = 0.9f),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f))
+                    .clickable { resetAutoCloseTimer() }
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    if (albumArt != null) {
+                        Image(
+                            bitmap = albumArt.asImageBitmap(),
+                            contentDescription = "Album Art",
+                            modifier = Modifier.size(200.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(Icons.Default.MusicNote, null, modifier = Modifier.size(100.dp), tint = Color.White.copy(alpha = 0.3f))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(text = songTitle.toString(), color = textColor, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = songArtist.toString(), color = textColor.copy(alpha = 0.7f), fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Simulación de progreso de música
+                    Slider(
+                        value = sliderPosition,
+                        onValueChange = { 
+                            sliderPosition = it
+                            resetAutoCloseTimer() 
+                        },
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(0.8f),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { GlobalState.skipToPrevious(); resetAutoCloseTimer() }) { Icon(Icons.Default.SkipPrevious, "Anterior", tint = textColor, modifier = Modifier.size(48.dp)) }
+                        IconButton(onClick = { GlobalState.togglePlayPause(); resetAutoCloseTimer() }) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play/Pause", tint = textColor, modifier = Modifier.size(72.dp)) }
+                        IconButton(onClick = { GlobalState.skipToNext(); resetAutoCloseTimer() }) { Icon(Icons.Default.SkipNext, "Siguiente", tint = textColor, modifier = Modifier.size(48.dp)) }
+                    }
+                }
+                
+                IconButton(
+                    onClick = { isExpanded = false },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Icon(Icons.Default.Pause, "Cerrar", tint = Color.Transparent) // Botón invisible o cruz si se desea
                 }
             }
         }

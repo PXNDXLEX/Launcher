@@ -222,6 +222,13 @@ fun SpeedometerWidget() {
                         Text(text = "K M / H", color = reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 10.sp)
                     }
                 }
+                "CUSTOM" -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.04f).dp)) {
+                        val textShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 25f) else null
+                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Bold, style = TextStyle(shadow = textShadow))
+                        Text(text = "KM/H", color = textColor.copy(alpha = 0.6f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Normal)
+                    }
+                }
                 else -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Bold)
@@ -249,6 +256,10 @@ fun SpeedometerDraw(
     val outlineColor = Color.Black.copy(alpha = 0.85f)
     val speedProgress by rememberUpdatedState((speed / maxSpeed).coerceIn(0f, 1f))
     
+    val customShape = AppSettings.customSpeedoShape.value
+    val customNeedle = AppSettings.customSpeedoNeedle.value
+    val customThickness = AppSettings.customSpeedoThickness.value
+
     var omnimonBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -273,7 +284,7 @@ fun SpeedometerDraw(
     var cumPulse by remember { mutableStateOf(0f) }
 
     LaunchedEffect(style) {
-        val animatedStyles = listOf("AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA")
+        val animatedStyles = listOf("AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
         if (style in animatedStyles) {
             var lastFrameTime = withFrameNanos { it }
             while (true) {
@@ -314,6 +325,77 @@ fun SpeedometerDraw(
         }
         
         when (style) {
+            "CUSTOM" -> {
+                val sweepAngle = 240f
+                val startAngle = 150f
+                val trackRadius = radius * 0.85f
+                val strokeWidth = radius * customThickness
+                val arcSize = Size(trackRadius * 2, trackRadius * 2)
+                val arcTopLeft = Offset(center.x - trackRadius, center.y - trackRadius)
+                
+                // Fondo
+                if (customShape == "CIRCLE") {
+                    drawCircle(color = if (isLight) Color.White.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.5f), radius = trackRadius, center = center)
+                    drawCircle(color = inactiveColor, radius = trackRadius, center = center, style = Stroke(width = strokeWidth))
+                    if (spProg > 0) drawArc(color = reactiveColor, startAngle = 90f, sweepAngle = 360f * spProg, useCenter = false, style = Stroke(width = strokeWidth, cap = StrokeCap.Round), size = arcSize, topLeft = arcTopLeft)
+                } else if (customShape == "LINE") {
+                    val lineY = center.y + radius * 0.5f
+                    drawLine(color = inactiveColor, start = Offset(center.x - radius * 0.8f, lineY), end = Offset(center.x + radius * 0.8f, lineY), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+                    if (spProg > 0) drawLine(color = reactiveColor, start = Offset(center.x - radius * 0.8f, lineY), end = Offset(center.x - radius * 0.8f + (radius * 1.6f * spProg), lineY), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+                } else { // ARC default
+                    drawArc(color = inactiveColor, startAngle = startAngle, sweepAngle = sweepAngle, useCenter = false, style = Stroke(width = strokeWidth, cap = StrokeCap.Round), size = arcSize, topLeft = arcTopLeft)
+                    if (spProg > 0) drawArc(color = reactiveColor, startAngle = startAngle, sweepAngle = sweepAngle * spProg, useCenter = false, style = Stroke(width = strokeWidth, cap = StrokeCap.Round), size = arcSize, topLeft = arcTopLeft)
+                }
+
+                // Aguja
+                val ptrRad = if (customShape == "CIRCLE") Math.toRadians((90f + 360f * spProg).toDouble()) else if (customShape == "LINE") 0.0 else Math.toRadians((startAngle + sweepAngle * spProg).toDouble())
+                
+                if (customShape != "LINE") {
+                    if (customNeedle == "PLASMA") {
+                        val fireSpeed = 15f + (speed * 0.8f)
+                        val flicker1 = sin(cumTime * fireSpeed) * radius * 0.035f
+                        val offsetBase = flicker1
+                        withTransform({
+                            translate(center.x, center.y)
+                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
+                        }) {
+                            val w = radius * 0.05f
+                            val h = trackRadius * 1.05f
+                            val path = Path().apply {
+                                moveTo(-w, 0f)
+                                quadraticBezierTo(-w + offsetBase, -h * 0.5f, offsetBase, -h)
+                                quadraticBezierTo(w + offsetBase, -h * 0.5f, w, 0f)
+                                close()
+                            }
+                            drawPath(path = path, color = reactiveColor)
+                        }
+                    } else if (customNeedle == "KATANA") {
+                        withTransform({
+                            translate(center.x, center.y)
+                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
+                        }) {
+                            val katanaPath = Path().apply {
+                                moveTo(0f, -(radius * 0.12f))
+                                lineTo(-(radius * 0.015f), -(trackRadius * 0.95f))
+                                quadraticBezierTo(0f, -(trackRadius * 1.05f), radius * 0.02f, -(trackRadius * 0.95f))
+                                lineTo(radius * 0.025f, -(radius * 0.12f))
+                                close()
+                            }
+                            drawPath(path = katanaPath, color = reactiveColor)
+                        }
+                    } else { // MINIMAL / ARROW
+                        val ptrX = (center.x + trackRadius * cos(ptrRad)).toFloat()
+                        val ptrY = (center.y + trackRadius * sin(ptrRad)).toFloat()
+                        drawCircle(color = reactiveColor, radius = radius * 0.05f, center = Offset(ptrX, ptrY))
+                        drawLine(color = reactiveColor, start = center, end = Offset(ptrX, ptrY), strokeWidth = radius * 0.02f, cap = StrokeCap.Round)
+                    }
+                } else {
+                    // LINE needle
+                    val ptrX = center.x - radius * 0.8f + (radius * 1.6f * spProg)
+                    val lineY = center.y + radius * 0.5f
+                    drawCircle(color = reactiveColor, radius = radius * 0.05f, center = Offset(ptrX, lineY))
+                }
+            }
             "OMNIMON" -> {
                 val sweepAngle = 240f
                 val startAngle = 150f
@@ -365,7 +447,7 @@ fun SpeedometerDraw(
 
                     withTransform({
                         translate(center.x, center.y)
-                        rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f)
+                        rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
                     }) {
                         fun drawFlame(width: Float, height: Float, color: Color, offset: Float) {
                             val path = Path().apply {
@@ -473,7 +555,7 @@ fun SpeedometerDraw(
                         
                         withTransform({
                             translate(center.x + mainRadius * cos(ptrRad).toFloat(), center.y + mainRadius * sin(ptrRad).toFloat())
-                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f)
+                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
                         }) {
                             val katanaPath = Path().apply {
                                 moveTo(0f, -(radius * 0.12f))
@@ -593,7 +675,7 @@ fun SpeedometerDraw(
                     
                     withTransform({
                         translate(lockX, lockY)
-                        rotate(degrees = Math.toDegrees(lockRad).toFloat() + 90f)
+                        rotate(degrees = Math.toDegrees(lockRad).toFloat() + 90f, pivot = Offset.Zero)
                     }) {
                         val bracketPulse = if (spProg > 0.8f) abs(sin(cumTime * 15f)) * radius * 0.03f else 0f
                         val bX = radius * 0.08f + bracketPulse

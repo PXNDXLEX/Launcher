@@ -84,10 +84,15 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var currentScreen by rememberSaveable { mutableStateOf("DASHBOARD") } 
     var showYoutubeInDashboard by rememberSaveable { mutableStateOf(false) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
+    var showWelcome by rememberSaveable { mutableStateOf(true) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
 
     LaunchedEffect(Unit) {
+        if (showWelcome) {
+            delay(2500)
+            showWelcome = false
+        }
         while (true) {
             val now = LocalDateTime.now()
             currentTime = now.format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -121,11 +126,12 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 Box(modifier = Modifier.weight(1f)) {
                     MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it }, isDarkMode)
                 }
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.8f)) {
                     NavigationBarItem(selected = currentScreen == "DASHBOARD", onClick = { currentScreen = "DASHBOARD" }, icon = { Icon(Icons.Default.Dashboard, "Dashboard", tint = if (currentScreen == "DASHBOARD") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = currentScreen == "MAPA_FULL", onClick = { currentScreen = "MAPA_FULL" }, icon = { Icon(Icons.Default.Map, "Mapa", tint = if (currentScreen == "MAPA_FULL") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = currentScreen == "YOUTUBE", onClick = { currentScreen = "YOUTUBE" }, icon = { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = false, onClick = { showSettingsDialog = true }, icon = { Icon(Icons.Default.Settings, "Ajustes") })
+                    NavigationBarItem(selected = false, onClick = onToggleTheme, icon = { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema") })
                 }
             }
         }
@@ -155,6 +161,25 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
         if (showSettingsDialog) {
             PremiumSettingsDialog(onDismiss = { showSettingsDialog = false })
+        }
+
+        AnimatedVisibility(
+            visible = showWelcome,
+            enter = fadeIn(animationSpec = tween(500)),
+            exit = fadeOut(animationSpec = tween(1000)) + scaleOut(animationSpec = tween(1000), targetScale = 1.1f),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = activeUiColor, modifier = Modifier.size(120.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text("Bienvenido a", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Light, letterSpacing = 2.sp)
+                    Text("CAR LAUNCHER", color = activeUiColor, fontSize = 42.sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp)
+                }
+            }
         }
     }
 }
@@ -236,7 +261,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 SettingsSection("Estilo del Tablero") {
                                     var expandedSpeedo by remember { mutableStateOf(false) }
-                                    val speedoOptions = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA")
+                                    val speedoOptions = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
                                     
                                     ExposedDropdownMenuBox(
                                         expanded = expandedSpeedo,
@@ -269,6 +294,39 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                 }
                                 SettingsSection("Color de Retroiluminación (Independiente)") {
                                     ColorPicker(selectedColor = AppSettings.speedoColor.value, onColorSelected = { AppSettings.setSpeedoColor(it) })
+                                }
+                                AnimatedVisibility(visible = AppSettings.speedoStyle.value == "CUSTOM") {
+                                    Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                                        SettingsSection("Editor Personalizado - Forma Base") {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                listOf("ARC", "CIRCLE", "LINE").forEach { shape ->
+                                                    FilterChip(
+                                                        selected = AppSettings.customSpeedoShape.value == shape,
+                                                        onClick = { AppSettings.setCustomSpeedoShape(shape) },
+                                                        label = { Text(shape) }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        SettingsSection("Editor Personalizado - Estilo de Aguja") {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                listOf("PLASMA", "KATANA", "ARROW").forEach { needle ->
+                                                    FilterChip(
+                                                        selected = AppSettings.customSpeedoNeedle.value == needle,
+                                                        onClick = { AppSettings.setCustomSpeedoNeedle(needle) },
+                                                        label = { Text(needle) }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        SettingsSection("Editor Personalizado - Grosor") {
+                                            Slider(
+                                                value = AppSettings.customSpeedoThickness.value,
+                                                onValueChange = { AppSettings.setCustomSpeedoThickness(it) },
+                                                valueRange = 0.02f..0.15f
+                                            )
+                                        }
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -376,6 +434,32 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
 
 @Composable
 fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent: @Composable () -> Unit, showYoutubeInDashboard: Boolean, onToggleYoutubeInDashboard: (Boolean) -> Unit, isDarkMode: Boolean) {
+    var swipeOffsetX by remember { mutableStateOf(0f) }
+    val speedoOptions = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
+    
+    val context = LocalContext.current
+    val speedoSwipeModifier = Modifier.pointerInput(Unit) {
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                if (swipeOffsetX > 100f) {
+                    val idx = speedoOptions.indexOf(AppSettings.speedoStyle.value)
+                    val newIdx = if (idx - 1 < 0) speedoOptions.size - 1 else idx - 1
+                    AppSettings.setSpeedoStyle(speedoOptions[newIdx])
+                    Toast.makeText(context, "Estilo: ${speedoOptions[newIdx]}", Toast.LENGTH_SHORT).show()
+                } else if (swipeOffsetX < -100f) {
+                    val idx = speedoOptions.indexOf(AppSettings.speedoStyle.value)
+                    val newIdx = (idx + 1) % speedoOptions.size
+                    AppSettings.setSpeedoStyle(speedoOptions[newIdx])
+                    Toast.makeText(context, "Estilo: ${speedoOptions[newIdx]}", Toast.LENGTH_SHORT).show()
+                }
+                swipeOffsetX = 0f
+            }
+        ) { change, dragAmount -> 
+            change.consume()
+            swipeOffsetX += dragAmount
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         when (currentScreen) {
             "MAPA_FULL" -> {
@@ -389,8 +473,8 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(modifier = Modifier.weight(0.60f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
                         Column(modifier = Modifier.weight(0.40f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }
@@ -399,8 +483,8 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Box(modifier = Modifier.weight(0.55f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
                         Row(modifier = Modifier.weight(0.45f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) {
+                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { SpeedometerWidget() }
+                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
                                 DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
                             }
                         }

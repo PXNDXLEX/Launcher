@@ -117,7 +117,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     val coroutineScope = rememberCoroutineScope()
     val mapView = remember { MapView(context) }
     
-    var isMapDarkMode by rememberSaveable { mutableStateOf(isDarkMode) }
+    val isMapDarkMode = AppSettings.isMapDarkMode.value
     var isFollowingLocation by rememberSaveable { mutableStateOf(true) }
     var hasInitializedPosition by rememberSaveable { mutableStateOf(false) }
     
@@ -239,6 +239,18 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val loc = result.lastLocation ?: return
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
+                // CORRECCIÓN: Calcular el ángulo real de movimiento para evitar rotaciones aleatorias del GPS
+                if (carMarker != null) {
+                    val startGeo = carMarker!!.position
+                    val l1 = android.location.Location("").apply { latitude = startGeo.latitude; longitude = startGeo.longitude }
+                    val l2 = android.location.Location("").apply { latitude = newGeo.latitude; longitude = newGeo.longitude }
+                    if (l1.distanceTo(l2) > 0.2f) {
+                        loc.bearing = l1.bearingTo(l2)
+                    } else {
+                        loc.bearing = carMarker!!.rotation
+                    }
+                }
+
                 NavigationState.currentLocation.value = loc
                 val speedKmH = loc.speed * 3.6f
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = speedKmH
@@ -650,7 +662,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         Column(modifier = Modifier.align(Alignment.BottomEnd).padding(if (isFullScreen) 32.dp else 16.dp), horizontalAlignment = Alignment.End) {
             
             FloatingActionButton(
-                onClick = { isMapDarkMode = !isMapDarkMode },
+                onClick = { AppSettings.setMapDarkMode(!AppSettings.isMapDarkMode.value) },
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             ) {
