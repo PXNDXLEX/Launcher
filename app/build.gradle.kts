@@ -58,5 +58,5 @@ dependencies {
     implementation("androidx.media3:media3-ui:${media3_version}")
 
     // FFmpeg para manipulación avanzada de GIFs (recorte circular y duración)
-    implementation("com.arthenica:ffmpeg-kit-min:6.0-2")
+    implementation("com.arthenica:ffmpeg-kit-min:5.1.LTS")
 }

@@ -107,43 +107,36 @@ fun DashcamGalleryDialog(onDismiss: () -> Unit) {
                                                         val jsonFile = File(metadataDir, "VID_${videoId}.json")
                                                         if (jsonFile.exists()) {
                                                             val json = JSONObject(jsonFile.readText())
-                                                            val points = json.getJSONArray("points")
-                                                            if (points.length() > 0) {
-                                                                val firstPt = points.getJSONObject(0)
-                                                                val lat = firstPt.getDouble("lat")
-                                                                val lon = firstPt.getDouble("lon")
-
-                                                                // Reverse geocoding con Photon
-                                                                val urlStr = "https://photon.komoot.io/reverse?lon=$lon&lat=$lat"
-                                                                val result = withContext(Dispatchers.IO) {
-                                                                    val conn = URL(urlStr).openConnection() as HttpURLConnection
-                                                                    conn.setRequestProperty("User-Agent", "CarLauncher")
-                                                                    conn.connectTimeout = 5000
-                                                                    conn.inputStream.bufferedReader().readText()
-                                                                }
-                                                                
-                                                                val features = JSONObject(result).getJSONArray("features")
-                                                                if (features.length() > 0) {
-                                                                    val props = features.getJSONObject(0).getJSONObject("properties")
-                                                                    val street = props.optString("street", "")
-                                                                    val city = props.optString("city", props.optString("county", ""))
-                                                                    val finalAddress = listOf(street, city).filter { it.isNotBlank() }.joinToString(", ")
-                                                                    addresses = addresses + (videoId to finalAddress.ifBlank { "Dirección desconocida" })
+                                                            val pointsArray = json.getJSONArray("points")
+                                                            val parsedPoints = mutableListOf<com.tuusuario.carlauncher.services.RoutePoint>()
+                                                            for (j in 0 until pointsArray.length()) {
+                                                                val pt = pointsArray.getJSONObject(j)
+                                                                parsedPoints.add(
+                                                                    com.tuusuario.carlauncher.services.RoutePoint(
+                                                                        lat = pt.getDouble("lat"),
+                                                                        lon = pt.getDouble("lon"),
+                                                                        timestamp = pt.getString("timestamp")
+                                                                    )
+                                                                )
+                                                            }
+                                                            
+                                                            withContext(Dispatchers.Main) {
+                                                                if (parsedPoints.isNotEmpty()) {
+                                                                    com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value = parsedPoints
+                                                                    onDismiss()
                                                                 } else {
-                                                                    addresses = addresses + (videoId to "No encontrada")
+                                                                    addresses = addresses + (videoId to "Sin datos GPS registrados")
                                                                 }
-                                                            } else {
-                                                                addresses = addresses + (videoId to "Sin datos GPS")
                                                             }
                                                         } else {
-                                                            addresses = addresses + (videoId to "Sin metadatos")
+                                                            addresses = addresses + (videoId to "No tiene metadatos de ruta")
                                                         }
                                                     } catch (e: Exception) {
-                                                        addresses = addresses + (videoId to "Error de red")
+                                                        addresses = addresses + (videoId to "Error al leer ruta")
                                                     }
                                                     loadingAddressFor = null
                                                 }
-                                            }) { Text("Ver Dirección") }
+                                            }) { Text("Ver Ruta en Mapa") }
                                         }
                                     }
                                 }

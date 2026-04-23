@@ -595,6 +595,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                 }
 
+                // Renderizar ruta Dashcam si hay una seleccionada
+                val selectedDashcamRoute = NavigationState.selectedDashcamRoute.value
+                val existingDashcamPolyline = view.overlays.find { it is Polyline && it.id == "DASHCAM_ROUTE" }
+                
+                if (selectedDashcamRoute != null) {
+                    if (existingDashcamPolyline == null) {
+                        val pts = selectedDashcamRoute.map { GeoPoint(it.lat, it.lon) }
+                        if (pts.isNotEmpty()) {
+                            val polyline = Polyline(view).apply {
+                                id = "DASHCAM_ROUTE"
+                                setPoints(pts)
+                                outlinePaint.color = android.graphics.Color.parseColor("#FF9800") // Naranja
+                                outlinePaint.strokeWidth = 14f
+                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                            }
+                            view.overlays.add(polyline)
+                            
+                            // Centrar en la ruta
+                            isFollowingLocation = false
+                            autoCenterJob?.cancel()
+                            view.controller.animateTo(pts.first())
+                            view.controller.setZoom(17.0)
+                            view.mapOrientation = 0f
+                            currentMapRotation = 0f
+                        }
+                    }
+                } else {
+                    if (existingDashcamPolyline != null) {
+                        view.overlays.remove(existingDashcamPolyline)
+                    }
+                }
+
                 view.invalidate()
             }
         )
@@ -610,6 +643,18 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     onClick = { NavigationState.selectedHistoryRoute.value = null; isFollowingLocation = true },
                     icon = { Icon(Icons.Default.Close, "Cerrar Ruta") },
                     text = { Text("Cerrar Ruta Histórica") },
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+            
+            // Botón para cerrar la vista de ruta Dashcam
+            if (NavigationState.selectedDashcamRoute.value != null) {
+                androidx.compose.material3.ExtendedFloatingActionButton(
+                    onClick = { NavigationState.selectedDashcamRoute.value = null; isFollowingLocation = true },
+                    icon = { Icon(Icons.Default.Close, "Cerrar Dashcam") },
+                    text = { Text("Cerrar Ruta de Video") },
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(bottom = 8.dp)
