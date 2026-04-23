@@ -189,22 +189,31 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         }
 
         // ── BOTÓN DASHCAM ──
+        // En landscape: arriba a la derecha (separado del widget de música que está abajo)
+        // En portrait: arriba a la derecha como siempre
         val lifecycleOwner = LocalLifecycleOwner.current
-        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = if (isLandscape) Alignment.BottomEnd else Alignment.TopEnd) {
+        val isRec = com.tuusuario.carlauncher.services.DashcamManager.isRecording.value
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = if (isLandscape) 96.dp else 0.dp, top = 16.dp, end = 16.dp),
+            contentAlignment = Alignment.TopEnd
+        ) {
             FloatingActionButton(
                 onClick = {
-                    if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) {
+                    if (isRec) {
                         com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
                     } else {
                         com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
                     }
                 },
-                containerColor = if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+                containerColor = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isRec) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
             ) {
-                Icon(if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
+                Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
             }
         }
+
 
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(

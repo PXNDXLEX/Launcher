@@ -45,9 +45,9 @@ object DashcamManager {
     fun startRecording(context: Context, lifecycleOwner: LifecycleOwner) {
         if (isRecording.value) return
         if (isStopping.get()) {
-            // Esperar a que termine la parada anterior antes de arrancar
-            Log.w("Dashcam", "startRecording ignorado: todavía deteniéndose")
-            return
+            // Si la parada todavía está en progreso, forzamos un reset para permitir una nueva grabación
+            Log.w("Dashcam", "startRecording: reseteando isStopping previo")
+            isStopping.set(false)
         }
 
         // Crear un executor fresco; nunca reutilizar uno ya cerrado
@@ -110,7 +110,7 @@ object DashcamManager {
                                 isRecording.value = false
                                 currentVideoId = null
                                 activePreview.value = null
-                                isStopping.set(false)
+                                isStopping.set(false)  // Siempre resetear para permitir siguiente grabación
                                 DashcamRouteTracker.stopSession()
 
                                 // Apagar el executor en un hilo secundario para no bloquear el main
@@ -118,7 +118,7 @@ object DashcamManager {
                                 cameraExecutor = null
                                 executorToShutdown?.let {
                                     if (!it.isShutdown) {
-                                        it.shutdown()
+                                        CoroutineScope(Dispatchers.IO).launch { it.shutdown() }
                                     }
                                 }
                             }

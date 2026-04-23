@@ -747,13 +747,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         }
 
         // ── NAVIGATION OVERLAY (Turn-by-Turn) ──
+        val nextStep = activeRouteSteps.firstOrNull()
         AnimatedVisibility(
-            visible = NavigationState.isRouteActive.value && activeRouteSteps.isNotEmpty(),
+            visible = NavigationState.isRouteActive.value && nextStep != null,
             enter = slideInVertically { -it } + fadeIn(),
             exit = slideOutVertically { -it } + fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp).padding(horizontal = 16.dp)
         ) {
-            val nextStep = activeRouteSteps[0]
+            // Snapshot local para evitar IndexOutOfBoundsException durante la animación de salida
+            val step = nextStep ?: return@AnimatedVisibility
             Surface(
                 modifier = Modifier.fillMaxWidth().height(90.dp),
                 shape = RoundedCornerShape(24.dp),
@@ -767,7 +769,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            getManeuverIcon(nextStep.modifier, nextStep.maneuverType),
+                            getManeuverIcon(step.modifier, step.maneuverType),
                             null,
                             tint = Color(uiColor),
                             modifier = Modifier.size(36.dp)
@@ -776,14 +778,53 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            if (nextStep.distance > 1000) String.format("En %.1f km", nextStep.distance/1000) else "En ${nextStep.distance.toInt()} m",
+                            if (step.distance > 1000) String.format("En %.1f km", step.distance/1000) else "En ${step.distance.toInt()} m",
                             fontSize = 14.sp, color = Color(uiColor), fontWeight = FontWeight.Bold
                         )
                         Text(
-                            nextStep.streetName.ifEmpty { "Siga recto" },
+                            step.streetName.ifEmpty { "Siga recto" },
                             fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+            }
+        }
+
+        // ── MAP CONTROL FABs (Derecha) ──
+        Column(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Botón Norte
+            AnimatedVisibility(visible = currentMapRotation != 0f) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        mapView.controller.animateTo(mapView.mapCenter, mapView.zoomLevelDouble, 500, 0f)
+                        currentMapRotation = 0f
+                    },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ) {
+                    Icon(Icons.Default.Explore, "Norte", modifier = Modifier.size(20.dp))
+                }
+            }
+            // Botón Centrar
+            AnimatedVisibility(visible = !isFollowingLocation) {
+                FloatingActionButton(
+                    onClick = {
+                        isFollowingLocation = true
+                        autoCenterJob?.cancel()
+                        NavigationState.currentLocation.value?.let {
+                            mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
+                            mapView.mapOrientation = 360f - lastKnownBearing
+                            currentMapRotation = 360f - lastKnownBearing
+                        }
+                    },
+                    containerColor = Color(uiColor).copy(alpha = 0.9f),
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.MyLocation, "Centrar")
                 }
             }
         }
