@@ -239,16 +239,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val loc = result.lastLocation ?: return
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
-                // CORRECCIÓN: Calcular el ángulo real de movimiento para evitar rotaciones aleatorias del GPS
-                if (carMarker != null) {
-                    val startGeo = carMarker!!.position
-                    val l1 = android.location.Location("").apply { latitude = startGeo.latitude; longitude = startGeo.longitude }
-                    val l2 = android.location.Location("").apply { latitude = newGeo.latitude; longitude = newGeo.longitude }
-                    if (l1.distanceTo(l2) > 0.2f) {
-                        loc.bearing = l1.bearingTo(l2)
-                    } else {
-                        loc.bearing = carMarker!!.rotation
-                    }
+                // Usamos el bearing nativo si estamos en movimiento, de lo contrario mantenemos el anterior
+                var targetBearing = carMarker?.rotation ?: 0f
+                if (loc.hasBearing() && loc.speed > 1.0f) {
+                    targetBearing = loc.bearing
                 }
 
                 NavigationState.currentLocation.value = loc
@@ -262,19 +256,19 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         isFlat = true // Permite que gire con el mapa de forma realista
                         position = newGeo
-                        rotation = if (loc.hasBearing() && !isStationary) loc.bearing else 0f
+                        rotation = targetBearing
                     }
                     mapView.overlays.add(carMarker)
                     
                     if (isFollowingLocation || !hasInitializedPosition) {
                         mapView.controller.setCenter(newGeo)
+                        mapView.setMapCenterOffset(0, mapView.height / 4) // Offset Bottom 1/3
                         if (!hasInitializedPosition) {
                             mapView.controller.setZoom(18.5)
                             hasInitializedPosition = true
                         }
                         if (loc.hasBearing() && !isStationary) {
-                            // CORRECCIÓN MATEMÁTICA: Usar 360f - loc.bearing para que apunte hacia adelante
-                            val newOrientation = 360f - loc.bearing
+                            val newOrientation = 360f - targetBearing
                             mapView.mapOrientation = newOrientation
                             currentMapRotation = newOrientation
                         }
@@ -283,13 +277,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     animator?.cancel()
                     val startGeo = carMarker!!.position
                     
-                    // REGLA MATEMÁTICA ANTI-TROMPO: Forzar el ángulo a existir solo de 0 a 360
                     var startRot = carMarker!!.rotation % 360f
                     if (startRot < 0) startRot += 360f
                     
-                    val targetRot = if (loc.hasBearing() && !isStationary) loc.bearing else startRot
-                    
-                    var deltaRot = targetRot - startRot
+                    var deltaRot = targetBearing - startRot
                     if (deltaRot > 180f) deltaRot -= 360f
                     if (deltaRot < -180f) deltaRot += 360f
 
@@ -316,7 +307,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
-                                // CORRECCIÓN MATEMÁTICA AQUÍ TAMBIÉN
+                                mapView.setMapCenterOffset(0, mapView.height / 4)
                                 val newMapRot = 360f - interpolatedRot
                                 mapView.mapOrientation = newMapRot 
                                 currentMapRotation = newMapRot
@@ -527,7 +518,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
         // BARRA DE BÚSQUEDA Y FAVORITOS SUPERIOR
         Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(horizontal = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(12.dp)).padding(horizontal = 8.dp)) {
                 IconButton(onClick = { 
                     showFavorites = !showFavorites
                     if(showFavorites) {
@@ -610,7 +601,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
 
             AnimatedVisibility(visible = searchResults.isNotEmpty()) {
-                LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 4.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).shadow(4.dp)) {
+                LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 4.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(12.dp)).shadow(4.dp)) {
                     items(searchResults) { place ->
                         Row(modifier = Modifier.fillMaxWidth().clickable {
                             focusManager.clearFocus()
@@ -663,7 +654,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             
             FloatingActionButton(
                 onClick = { AppSettings.setMapDarkMode(!AppSettings.isMapDarkMode.value) },
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
                 modifier = Modifier.padding(bottom = 8.dp)
             ) {
                 Icon(if (isMapDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema Mapa", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -672,7 +663,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             AnimatedVisibility(visible = !isFollowingLocation && currentMapRotation != 0f) {
                 FloatingActionButton(
                     onClick = { mapView.controller.animateTo(mapView.mapCenter, mapView.zoomLevelDouble, 500, 0f); currentMapRotation = 0f },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
                     modifier = Modifier.padding(bottom = 8.dp)
                 ) {
                     Icon(Icons.Default.Explore, "Norte", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -691,7 +682,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     },
                     icon = { Icon(Icons.Default.MyLocation, "Centrar") },
                     text = { Text("Centrar") },
-                    containerColor = MaterialTheme.colorScheme.primary,
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
