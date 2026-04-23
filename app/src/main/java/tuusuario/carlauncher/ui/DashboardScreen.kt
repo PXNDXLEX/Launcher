@@ -409,7 +409,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             isExpanded = expandedSection == "speedo_style",
                             onClick = { expandedSection = if (expandedSection == "speedo_style") "" else "speedo_style" }
                         ) {
-                            val opts = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
+                            val opts = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "OVERDRIVE", "DEMONIC", "NEBULA"  "CUSTOM")
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 opts.chunked(3).forEach { row ->
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1172,4 +1172,4 @@ fun DashcamPreviewOverlay() {
         }
     }
 }
-
+

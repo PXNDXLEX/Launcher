@@ -597,7 +597,7 @@ fun SpeedometerDraw(
                         val noiseH = if (isLit) abs(sin(i * 12.34f + cumTime * 25f)) * (radius * 0.8f) * spProg else 0f
                         val bHeight = radius * 0.1f + noiseH + (if (isLit) radius*0.1f else 0f)
 
-                        // Glow 100% nativo de Compose sin usar ShadowLayer
+                        // Glow nativo 100% Compose sin usar ShadowLayer
                         if (isLit && gX == 0f) {
                             val glowRadius = bHeight.coerceAtLeast(1f)
                             val glowBrush = Brush.radialGradient(
@@ -891,6 +891,7 @@ fun SpeedometerDraw(
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
+                            if (isLit) setShadowLayer(10f, 0f, 0f, android.graphics.Color.parseColor(if(isLight) "#FFFFFF" else "#0EA5E9"))
                         }
                         canvas.nativeCanvas.drawText(speedVal.toString(), textX + numShakeAmt, textY + (radius * 0.04f) + numShakeAmt, paint) 
                     }
@@ -1003,7 +1004,7 @@ fun SpeedometerDraw(
                         
                         if (isLit && isLight) {
                             val strokePaint = android.graphics.Paint(paint).apply {
-                                this.style = android.graphics.Paint.Style.STROKE
+                                style = android.graphics.Paint.Style.STROKE
                                 strokeWidth = radius * 0.01f
                                 color = android.graphics.Color.argb((activeColor.alpha*255).toInt(), (activeColor.red*255).toInt(), (activeColor.green*255).toInt(), (activeColor.blue*255).toInt())
                             }
