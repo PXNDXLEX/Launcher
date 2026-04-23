@@ -889,7 +889,7 @@ private fun getManeuverIcon(modifier: String, type: String): androidx.compose.ui
         type.contains("arrive") -> Icons.Default.Flag
         modifier.contains("left") -> if (modifier.contains("sharp")) Icons.Default.TurnSharpLeft else Icons.Default.TurnLeft
         modifier.contains("right") -> if (modifier.contains("sharp")) Icons.Default.TurnSharpRight else Icons.Default.TurnRight
-        modifier.contains("uturn") -> Icons.Default.UturnLeft
+        modifier.contains("uturn") -> Icons.Default.UTurnLeft
         modifier.contains("straight") -> Icons.Default.Straight
         else -> Icons.Default.Navigation
     }
@@ -943,7 +943,7 @@ private fun drawVehicleBitmap(type: String, color: Int): Bitmap {
     return b
 }
 
-private fun drawCustomPin(color: Int): Bitmap {
+internal fun drawCustomPin(color: Int): Bitmap {
     val b = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(b)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -955,7 +955,7 @@ private fun drawCustomPin(color: Int): Bitmap {
     path.lineTo(65f, 35f)
     path.close()
     canvas.drawPath(path, p)
-    p.color = Color.White.toArgb()
+    p.color = android.graphics.Color.WHITE
     canvas.drawCircle(40f, 30f, 10f, p)
     return b
 }
