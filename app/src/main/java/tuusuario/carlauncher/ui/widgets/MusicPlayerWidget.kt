@@ -37,6 +37,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.tuusuario.carlauncher.services.GlobalState
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 @Composable
 fun MusicPlayerWidget() {
@@ -186,117 +188,141 @@ fun MusicPlayerWidget() {
             }
         }
         
-        // 4. CAPA DE EXPANSIÓN (POP-UP MAXIMIZADO) - Cierre al tocar fuera
-        AnimatedVisibility(
-            visible = isExpanded,
-            enter = fadeIn() + scaleIn(initialScale = 0.9f),
-            exit = fadeOut() + scaleOut(targetScale = 0.9f),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Fondo completo clickeable para cerrar
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.88f))
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) { isExpanded = false },
-                contentAlignment = Alignment.Center
+        // 4. CAPA DE EXPANSIÓN (POP-UP MAXIMIZADO) - Flotante real a pantalla completa
+        if (isExpanded) {
+            Dialog(
+                onDismissRequest = { isExpanded = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
             ) {
-                // Contenido que NO cierra al tocarlo
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFF1A1A2E).copy(alpha = 0.95f))
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) { resetAutoCloseTimer() }
-                        .padding(28.dp)
+                var showContent by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    showContent = true
+                }
+                
+                AnimatedVisibility(
+                    visible = showContent,
+                    enter = fadeIn() + scaleIn(initialScale = 0.9f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.9f),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    // Botón cerrar
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        IconButton(
-                            onClick = { isExpanded = false },
-                            modifier = Modifier.align(Alignment.TopEnd)
-                        ) {
-                            Icon(Icons.Default.Close, "Cerrar", tint = Color.White.copy(alpha = 0.6f))
-                        }
-                    }
-                    
-                    // Carátula grande
-                    if (albumArt != null) {
-                        Image(
-                            bitmap = albumArt.asImageBitmap(),
-                            contentDescription = "Album Art",
-                            modifier = Modifier
-                                .size(180.dp)
-                                .clip(RoundedCornerShape(16.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(180.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.DarkGray),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.MusicNote, null, modifier = Modifier.size(80.dp), tint = Color.White.copy(alpha = 0.3f))
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text(text = songTitle.toString(), color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(text = songArtist.toString(), color = textColor.copy(alpha = 0.6f), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
-                    // Barra de progreso REAL con seekTo
-                    Slider(
-                        value = progressFraction,
-                        onValueChange = { 
-                            isSeeking = true
-                            seekPosition = it
-                            resetAutoCloseTimer() 
-                        },
-                        onValueChangeFinished = {
-                            if (songDuration > 0) {
-                                val newPos = (seekPosition * songDuration).toLong()
-                                GlobalState.seekTo(newPos)
-                                GlobalState.songPosition.value = newPos
-                            }
-                            isSeeking = false
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.2f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    
-                    // Tiempos
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(formatTime(if (isSeeking) (seekPosition * songDuration).toLong() else songPosition), color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                        Text(formatTime(songDuration), color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                    }
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    // Controles
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Fondo completo clickeable para cerrar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.88f))
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) { 
+                                showContent = false
+                                coroutineScope.launch {
+                                    delay(200) // Esperar animación de salida
+                                    isExpanded = false
+                                }
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        IconButton(onClick = { GlobalState.skipToPrevious(); resetAutoCloseTimer() }) { Icon(Icons.Default.SkipPrevious, "Anterior", tint = textColor, modifier = Modifier.size(44.dp)) }
-                        IconButton(onClick = { GlobalState.togglePlayPause(); resetAutoCloseTimer() }) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play/Pause", tint = textColor, modifier = Modifier.size(64.dp)) }
-                        IconButton(onClick = { GlobalState.skipToNext(); resetAutoCloseTimer() }) { Icon(Icons.Default.SkipNext, "Siguiente", tint = textColor, modifier = Modifier.size(44.dp)) }
+                        // Contenido que NO cierra al tocarlo
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .fillMaxWidth(0.6f) // Ajustado al 60% para verse elegante en modo horizontal
+                                .clip(RoundedCornerShape(32.dp))
+                                .background(Color(0xFF1A1A2E).copy(alpha = 0.95f))
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() }
+                                ) { resetAutoCloseTimer() }
+                                .padding(32.dp)
+                        ) {
+                            // Botón cerrar
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                IconButton(
+                                    onClick = { 
+                                        showContent = false
+                                        coroutineScope.launch {
+                                            delay(200)
+                                            isExpanded = false
+                                        }
+                                    },
+                                    modifier = Modifier.align(Alignment.TopEnd)
+                                ) {
+                                    Icon(Icons.Default.Close, "Cerrar", tint = Color.White.copy(alpha = 0.6f))
+                                }
+                            }
+                            
+                            // Carátula grande
+                            if (albumArt != null) {
+                                Image(
+                                    bitmap = albumArt.asImageBitmap(),
+                                    contentDescription = "Album Art",
+                                    modifier = Modifier
+                                        .size(240.dp)
+                                        .clip(RoundedCornerShape(20.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(240.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color.DarkGray),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.MusicNote, null, modifier = Modifier.size(100.dp), tint = Color.White.copy(alpha = 0.3f))
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(text = songTitle.toString(), color = textColor, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(text = songArtist.toString(), color = textColor.copy(alpha = 0.6f), fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            
+                            Spacer(modifier = Modifier.height(24.dp))
+                            
+                            // Barra de progreso REAL con seekTo
+                            Slider(
+                                value = progressFraction,
+                                onValueChange = { 
+                                    isSeeking = true
+                                    seekPosition = it
+                                    resetAutoCloseTimer() 
+                                },
+                                onValueChangeFinished = {
+                                    if (songDuration > 0) {
+                                        val newPos = (seekPosition * songDuration).toLong()
+                                        GlobalState.seekTo(newPos)
+                                        GlobalState.songPosition.value = newPos
+                                    }
+                                    isSeeking = false
+                                },
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            // Tiempos
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(formatTime(if (isSeeking) (seekPosition * songDuration).toLong() else songPosition), color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                                Text(formatTime(songDuration), color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            // Controles
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(onClick = { GlobalState.skipToPrevious(); resetAutoCloseTimer() }) { Icon(Icons.Default.SkipPrevious, "Anterior", tint = textColor, modifier = Modifier.size(56.dp)) }
+                                IconButton(onClick = { GlobalState.togglePlayPause(); resetAutoCloseTimer() }) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play/Pause", tint = textColor, modifier = Modifier.size(80.dp)) }
+                                IconButton(onClick = { GlobalState.skipToNext(); resetAutoCloseTimer() }) { Icon(Icons.Default.SkipNext, "Siguiente", tint = textColor, modifier = Modifier.size(56.dp)) }
+                            }
+                        }
                     }
                 }
             }
