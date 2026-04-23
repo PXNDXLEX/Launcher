@@ -660,6 +660,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
+        }
 
         // BARRA DE BÚSQUEDA Y FAVORITOS SUPERIOR
         Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp)) {
@@ -1005,4 +1006,5 @@ fun drawVehicleBitmap(type: String, color: Int): Bitmap {
         "HATCHBACK" -> { canvas.drawRoundRect(25f, 20f, 75f, 85f, 12f, 12f, bodyPaint); canvas.drawRoundRect(30f, 40f, 70f, 55f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 75f, 70f, 82f, 3f, 3f, glassPaint); canvas.drawCircle(35f, 25f, 6f, lightPaint); canvas.drawCircle(65f, 25f, 6f, lightPaint) }
     }
     return bitmap
+}
 }

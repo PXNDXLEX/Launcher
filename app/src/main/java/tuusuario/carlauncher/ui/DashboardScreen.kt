@@ -57,6 +57,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
+import androidx.compose.ui.platform.LocalLifecycleOwner
+
 object NavigationState { 
     val currentSpeedKmH = mutableStateOf(0f) 
     val currentLocation = mutableStateOf<android.location.Location?>(null)
