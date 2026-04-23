@@ -338,7 +338,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                         if (loc.hasBearing() && !isStationary) {
                             val newOrientation = 360f - targetBearing
-                            mapOrientation = newOrientation
+                            mapView.mapOrientation = newOrientation
                             currentMapRotation = newOrientation
                         }
                     }
@@ -374,7 +374,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 var interpMapRot = startMapRot + (deltaMapRot * fraction)
                                 interpMapRot %= 360f
                                 if (interpMapRot < 0) interpMapRot += 360f
-                                mapOrientation = interpMapRot
+                                mapView.mapOrientation = interpMapRot
                                 currentMapRotation = interpMapRot
                             }
                             mapView.invalidate()
@@ -560,7 +560,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
-
                 if (isMapDarkMode) {
                     val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
@@ -568,30 +567,38 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         0.0f, 0.0f, -1.0f, 0.0f, 255f,
                         0.0f, 0.0f, 0.0f, 1.0f, 0.0f
                     ))
+                    val destinationMatrix = android.graphics.ColorMatrix()
+                    destinationMatrix.setSaturation(0.2f)
+                    inverseMatrix.postConcat(destinationMatrix)
                     view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
                 } else {
                     view.overlayManager.tilesOverlay.setColorFilter(null)
                 }
-                
+
                 // Renderizar la ruta histórica si hay una seleccionada
                 val selectedRoute = NavigationState.selectedHistoryRoute.value
+                val selectedSegment = NavigationState.selectedHistorySegment.value
                 val existingHistoryPolyline = view.overlays.find { it is Polyline && it.id == "ROUTE_HISTORY" }
                 
                 if (selectedRoute != null) {
                     if (existingHistoryPolyline == null) {
-                        val pts = selectedRoute.points.map { GeoPoint(it.lat, it.lon) }
+                        val pts = if (selectedSegment != null) {
+                            selectedSegment.points.map { GeoPoint(it.lat, it.lon) }
+                        } else {
+                            selectedRoute.segments.flatMap { s -> s.points.map { GeoPoint(it.lat, it.lon) } }
+                        }
+                        
                         if (pts.isNotEmpty()) {
                             val polyline = Polyline(view).apply {
                                 id = "ROUTE_HISTORY"
                                 setPoints(pts)
-                                outlinePaint.color = android.graphics.Color.parseColor("#4CAF50") // Verde
+                                outlinePaint.color = android.graphics.Color.parseColor("#4CAF50")
                                 outlinePaint.strokeWidth = 14f
-                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                                outlinePaint.strokeCap = Paint.Cap.ROUND
+                                outlinePaint.strokeJoin = Paint.Join.ROUND
                             }
                             view.overlays.add(polyline)
                             
-                            // Centrar en la ruta
                             isFollowingLocation = false
                             autoCenterJob?.cancel()
                             view.controller.animateTo(pts.first())
@@ -617,14 +624,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             val polyline = Polyline(view).apply {
                                 id = "DASHCAM_ROUTE"
                                 setPoints(pts)
-                                outlinePaint.color = android.graphics.Color.parseColor("#FF9800") // Naranja
+                                outlinePaint.color = android.graphics.Color.parseColor("#FF9800")
                                 outlinePaint.strokeWidth = 14f
-                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                                outlinePaint.strokeCap = Paint.Cap.ROUND
+                                outlinePaint.strokeJoin = Paint.Join.ROUND
                             }
                             view.overlays.add(polyline)
                             
-                            // Centrar en la ruta
                             isFollowingLocation = false
                             autoCenterJob?.cancel()
                             view.controller.animateTo(pts.first())
@@ -643,356 +649,313 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         )
 
-        // UI elements sobre el mapa
-        Column(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).offset(y = (-40).dp),
-            horizontalAlignment = Alignment.End
-        ) {
-            // Botón para cerrar la vista de ruta histórica
-            if (NavigationState.selectedHistoryRoute.value != null) {
-                androidx.compose.material3.ExtendedFloatingActionButton(
-                    onClick = { NavigationState.selectedHistoryRoute.value = null; isFollowingLocation = true },
-                    icon = { Icon(Icons.Default.Close, "Cerrar Ruta") },
-                    text = { Text("Cerrar Ruta Histórica") },
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-            }
-            
-            // Botón para cerrar la vista de ruta Dashcam
-            if (NavigationState.selectedDashcamRoute.value != null) {
-                androidx.compose.material3.ExtendedFloatingActionButton(
-                    onClick = { NavigationState.selectedDashcamRoute.value = null; isFollowingLocation = true },
-                    icon = { Icon(Icons.Default.Close, "Cerrar Dashcam") },
-                    text = { Text("Cerrar Ruta de Video") },
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-            }
-        }
-
-        // BARRA DE BÚSQUEDA Y FAVORITOS SUPERIOR
-        Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(12.dp)).padding(horizontal = 8.dp)) {
-                IconButton(onClick = { 
-                    showFavorites = !showFavorites
-                    if(showFavorites) {
-                        val loc = NavigationState.currentLocation.value
-                        val favs = favManager.getFavorites().map { fav ->
-                            var dist = 0.0
-                            loc?.let {
-                                val res = FloatArray(1)
-                                android.location.Location.distanceBetween(it.latitude, it.longitude, fav.lat, fav.lon, res)
-                                dist = res[0] / 1000.0
-                            }
-                            fav.copy(distanceKm = dist)
-                        }.sortedBy { it.distanceKm } 
-                        searchResults = favs
-                    } else {
-                        searchResults = emptyList()
-                    }
-                }) {
-                    Icon(if(showFavorites) Icons.Default.Star else Icons.Default.StarBorder, "Favoritos", tint = Color(uiColor))
-                }
-                
-                TextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Buscar lugar...") },
-                    modifier = Modifier.weight(1f),
-                    colors = TextFieldDefaults.textFieldColors(containerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        focusManager.clearFocus()
-                        if (searchQuery.isNotEmpty()) {
-                            isSearching = true
-                            coroutineScope.launch {
-                                try {
-                                    val query = URLEncoder.encode(searchQuery, "UTF-8")
-                                    val loc = NavigationState.currentLocation.value
-                                    
-                                    // Usar Photon API — mejores resultados que Nominatim para comercios/POIs
-                                    val urlStr = buildString {
-                                        append("https://photon.komoot.io/api/?q=$query&limit=15")
-                                        if (loc != null) {
-                                            append("&lat=${loc.latitude}&lon=${loc.longitude}")
-                                        }
-                                    }
-                                    
-                                    val result = withContext(Dispatchers.IO) {
-                                        val conn = URL(urlStr).openConnection() as HttpURLConnection
-                                        conn.setRequestProperty("User-Agent", "CarLauncher")
-                                        conn.connectTimeout = 5000
-                                        conn.inputStream.bufferedReader().readText()
-                                    }
-                                    
-                                    // Photon devuelve GeoJSON: { features: [{ geometry: {coordinates: [lon,lat]}, properties: {name, street, city, country, ...} }] }
-                                    val json = JSONObject(result)
-                                    val features = json.getJSONArray("features")
-                                    val list = mutableListOf<PlaceResult>()
-                                    
-                                    for (i in 0 until features.length()) {
-                                        val feature = features.getJSONObject(i)
-                                        val geometry = feature.getJSONObject("geometry")
-                                        val coords = geometry.getJSONArray("coordinates")
-                                        val lon = coords.getDouble(0)
-                                        val lat = coords.getDouble(1)
-                                        
-                                        val props = feature.getJSONObject("properties")
-                                        val name = props.optString("name", "")
-                                        val street = props.optString("street", "")
-                                        val city = props.optString("city", props.optString("county", ""))
-                                        val state = props.optString("state", "")
-                                        val osmType = props.optString("osm_value", "")
-                                        
-                                        // Construir nombre legible
-                                        val displayName = when {
-                                            name.isNotEmpty() -> name
-                                            street.isNotEmpty() -> street
-                                            else -> "Lugar"
-                                        }
-                                        
-                                        // Construir dirección
-                                        val addressParts = listOfNotNull(
-                                            street.takeIf { it.isNotEmpty() && it != displayName },
-                                            city.takeIf { it.isNotEmpty() },
-                                            state.takeIf { it.isNotEmpty() }
-                                        )
-                                        val address = addressParts.joinToString(", ")
-                                        
-                                        var dist = 0.0
-                                        loc?.let {
-                                            val res = FloatArray(1)
-                                            android.location.Location.distanceBetween(it.latitude, it.longitude, lat, lon, res)
-                                            dist = res[0] / 1000.0
-                                        }
-                                        
-                                        // Detectar tipo de ícono según OSM type
-                                        val iconType = when {
-                                            osmType.contains("fuel", true) || osmType.contains("gas", true) -> "LocalGasStation"
-                                            osmType.contains("shop", true) || osmType.contains("store", true) || osmType.contains("supermarket", true) -> "Store"
-                                            osmType.contains("office", true) -> "Work"
-                                            osmType.contains("residential", true) || osmType.contains("house", true) -> "Home"
-                                            else -> "Place"
-                                        }
-                                        
-                                        if (displayName != "Lugar" || address.isNotEmpty()) {
-                                            list.add(PlaceResult(displayName, address, lat, lon, iconType, dist))
-                                        }
-                                    }
-                                    searchResults = list.sortedBy { it.distanceKm }.take(8)
-                                    if(list.isEmpty()) Toast.makeText(context, "No se encontraron resultados", Toast.LENGTH_SHORT).show()
-                                } catch (e: Exception) { Toast.makeText(context, "Error al buscar: ${e.message}", Toast.LENGTH_SHORT).show() }
-                                isSearching = false
-                            }
-                        }
-                    })
-                )
-                if (isSearching) CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 8.dp), strokeWidth = 2.dp)
-                else IconButton(onClick = { searchQuery = ""; searchResults = emptyList(); showFavorites = false; focusManager.clearFocus() }) { Icon(Icons.Default.Close, "Limpiar") }
-            }
-
-            AnimatedVisibility(visible = searchResults.isNotEmpty()) {
-                LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 4.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(12.dp)).shadow(4.dp)) {
-                    items(searchResults) { place ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable {
-                            focusManager.clearFocus()
-                            searchQuery = place.name
-                            val p = GeoPoint(place.lat, place.lon)
-                            selectedDestination = p
-                            
-                            isFollowingLocation = false
-                            autoCenterJob?.cancel()
-
-                            mapView.controller.animateTo(p)
-                            mapView.overlays.removeAll { it is Marker && it.id == "DEST" }
-                            val m = Marker(mapView).apply { position = p; id = "DEST"; icon = BitmapDrawable(context.resources, drawCustomPin(uiColor)); setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) }
-                            mapView.overlays.add(m)
-                            mapView.invalidate()
-                            searchResults = emptyList()
-                            showFavorites = false
-                        }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            
-                            val icon = when (place.iconType) {
-                                "Home" -> Icons.Default.Home
-                                "Work" -> Icons.Default.Work
-                                "Store" -> Icons.Default.Store
-                                "LocalGasStation" -> Icons.Default.LocalGasStation
-                                else -> Icons.Default.Place
-                            }
-                            Icon(icon, null, tint = Color(uiColor), modifier = Modifier.size(28.dp))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(place.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (place.address.isNotEmpty()) {
-                                    Text(place.address, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-
-                            if (place.distanceKm > 0.0) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(String.format("%.1f km", place.distanceKm), fontWeight = FontWeight.Bold, color = Color(uiColor), fontSize = 14.sp)
-                            }
-                        }
-                        Divider()
-                    }
-                }
-            }
-        }
-
-        // CONTROLES FLOTANTES (Abajo Derecha)
-        Column(modifier = Modifier.align(Alignment.BottomEnd).padding(if (isFullScreen) 32.dp else 16.dp), horizontalAlignment = Alignment.End) {
-            
-            FloatingActionButton(
-                onClick = { AppSettings.setMapDarkMode(!AppSettings.isMapDarkMode.value) },
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                Icon(if (isMapDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema Mapa", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            AnimatedVisibility(visible = !isFollowingLocation && currentMapRotation != 0f) {
-                FloatingActionButton(
-                    onClick = { mapView.controller.animateTo(mapView.mapCenter, mapView.zoomLevelDouble, 500, 0f); currentMapRotation = 0f },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                    modifier = Modifier.padding(bottom = 8.dp)
+        // ── TOP OVERLAY: SEARCH & STATUS ──
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                    shadowElevation = 8.dp
                 ) {
-                    Icon(Icons.Default.Explore, "Norte", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Search, null, tint = Color(uiColor))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (searchQuery.isEmpty()) Text("¿A dónde vamos?", color = Color.Gray)
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        isSearching = true
+                                        coroutineScope.launch {
+                                            searchResults = searchPlaces(searchQuery)
+                                            isSearching = false
+                                        }
+                                    }
+                                    focusManager.clearFocus()
+                                })
+                            )
+                        }
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = ""; searchResults = emptyList() }) {
+                                Icon(Icons.Default.Close, null)
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                FloatingActionButton(
+                    onClick = { showFavorites = !showFavorites; searchResults = emptyList() },
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                    contentColor = if (showFavorites) Color(uiColor) else MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null)
                 }
             }
 
-            AnimatedVisibility(visible = !isFollowingLocation) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        isFollowingLocation = true
-                        autoCenterJob?.cancel()
-                        NavigationState.currentLocation.value?.let { 
-                            mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                            mapView.mapOrientation = 360f - lastKnownBearing
-                            currentMapRotation = 360f - lastKnownBearing
-                        }
-                    },
-                    icon = { Icon(Icons.Default.MyLocation, "Centrar") },
-                    text = { Text("Centrar") },
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-            }
-
-            if (routeDistanceText.isNotEmpty()) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                                val dest = selectedDestination
-                                if (start != null && dest != null) {
-                                    calculateRoute(GeoPoint(start.latitude, start.longitude), dest)
-                                } else {
-                                    routeDistanceText = "Esperando GPS..."
+            AnimatedVisibility(visible = searchResults.isNotEmpty() || showFavorites, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(max = 300.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+                ) {
+                    val list = if (showFavorites) favManager.getFavorites() else searchResults
+                    LazyColumn {
+                        items(list) { place ->
+                            ListItem(
+                                headlineContent = { Text(place.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(place.address, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                leadingContent = { 
+                                    Icon(
+                                        when(place.iconType) {
+                                            "Home" -> Icons.Default.Home
+                                            "Work" -> Icons.Default.Work
+                                            else -> Icons.Default.Place
+                                        }, 
+                                        null, 
+                                        tint = Color(uiColor)
+                                    ) 
+                                },
+                                modifier = Modifier.clickable {
+                                    val dest = GeoPoint(place.lat, place.lon)
+                                    selectedDestination = dest
+                                    mapView.overlays.removeAll { it is Marker && it.id == "DEST" }
+                                    val marker = Marker(mapView).apply {
+                                        position = dest
+                                        id = "DEST"
+                                        icon = BitmapDrawable(context.resources, drawCustomPin(uiColor))
+                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                    }
+                                    mapView.overlays.add(marker)
+                                    mapView.controller.animateTo(dest)
+                                    searchResults = emptyList()
+                                    showFavorites = false
+                                    focusManager.clearFocus()
                                 }
-                            },
-                            icon = { Icon(Icons.Default.Directions, "Trazar") }, text = { Text("Ir") }, 
-                            containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── NAVIGATION OVERLAY (Turn-by-Turn) ──
+        AnimatedVisibility(
+            visible = NavigationState.isRouteActive.value && activeRouteSteps.isNotEmpty(),
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp).padding(horizontal = 16.dp)
+        ) {
+            val nextStep = activeRouteSteps[0]
+            Surface(
+                modifier = Modifier.fillMaxWidth().height(90.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                shadowElevation = 10.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(uiColor).copy(alpha = 0.3f))
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier.size(56.dp).background(Color(uiColor).copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            getManeuverIcon(nextStep.modifier, nextStep.maneuverType),
+                            null,
+                            tint = Color(uiColor),
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (nextStep.distance > 1000) String.format("En %.1f km", nextStep.distance/1000) else "En ${nextStep.distance.toInt()} m",
+                            fontSize = 14.sp, color = Color(uiColor), fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            nextStep.streetName.ifEmpty { "Siga recto" },
+                            fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
         }
 
-        // DIÁLOGO PARA GUARDAR FAVORITO
-        if (showSaveFavoriteDialog && favoriteLocationToSave != null) {
+        // ── BOTTOM OVERLAY: ROUTE ACTIONS ──
+        AnimatedVisibility(
+            visible = selectedDestination != null,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().height(100.dp),
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                shadowElevation = 12.dp
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(if (NavigationState.isRouteActive.value) "En ruta a destino" else "Destino marcado", fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text(routeDistanceText.ifEmpty { "Calculando..." }, fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color(uiColor))
+                    }
+                    
+                    if (!NavigationState.isRouteActive.value) {
+                        Button(
+                            onClick = { 
+                                NavigationState.currentLocation.value?.let { loc ->
+                                    calculateRoute(GeoPoint(loc.latitude, loc.longitude), selectedDestination!!)
+                                }
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(uiColor)),
+                            modifier = Modifier.height(56.dp)
+                        ) {
+                            Icon(Icons.Default.Directions, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("INICIAR", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = { 
+                                NavigationState.clearActiveRoute()
+                                mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
+                                mapView.invalidate()
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.height(56.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("PARAR", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showArrivalAlert) {
+            AlertDialog(
+                onDismissRequest = { showArrivalAlert = false },
+                title = { Text("¡Has llegado!", fontWeight = FontWeight.Bold) },
+                text = { Text("Has alcanzado tu destino satisfactoriamente.") },
+                confirmButton = { Button(onClick = { showArrivalAlert = false }) { Text("OK") } }
+            )
+        }
+
+        if (showSaveFavoriteDialog) {
             AlertDialog(
                 onDismissRequest = { showSaveFavoriteDialog = false },
                 title = { Text("Guardar Favorito") },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        TextField(
-                            value = favoriteNameToSave,
-                            onValueChange = { favoriteNameToSave = it },
-                            label = { Text("Nombre del lugar") },
-                            singleLine = true
-                        )
-                        Text("Elige un ícono:")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            IconButton(onClick = { selectedIconType = "Home" }) { Icon(Icons.Default.Home, null, tint = if(selectedIconType=="Home") Color(uiColor) else MaterialTheme.colorScheme.onSurface) }
-                            IconButton(onClick = { selectedIconType = "Work" }) { Icon(Icons.Default.Work, null, tint = if(selectedIconType=="Work") Color(uiColor) else MaterialTheme.colorScheme.onSurface) }
-                            IconButton(onClick = { selectedIconType = "Store" }) { Icon(Icons.Default.Store, null, tint = if(selectedIconType=="Store") Color(uiColor) else MaterialTheme.colorScheme.onSurface) }
-                            IconButton(onClick = { selectedIconType = "LocalGasStation" }) { Icon(Icons.Default.LocalGasStation, null, tint = if(selectedIconType=="LocalGasStation") Color(uiColor) else MaterialTheme.colorScheme.onSurface) }
-                            IconButton(onClick = { selectedIconType = "Star" }) { Icon(Icons.Default.Star, null, tint = if(selectedIconType=="Star") Color(uiColor) else MaterialTheme.colorScheme.onSurface) }
+                    Column {
+                        TextField(value = favoriteNameToSave, onValueChange = { favoriteNameToSave = it }, label = { Text("Nombre") })
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Star", "Home", "Work").forEach { type ->
+                                FilterChip(
+                                    selected = selectedIconType == type,
+                                    onClick = { selectedIconType = type },
+                                    label = { Text(type) }
+                                )
+                            }
                         }
                     }
                 },
                 confirmButton = {
                     Button(onClick = {
-                        favManager.addFavorite(PlaceResult(favoriteNameToSave, "", favoriteLocationToSave!!.latitude, favoriteLocationToSave!!.longitude, selectedIconType))
-                        Toast.makeText(context, "Favorito guardado", Toast.LENGTH_SHORT).show()
-                        showSaveFavoriteDialog = false
+                        favoriteLocationToSave?.let {
+                            favManager.addFavorite(PlaceResult(favoriteNameToSave, "Favorito guardado", it.latitude, it.longitude, selectedIconType))
+                            showSaveFavoriteDialog = false
+                            Toast.makeText(context, "Guardado", Toast.LENGTH_SHORT).show()
+                        }
                     }) { Text("Guardar") }
-                },
-                dismissButton = { TextButton(onClick = { showSaveFavoriteDialog = false }) { Text("Cancelar") } }
+                }
             )
         }
-
-        AnimatedVisibility(
-            visible = showArrivalAlert,
-            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 24.dp)
-        ) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF4CAF50)),
-                elevation = CardDefaults.cardElevation(12.dp),
-                modifier = Modifier.width(300.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(Icons.Default.CheckCircle, null, tint = Color.White, modifier = Modifier.size(32.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("¡Has llegado a tu destino!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
-            }
-        }
-        
-        LaunchedEffect(showArrivalAlert) {
-            if (showArrivalAlert) {
-                delay(4000)
-                showArrivalAlert = false
-            }
-        }
     }
 }
 
-fun drawCustomPin(color: Int): Bitmap {
-    val size = 90
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
-    val path = Path().apply { moveTo(45f, 90f); cubicTo(45f, 90f, 10f, 50f, 10f, 35f); cubicTo(10f, 15f, 25f, 5f, 45f, 5f); cubicTo(65f, 5f, 80f, 15f, 80f, 35f); cubicTo(80f, 50f, 45f, 90f, 45f, 90f); close() }
-    canvas.drawPath(path, paint)
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(45f, 35f, 12f, paint)
-    return bitmap 
+private fun getManeuverIcon(modifier: String, type: String): androidx.compose.ui.graphics.vector.ImageVector {
+    return when {
+        type.contains("arrive") -> Icons.Default.Flag
+        modifier.contains("left") -> if (modifier.contains("sharp")) Icons.Default.TurnSharpLeft else Icons.Default.TurnLeft
+        modifier.contains("right") -> if (modifier.contains("sharp")) Icons.Default.TurnSharpRight else Icons.Default.TurnRight
+        modifier.contains("uturn") -> Icons.Default.UturnLeft
+        modifier.contains("straight") -> Icons.Default.Straight
+        else -> Icons.Default.Navigation
+    }
 }
 
-fun drawVehicleBitmap(type: String, color: Int): Bitmap {
-    val size = 120
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
-    val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.DKGRAY; style = Paint.Style.FILL }
-    val lightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.parseColor("#FFF59D"); style = Paint.Style.FILL }
-    val scale = 1.2f
-    canvas.scale(scale, scale)
+suspend fun searchPlaces(query: String): List<PlaceResult> = withContext(Dispatchers.IO) {
+    try {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=5")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.setRequestProperty("User-Agent", "CarLauncherApp")
+        val response = conn.inputStream.bufferedReader().readText()
+        val array = JSONArray(response)
+        val list = mutableListOf<PlaceResult>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            list.add(PlaceResult(obj.getString("display_name").split(",")[0], obj.getString("display_name"), obj.getDouble("lat"), obj.getDouble("lon")))
+        }
+        list
+    } catch (e: Exception) { emptyList() }
+}
+
+private fun drawVehicleBitmap(type: String, color: Int): Bitmap {
+    val b = Bitmap.createBitmap(120, 120, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(b)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = color
+    p.setShadowLayer(8f, 0f, 4f, 0x80000000.toInt())
 
     when (type) {
-        "FLECHA" -> { val path = Path().apply { moveTo(size / 2f / scale, 10f); lineTo((size - 20f) / scale, (size - 15f) / scale); lineTo(size / 2f / scale, (size - 30f) / scale); lineTo(20f / scale, (size - 15f) / scale); close() }; canvas.drawPath(path, bodyPaint) }
-        "SEDAN", "CUSTOM" -> { canvas.drawRoundRect(25f, 10f, 75f, 90f, 15f, 15f, bodyPaint); canvas.drawRoundRect(30f, 30f, 70f, 45f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 65f, 70f, 75f, 5f, 5f, glassPaint); canvas.drawCircle(35f, 15f, 6f, lightPaint); canvas.drawCircle(65f, 15f, 6f, lightPaint) }
-        "HATCHBACK" -> { canvas.drawRoundRect(25f, 20f, 75f, 85f, 12f, 12f, bodyPaint); canvas.drawRoundRect(30f, 40f, 70f, 55f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 75f, 70f, 82f, 3f, 3f, glassPaint); canvas.drawCircle(35f, 25f, 6f, lightPaint); canvas.drawCircle(65f, 25f, 6f, lightPaint) }
+        "SPORT" -> {
+            val path = Path()
+            path.moveTo(60f, 10f)
+            path.lineTo(20f, 100f)
+            path.lineTo(60f, 85f)
+            path.lineTo(100f, 100f)
+            path.close()
+            canvas.drawPath(path, p)
+        }
+        "TRUCK" -> canvas.drawRect(30f, 20f, 90f, 100f, p)
+        else -> { 
+            val path = Path()
+            path.moveTo(60f, 15f)
+            path.lineTo(25f, 105f)
+            path.lineTo(60f, 90f)
+            path.lineTo(95f, 105f)
+            path.close()
+            canvas.drawPath(path, p)
+        }
     }
-    return bitmap
+    return b
+}
+
+private fun drawCustomPin(color: Int): Bitmap {
+    val b = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(b)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = color
+    canvas.drawCircle(40f, 30f, 25f, p)
+    val path = Path()
+    path.moveTo(15f, 35f)
+    path.lineTo(40f, 75f)
+    path.lineTo(65f, 35f)
+    path.close()
+    canvas.drawPath(path, p)
+    p.color = Color.White.toArgb()
+    canvas.drawCircle(40f, 30f, 10f, p)
+    return b
 }
