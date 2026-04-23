@@ -1,11 +1,13 @@
 package com.tuusuario.carlauncher.services
 
+import android.content.Context
 import android.location.Location
-import android.os.Environment
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
@@ -16,44 +18,91 @@ data class RoutePoint(
     val note: String? = null
 )
 
+data class RouteSegment(
+    val startTime: String,   // "HH:mm"
+    val endTime: String,     // "HH:mm"
+    val points: MutableList<RoutePoint> = mutableListOf()
+)
+
 data class DailyRoute(
     val date: String,
-    val points: MutableList<RoutePoint> = mutableListOf(),
+    val segments: MutableList<RouteSegment> = mutableListOf(),
     var isDeleted: Boolean = false,
     var deletedAt: String? = null
 )
 
 object RouteTracker {
-    private const val MIN_DISTANCE_METERS = 50f
+    private const val MIN_DISTANCE_METERS = 10f
+    private const val SEGMENT_DURATION_MINUTES = 30
+
     private var lastRecordedLocation: Location? = null
-    var currentDailyRoute: DailyRoute? = null
+    private var currentDailyRoute: DailyRoute? = null
+    private var currentSegment: RouteSegment? = null
+    private var routesDir: File? = null
+    private var trashDir: File? = null
 
-    private fun getRoutesDir(): File {
-        val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val routesDir = File(docsDir, "CarLauncher/Rutas")
-        if (!routesDir.exists()) routesDir.mkdirs()
-        return routesDir
-    }
-    
-    private fun getTrashDir(): File {
-        val trashDir = File(getRoutesDir(), "Papelera")
-        if (!trashDir.exists()) trashDir.mkdirs()
-        return trashDir
+    /**
+     * Must be called once with the Application context before any recording happens.
+     * Uses app-internal storage so no WRITE_EXTERNAL_STORAGE permission is needed.
+     */
+    fun init(context: Context) {
+        val base = File(context.filesDir, "CarLauncher/Rutas")
+        if (!base.exists()) base.mkdirs()
+        routesDir = base
+
+        val trash = File(base, "Papelera")
+        if (!trash.exists()) trash.mkdirs()
+        trashDir = trash
+
+        // Migrate old external storage files if they exist
+        migrateOldStorage()
     }
 
-    fun cleanupOldTrash() {
+    private fun getRoutesDir(): File = routesDir ?: throw IllegalStateException("RouteTracker not initialized. Call init(context) first.")
+    private fun getTrashDir(): File = trashDir ?: throw IllegalStateException("RouteTracker not initialized. Call init(context) first.")
+
+    /**
+     * Migrate files from old Documents/CarLauncher/Rutas location if any exist.
+     */
+    private fun migrateOldStorage() {
         try {
-            val trashDir = getTrashDir()
-            val files = trashDir.listFiles() ?: return
-            val now = LocalDateTime.now()
-            files.forEach { file ->
-                val json = JSONObject(file.readText())
-                val deletedAtStr = json.optString("deletedAt", "")
-                if (deletedAtStr.isNotEmpty()) {
-                    val deletedAt = LocalDateTime.parse(deletedAtStr, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                    val daysInTrash = ChronoUnit.DAYS.between(deletedAt, now)
-                    if (daysInTrash >= 2) {
-                        file.delete() // Permanently delete after 2 days
+            val oldDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), "CarLauncher/Rutas")
+            if (oldDir.exists()) {
+                oldDir.listFiles()?.filter { it.name.endsWith(".json") }?.forEach { oldFile ->
+                    val newFile = File(getRoutesDir(), oldFile.name)
+                    if (!newFile.exists()) {
+                        // Try to convert old format (flat points) to new format (segments)
+                        try {
+                            val json = JSONObject(oldFile.readText())
+                            if (!json.has("segments") && json.has("points")) {
+                                // Old format: convert all points into one segment
+                                val oldPoints = json.getJSONArray("points")
+                                if (oldPoints.length() > 0) {
+                                    val firstPt = oldPoints.getJSONObject(0)
+                                    val lastPt = oldPoints.getJSONObject(oldPoints.length() - 1)
+                                    
+                                    val segment = JSONObject()
+                                    segment.put("startTime", firstPt.getString("timestamp").substring(0, 5))
+                                    segment.put("endTime", lastPt.getString("timestamp").substring(0, 5))
+                                    segment.put("points", oldPoints)
+                                    
+                                    val segments = JSONArray()
+                                    segments.put(segment)
+                                    
+                                    val newJson = JSONObject()
+                                    newJson.put("date", json.getString("date"))
+                                    newJson.put("segments", segments)
+                                    newJson.put("isDeleted", json.optBoolean("isDeleted", false))
+                                    if (json.has("deletedAt")) newJson.put("deletedAt", json.getString("deletedAt"))
+                                    
+                                    newFile.writeText(newJson.toString(2))
+                                }
+                            } else {
+                                oldFile.copyTo(newFile)
+                            }
+                        } catch (e: Exception) {
+                            oldFile.copyTo(newFile)
+                        }
                     }
                 }
             }
@@ -62,7 +111,35 @@ object RouteTracker {
         }
     }
 
+    fun cleanupOldTrash() {
+        try {
+            val files = getTrashDir().listFiles() ?: return
+            val now = LocalDateTime.now()
+            files.forEach { file ->
+                try {
+                    val json = JSONObject(file.readText())
+                    val deletedAtStr = json.optString("deletedAt", "")
+                    if (deletedAtStr.isNotEmpty()) {
+                        val deletedAt = LocalDateTime.parse(deletedAtStr, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                        val daysInTrash = ChronoUnit.DAYS.between(deletedAt, now)
+                        if (daysInTrash >= 2) {
+                            file.delete()
+                        }
+                    }
+                } catch (e: Exception) { /* skip corrupt files */ }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Called on every GPS update. Records the point if it is >= 10m from the last one.
+     * Groups points into 30-minute segments automatically.
+     */
     fun onLocationUpdate(loc: Location) {
+        if (routesDir == null) return // Not initialized
+
         val lastLoc = lastRecordedLocation
         if (lastLoc == null || lastLoc.distanceTo(loc) >= MIN_DISTANCE_METERS) {
             recordPoint(loc)
@@ -75,12 +152,46 @@ object RouteTracker {
             val now = LocalDateTime.now()
             val dateStr = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
             val timeStr = now.format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-            
+            val timeHHmm = timeStr.substring(0, 5)
+
+            // Load or create the daily route
             if (currentDailyRoute == null || currentDailyRoute?.date != dateStr) {
                 currentDailyRoute = loadRoute(dateStr) ?: DailyRoute(dateStr)
+                currentSegment = currentDailyRoute?.segments?.lastOrNull()
             }
-            
-            currentDailyRoute?.points?.add(RoutePoint(loc.latitude, loc.longitude, timeStr))
+
+            // Check if we need a new segment (every 30 minutes)
+            val needNewSegment = if (currentSegment == null) {
+                true
+            } else {
+                try {
+                    val segStart = LocalTime.parse(currentSegment!!.startTime, DateTimeFormatter.ofPattern("HH:mm"))
+                    val currentTime = LocalTime.parse(timeHHmm, DateTimeFormatter.ofPattern("HH:mm"))
+                    ChronoUnit.MINUTES.between(segStart, currentTime) >= SEGMENT_DURATION_MINUTES
+                } catch (e: Exception) {
+                    true
+                }
+            }
+
+            if (needNewSegment) {
+                // Start a new segment
+                currentSegment = RouteSegment(
+                    startTime = timeHHmm,
+                    endTime = timeHHmm
+                )
+                currentDailyRoute!!.segments.add(currentSegment!!)
+            }
+
+            // Add the point
+            currentSegment!!.points.add(RoutePoint(loc.latitude, loc.longitude, timeStr))
+            currentSegment = currentSegment!!.copy(endTime = timeHHmm).also { updated ->
+                // Replace the last segment in the list with the updated one
+                val idx = currentDailyRoute!!.segments.size - 1
+                currentDailyRoute!!.segments[idx] = updated
+                currentSegment = currentDailyRoute!!.segments[idx]
+            }
+
+            // Save to disk
             saveRoute(currentDailyRoute!!)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -93,29 +204,36 @@ object RouteTracker {
             json.put("date", route.date)
             json.put("isDeleted", route.isDeleted)
             route.deletedAt?.let { json.put("deletedAt", it) }
-            
-            val pointsArray = JSONArray()
-            route.points.forEach { pt ->
-                val ptObj = JSONObject()
-                ptObj.put("lat", pt.lat)
-                ptObj.put("lon", pt.lon)
-                ptObj.put("timestamp", pt.timestamp)
-                pt.note?.let { ptObj.put("note", it) }
-                pointsArray.put(ptObj)
+
+            val segmentsArray = JSONArray()
+            route.segments.forEach { seg ->
+                val segObj = JSONObject()
+                segObj.put("startTime", seg.startTime)
+                segObj.put("endTime", seg.endTime)
+
+                val pointsArray = JSONArray()
+                seg.points.forEach { pt ->
+                    val ptObj = JSONObject()
+                    ptObj.put("lat", pt.lat)
+                    ptObj.put("lon", pt.lon)
+                    ptObj.put("timestamp", pt.timestamp)
+                    pt.note?.let { ptObj.put("note", it) }
+                    pointsArray.put(ptObj)
+                }
+                segObj.put("points", pointsArray)
+                segmentsArray.put(segObj)
             }
-            json.put("points", pointsArray)
-            
+            json.put("segments", segmentsArray)
+
             val dir = if (route.isDeleted) getTrashDir() else getRoutesDir()
             val file = File(dir, "ruta_${route.date}.json")
             file.writeText(json.toString(2))
-            
-            // If it was moved to trash, delete the original
+
+            // If moved to trash, delete the original; and vice versa
             if (route.isDeleted) {
-                val originalFile = File(getRoutesDir(), "ruta_${route.date}.json")
-                if (originalFile.exists()) originalFile.delete()
+                File(getRoutesDir(), "ruta_${route.date}.json").let { if (it.exists()) it.delete() }
             } else {
-                val trashFile = File(getTrashDir(), "ruta_${route.date}.json")
-                if (trashFile.exists()) trashFile.delete()
+                File(getTrashDir(), "ruta_${route.date}.json").let { if (it.exists()) it.delete() }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -125,29 +243,63 @@ object RouteTracker {
     fun loadRoute(dateStr: String): DailyRoute? {
         val file = File(getRoutesDir(), "ruta_${dateStr}.json")
         val trashFile = File(getTrashDir(), "ruta_${dateStr}.json")
-        
-        val targetFile = if (file.exists()) file else if (trashFile.exists()) trashFile else null
-        if (targetFile == null) return null
-        
+        val targetFile = when {
+            file.exists() -> file
+            trashFile.exists() -> trashFile
+            else -> return null
+        }
+
         return try {
             val json = JSONObject(targetFile.readText())
             val route = DailyRoute(
                 date = json.getString("date"),
                 isDeleted = json.optBoolean("isDeleted", false),
-                deletedAt = json.optString("deletedAt", null).takeIf { it != "null" && it.isNotEmpty() }
+                deletedAt = json.optString("deletedAt", null).takeIf { it != "null" && !it.isNullOrEmpty() }
             )
-            val ptsArray = json.getJSONArray("points")
-            for (i in 0 until ptsArray.length()) {
-                val ptObj = ptsArray.getJSONObject(i)
-                route.points.add(
-                    RoutePoint(
-                        lat = ptObj.getDouble("lat"),
-                        lon = ptObj.getDouble("lon"),
-                        timestamp = ptObj.getString("timestamp"),
-                        note = ptObj.optString("note", null).takeIf { it != "null" && it.isNotEmpty() }
+
+            if (json.has("segments")) {
+                val segArray = json.getJSONArray("segments")
+                for (s in 0 until segArray.length()) {
+                    val segObj = segArray.getJSONObject(s)
+                    val segment = RouteSegment(
+                        startTime = segObj.getString("startTime"),
+                        endTime = segObj.getString("endTime")
                     )
-                )
+                    val ptsArray = segObj.getJSONArray("points")
+                    for (i in 0 until ptsArray.length()) {
+                        val ptObj = ptsArray.getJSONObject(i)
+                        segment.points.add(RoutePoint(
+                            lat = ptObj.getDouble("lat"),
+                            lon = ptObj.getDouble("lon"),
+                            timestamp = ptObj.getString("timestamp"),
+                            note = ptObj.optString("note", null).takeIf { it != "null" && !it.isNullOrEmpty() }
+                        ))
+                    }
+                    route.segments.add(segment)
+                }
+            } else if (json.has("points")) {
+                // Legacy format compatibility: convert flat points to a single segment
+                val ptsArray = json.getJSONArray("points")
+                if (ptsArray.length() > 0) {
+                    val points = mutableListOf<RoutePoint>()
+                    for (i in 0 until ptsArray.length()) {
+                        val ptObj = ptsArray.getJSONObject(i)
+                        points.add(RoutePoint(
+                            lat = ptObj.getDouble("lat"),
+                            lon = ptObj.getDouble("lon"),
+                            timestamp = ptObj.getString("timestamp"),
+                            note = ptObj.optString("note", null).takeIf { it != "null" && !it.isNullOrEmpty() }
+                        ))
+                    }
+                    val seg = RouteSegment(
+                        startTime = points.first().timestamp.substring(0, 5),
+                        endTime = points.last().timestamp.substring(0, 5),
+                        points = points
+                    )
+                    route.segments.add(seg)
+                }
             }
+
             route
         } catch (e: Exception) {
             e.printStackTrace()
@@ -155,18 +307,47 @@ object RouteTracker {
         }
     }
 
+    /**
+     * Get all route dates that have data, sorted descending.
+     */
     fun getAllRoutes(): List<DailyRoute> {
+        if (routesDir == null) return emptyList()
         val routes = mutableListOf<DailyRoute>()
         try {
-            getRoutesDir().listFiles()?.filter { it.name.endsWith(".json") }?.forEach {
-                loadRoute(it.name.removePrefix("ruta_").removeSuffix(".json"))?.let { r -> routes.add(r) }
+            getRoutesDir().listFiles()?.filter { it.name.startsWith("ruta_") && it.name.endsWith(".json") }?.forEach {
+                val dateStr = it.name.removePrefix("ruta_").removeSuffix(".json")
+                loadRoute(dateStr)?.let { r -> routes.add(r) }
             }
-            getTrashDir().listFiles()?.filter { it.name.endsWith(".json") }?.forEach {
-                loadRoute(it.name.removePrefix("ruta_").removeSuffix(".json"))?.let { r -> routes.add(r) }
+            getTrashDir().listFiles()?.filter { it.name.startsWith("ruta_") && it.name.endsWith(".json") }?.forEach {
+                val dateStr = it.name.removePrefix("ruta_").removeSuffix(".json")
+                loadRoute(dateStr)?.let { r -> if (routes.none { existing -> existing.date == r.date }) routes.add(r) }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
         return routes.sortedByDescending { it.date }
+    }
+
+    /**
+     * Get all dates that have route data (for day navigation).
+     */
+    fun getAvailableDates(): List<String> {
+        if (routesDir == null) return emptyList()
+        val dates = mutableSetOf<String>()
+        try {
+            getRoutesDir().listFiles()?.filter { it.name.startsWith("ruta_") && it.name.endsWith(".json") }?.forEach {
+                dates.add(it.name.removePrefix("ruta_").removeSuffix(".json"))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return dates.sorted()
+    }
+
+    /**
+     * Get all points from a route flattened across all segments (for backward compat).
+     */
+    fun getAllPoints(route: DailyRoute): List<RoutePoint> {
+        return route.segments.flatMap { it.points }
     }
 }

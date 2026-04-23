@@ -66,11 +66,43 @@ import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.ui.platform.LocalLifecycleOwner
 
+/**
+ * Turn-by-turn instruction from OSRM steps.
+ */
+data class RouteStep(
+    val maneuverType: String,   // "turn", "new name", "depart", "arrive", "end of road", "roundabout", "fork", "merge"
+    val modifier: String,       // "left", "right", "straight", "uturn", "slight left", "slight right", "sharp left", "sharp right"
+    val distance: Double,       // meters for this step
+    val streetName: String,
+    val maneuverLat: Double,
+    val maneuverLon: Double
+)
+
 object NavigationState { 
     val currentSpeedKmH = mutableStateOf(0f) 
     val currentLocation = mutableStateOf<android.location.Location?>(null)
     val selectedHistoryRoute = mutableStateOf<com.tuusuario.carlauncher.services.DailyRoute?>(null)
     val selectedDashcamRoute = mutableStateOf<List<com.tuusuario.carlauncher.services.RoutePoint>?>(null)
+    
+    // ── ACTIVE NAVIGATION (persists across tab switches) ──
+    val activeDestination = mutableStateOf<org.osmdroid.util.GeoPoint?>(null)
+    val activeRoutePoints = mutableStateListOf<org.osmdroid.util.GeoPoint>()
+    val activeRouteDistance = mutableStateOf("")
+    val activeRouteSteps = mutableStateListOf<RouteStep>()
+    val cachedRouteJson = mutableStateOf<String?>(null)  // Full OSRM response for offline cache
+    val isRouteActive = mutableStateOf(false)
+    
+    /** Selected segment for history viewing */
+    val selectedHistorySegment = mutableStateOf<com.tuusuario.carlauncher.services.RouteSegment?>(null)
+    
+    fun clearActiveRoute() {
+        activeDestination.value = null
+        activeRoutePoints.clear()
+        activeRouteDistance.value = ""
+        activeRouteSteps.clear()
+        cachedRouteJson.value = null
+        isRouteActive.value = false
+    }
 }
 
 // Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
@@ -204,6 +236,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         if (NavigationState.selectedHistoryRoute.value != null || NavigationState.selectedDashcamRoute.value != null) {
             RouteMapFloatingDialog(onDismiss = {
                 NavigationState.selectedHistoryRoute.value = null
+                NavigationState.selectedHistorySegment.value = null
                 NavigationState.selectedDashcamRoute.value = null
             })
         }
@@ -508,10 +541,21 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
 
 @Composable
 fun RouteHistoryScreen() {
-    var routes by remember { mutableStateOf(com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()) }
+    val allRoutes = remember { mutableStateOf(com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()) }
+    val routes = allRoutes.value.filter { !it.isDeleted }
+    val availableDates = routes.map { it.date }.distinct().sorted()
+    
+    var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
     var showingTrash by remember { mutableStateOf(false) }
+    val activeUiColor = Color(AppSettings.uiColor.value)
+
+    // Refresh when coming back
+    LaunchedEffect(Unit) {
+        allRoutes.value = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // ── HEADER ──
         Row(
             modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -531,51 +575,174 @@ fun RouteHistoryScreen() {
             }
         }
 
-        val displayedRoutes = routes.filter { it.isDeleted == showingTrash }
-
-        if (displayedRoutes.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(64.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(if (showingTrash) "La papelera está vacía" else "No hay rutas registradas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (showingTrash) {
+            // ── TRASH VIEW (unchanged logic) ──
+            val trashRoutes = allRoutes.value.filter { it.isDeleted }
+            if (trashRoutes.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("La papelera está vacía", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-            }
-        } else {
-            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(displayedRoutes.size) { i ->
-                    val route = displayedRoutes[i]
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            if (!showingTrash) { NavigationState.selectedHistoryRoute.value = route }
-                        },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Ruta del ${route.date}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("${route.points.size} puntos registrados", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (showingTrash && route.deletedAt != null) {
-                                    Text("Borrado: ${route.deletedAt?.split("T")?.get(0)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(trashRoutes.size) { i ->
+                        val route = trashRoutes[i]
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(32.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Ruta del ${route.date}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    val totalPts = route.segments.sumOf { it.points.size }
+                                    Text("$totalPts puntos · ${route.segments.size} segmentos", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    route.deletedAt?.let {
+                                        Text("Borrado: ${it.split("T").getOrElse(0) { it }}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                    }
                                 }
-                            }
-                            if (showingTrash) {
                                 IconButton(onClick = {
                                     route.isDeleted = false; route.deletedAt = null
                                     com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
-                                    routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+                                    allRoutes.value = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
                                 }) { Icon(Icons.Default.Restore, "Restaurar", tint = MaterialTheme.colorScheme.primary) }
-                            } else {
-                                IconButton(onClick = {
-                                    route.isDeleted = true
-                                    route.deletedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                                    com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
-                                    routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
-                                }) { Icon(Icons.Default.Delete, "Borrar", tint = MaterialTheme.colorScheme.error) }
                             }
                         }
+                    }
+                }
+            }
+        } else {
+            // ── MAIN VIEW: Day Navigation + Segments ──
+            if (availableDates.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("No hay rutas registradas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Conduce al menos 10 metros para empezar", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    }
+                }
+            } else {
+                val safeIndex = selectedDateIndex.coerceIn(0, availableDates.lastIndex)
+                val currentDate = availableDates[safeIndex]
+                val currentRoute = routes.find { it.date == currentDate }
+
+                // ── DAY NAVIGATION BAR ──
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = { if (safeIndex > 0) selectedDateIndex = safeIndex - 1 },
+                            enabled = safeIndex > 0
+                        ) {
+                            Icon(Icons.Default.ChevronLeft, "Día anterior",
+                                tint = if (safeIndex > 0) activeUiColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                modifier = Modifier.size(32.dp))
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(currentDate, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = activeUiColor)
+                            currentRoute?.let { r ->
+                                val totalPts = r.segments.sumOf { it.points.size }
+                                Text("${r.segments.size} segmentos · $totalPts puntos", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { if (safeIndex < availableDates.lastIndex) selectedDateIndex = safeIndex + 1 },
+                            enabled = safeIndex < availableDates.lastIndex
+                        ) {
+                            Icon(Icons.Default.ChevronRight, "Día siguiente",
+                                tint = if (safeIndex < availableDates.lastIndex) activeUiColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                modifier = Modifier.size(32.dp))
+                        }
+                    }
+                }
+
+                // ── SEGMENTS LIST ──
+                if (currentRoute != null && currentRoute.segments.isNotEmpty()) {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        items(currentRoute.segments.size) { segIndex ->
+                            val segment = currentRoute.segments[segIndex]
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    // Open this segment's route on the map
+                                    NavigationState.selectedHistorySegment.value = segment
+                                    NavigationState.selectedHistoryRoute.value = currentRoute
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Time icon with accent
+                                    Box(
+                                        modifier = Modifier.size(48.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(activeUiColor.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Timeline, null, tint = activeUiColor, modifier = Modifier.size(24.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "${segment.startTime} — ${segment.endTime}",
+                                            fontWeight = FontWeight.Bold, fontSize = 16.sp
+                                        )
+                                        Text(
+                                            "${segment.points.size} puntos registrados",
+                                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null, tint = activeUiColor.copy(alpha = 0.6f))
+                                }
+                            }
+                        }
+
+                        // Delete day button at bottom
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    currentRoute.isDeleted = true
+                                    currentRoute.deletedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                    com.tuusuario.carlauncher.services.RouteTracker.saveRoute(currentRoute)
+                                    allRoutes.value = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+                                    // Adjust index
+                                    val newDates = allRoutes.value.filter { !it.isDeleted }.map { it.date }.distinct().sorted()
+                                    selectedDateIndex = (selectedDateIndex - 1).coerceAtLeast(0)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+                            ) {
+                                Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Eliminar este día")
+                            }
+                        }
+                    }
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Sin datos para este día", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -811,11 +978,13 @@ fun DashboardMediaWidget(showYoutubeInDashboard: Boolean, youtubeContent: @Compo
 fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val historyRoute = NavigationState.selectedHistoryRoute.value
+    val historySegment = NavigationState.selectedHistorySegment.value
     val dashcamRoute = NavigationState.selectedDashcamRoute.value
 
-    val routePoints: List<GeoPoint> = remember(historyRoute, dashcamRoute) {
+    val routePoints: List<GeoPoint> = remember(historyRoute, historySegment, dashcamRoute) {
         when {
-            historyRoute != null -> historyRoute.points.map { GeoPoint(it.lat, it.lon) }
+            historySegment != null -> historySegment.points.map { GeoPoint(it.lat, it.lon) }
+            historyRoute != null -> historyRoute.segments.flatMap { seg -> seg.points.map { GeoPoint(it.lat, it.lon) } }
             dashcamRoute != null -> dashcamRoute.map { GeoPoint(it.lat, it.lon) }
             else -> emptyList()
         }
@@ -827,7 +996,11 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
         android.graphics.Color.parseColor("#FF9800")
 
     val routeTitle = when {
-        historyRoute != null -> "Ruta del ${historyRoute.date} · ${historyRoute.points.size} puntos"
+        historySegment != null -> "Segmento ${historySegment.startTime}—${historySegment.endTime} · ${historySegment.points.size} puntos"
+        historyRoute != null -> {
+            val totalPts = historyRoute.segments.sumOf { it.points.size }
+            "Ruta del ${historyRoute.date} · $totalPts puntos"
+        }
         dashcamRoute != null -> "Ruta de Video · ${dashcamRoute.size} puntos"
         else -> ""
     }

@@ -4,22 +4,13 @@ import android.Manifest
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.animation.LinearInterpolator
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -52,6 +43,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.google.android.gms.location.*
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
+import com.tuusuario.carlauncher.ui.RouteStep
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -70,7 +62,6 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -126,9 +117,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var favoriteLocationToSave by remember { mutableStateOf<GeoPoint?>(null) }
     var selectedIconType by remember { mutableStateOf("Star") }
 
-    var selectedDestination by remember { mutableStateOf<GeoPoint?>(null) }
-    var routeDistanceText by remember { mutableStateOf("") }
-    val currentRoutePoints = remember { mutableStateListOf<GeoPoint>() }
+    // ELEVATED STATE: Now using NavigationState
+    var selectedDestination by NavigationState.activeDestination
+    var routeDistanceText by NavigationState.activeRouteDistance
+    val currentRoutePoints = NavigationState.activeRoutePoints
+    val activeRouteSteps = NavigationState.activeRouteSteps
     
     var showArrivalAlert by remember { mutableStateOf(false) }
     var isCalculatingRoute by remember { mutableStateOf(false) }
@@ -170,19 +163,22 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
-    // Función unificada para calcular/recalcular rutas
+    // Función unificada para calcular/recalcular rutas con STEPS (indicadores de giro)
     val calculateRoute: (GeoPoint, GeoPoint) -> Unit = { startGeo, destGeo ->
         if (!isCalculatingRoute) {
             isCalculatingRoute = true
             coroutineScope.launch {
                 routeDistanceText = "Calculando ruta..."
                 try {
-                    val urlStr = "https://router.project-osrm.org/route/v1/driving/${startGeo.longitude},${startGeo.latitude};${destGeo.longitude},${destGeo.latitude}?overview=full&geometries=geojson"
+                    // Añadimos steps=true para obtener las maniobras
+                    val urlStr = "https://router.project-osrm.org/route/v1/driving/${startGeo.longitude},${startGeo.latitude};${destGeo.longitude},${destGeo.latitude}?overview=full&geometries=geojson&steps=true"
                     val result = withContext(Dispatchers.IO) {
                         val conn = URL(urlStr).openConnection() as HttpURLConnection
-                        conn.connectTimeout = 3000
+                        conn.connectTimeout = 4000
                         conn.inputStream.bufferedReader().readText()
                     }
+                    
+                    NavigationState.cachedRouteJson.value = result // Cache for offline use
                     val json = JSONObject(result)
                     val routes = json.getJSONArray("routes")
                     if (routes.length() > 0) {
@@ -190,6 +186,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val distanceMeters = route.getDouble("distance")
                         routeDistanceText = if (distanceMeters > 1000) String.format("%.1f km restantes", distanceMeters / 1000) else "${distanceMeters.toInt()} m restantes"
 
+                        // Parsear Puntos
                         val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
                         currentRoutePoints.clear()
                         for (i in 0 until coordinates.length()) {
@@ -197,12 +194,34 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             currentRoutePoints.add(GeoPoint(pt.getDouble(1), pt.getDouble(0)))
                         }
                         
+                        // Parsear Steps (Instrucciones de giro)
+                        activeRouteSteps.clear()
+                        val legs = route.getJSONArray("legs")
+                        if (legs.length() > 0) {
+                            val steps = legs.getJSONObject(0).getJSONArray("steps")
+                            for (i in 0 until steps.length()) {
+                                val step = steps.getJSONObject(i)
+                                val maneuver = step.getJSONObject("maneuver")
+                                val loc = maneuver.getJSONArray("location")
+                                activeRouteSteps.add(RouteStep(
+                                    maneuverType = maneuver.getString("type"),
+                                    modifier = maneuver.optString("modifier", "straight"),
+                                    distance = step.getDouble("distance"),
+                                    streetName = step.optString("name", "Calle"),
+                                    maneuverLat = loc.getDouble(1),
+                                    maneuverLon = loc.getDouble(0)
+                                ))
+                            }
+                        }
+
+                        NavigationState.isRouteActive.value = true
+                        
                         mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
                         val polyline = Polyline(mapView).apply {
                             id = "ROUTE_MAIN"
                             setPoints(currentRoutePoints.toList())
                             outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
-                            outlinePaint.strokeWidth = 18f
+                            outlinePaint.strokeWidth = 20f
                             outlinePaint.strokeCap = Paint.Cap.ROUND
                             outlinePaint.strokeJoin = Paint.Join.ROUND
                         }
@@ -212,26 +231,33 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         mapView.invalidate()
                     }
                 } catch (e: Exception) { 
-                    val dist = startGeo.distanceToAsDouble(destGeo)
-                    routeDistanceText = "Ruta Offline: ${String.format("%.1f km (Linea Recta)", dist / 1000)}"
-                    currentRoutePoints.clear()
-                    currentRoutePoints.add(startGeo)
-                    currentRoutePoints.add(destGeo)
+                    // LÓGICA OFFLINE: Usar caché si existe
+                    if (NavigationState.cachedRouteJson.value != null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Sin Internet: Usando ruta en caché", Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        val dist = startGeo.distanceToAsDouble(destGeo)
+                        routeDistanceText = "Offline: ${String.format("%.1f km (Directo)", dist / 1000)}"
+                        currentRoutePoints.clear()
+                        currentRoutePoints.add(startGeo)
+                        currentRoutePoints.add(destGeo)
 
-                    mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
-                    val polyline = Polyline(mapView).apply {
-                        id = "ROUTE_MAIN"
-                        setPoints(currentRoutePoints.toList())
-                        outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
-                        outlinePaint.strokeWidth = 12f
-                        outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
-                    }
-                    mapView.overlays.add(0, polyline)
-                    isFollowingLocation = true 
-                    autoCenterJob?.cancel()
-                    mapView.invalidate()
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Sin Internet: Activando Ruta Directa Offline", Toast.LENGTH_LONG).show()
+                        mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
+                        val polyline = Polyline(mapView).apply {
+                            id = "ROUTE_MAIN"
+                            setPoints(currentRoutePoints.toList())
+                            outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
+                            outlinePaint.strokeWidth = 12f
+                            outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
+                        }
+                        mapView.overlays.add(0, polyline)
+                        isFollowingLocation = true 
+                        autoCenterJob?.cancel()
+                        mapView.invalidate()
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Sin Internet: Activando Ruta Directa", Toast.LENGTH_LONG).show()
+                        }
                     }
                 } finally {
                     isCalculatingRoute = false
@@ -256,29 +282,25 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
             .setMinUpdateIntervalMillis(500)
-            .setMinUpdateDistanceMeters(1f)  // Ignorar si se movió menos de 1 metro
-            .setMaxUpdateDelayMillis(2000)    // No atrasar más de 2s
+            .setMinUpdateDistanceMeters(1f)
+            .setMaxUpdateDelayMillis(2000)
             .build()
 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
-
-                // Descartar puntos imprecisos para evitar saltos en el mapa.
-                // Umbral relajado a 40m para no bloquear señal en zonas con poca cobertura,
-                // pero suficiente para eliminar los saltos típicos de reflejos urbanos.
                 if (loc.hasAccuracy() && loc.accuracy > 40f) return
 
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
-                // Usamos el bearing nativo si estamos en movimiento, de lo contrario mantenemos el anterior
-                var targetBearing = carMarker?.rotation ?: 0f
-                if (loc.hasBearing() && loc.speed > 1.0f) {
+                // RACING MODE: Bearing setup
+                var targetBearing = lastKnownBearing
+                if (loc.hasBearing() && loc.speed > 0.8f) {
                     targetBearing = loc.bearing
                     lastKnownBearing = targetBearing
                 }
 
-                // Registrar ruta automáticamente
+                // Registrar ruta automáticamente (ahora usa storage interno)
                 com.tuusuario.carlauncher.services.RouteTracker.onLocationUpdate(loc)
                 com.tuusuario.carlauncher.services.DashcamRouteTracker.onLocationUpdate(loc)
 
@@ -294,52 +316,44 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 val file = java.io.File(AppSettings.customVehicleIconPath.value)
                                 if (file.exists()) {
                                     val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                                    val scaled = android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                    scaled
-                                } else {
-                                    drawVehicleBitmap("SEDAN", uiColor)
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                drawVehicleBitmap("SEDAN", uiColor)
-                            }
-                        } else {
-                            drawVehicleBitmap(vehicleType, uiColor)
-                        }
+                                    android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
+                                } else { drawVehicleBitmap("SEDAN", uiColor) }
+                            } catch (e: Exception) { drawVehicleBitmap("SEDAN", uiColor) }
+                        } else { drawVehicleBitmap(vehicleType, uiColor) }
+                        
                         icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         isFlat = true
                         position = newGeo
-                        rotation = 0f // SIEMPRE apunta hacia arriba; el mapa rota alrededor
+                        rotation = 0f // SIEMPRE mirando arriba
                     }
                     mapView.overlays.add(carMarker)
                     
                     if (isFollowingLocation || !hasInitializedPosition) {
                         mapView.controller.setCenter(newGeo)
-                        mapView.setMapCenterOffset(0, mapView.height / 4) // Offset Bottom 1/3
+                        mapView.setMapCenterOffset(0, mapView.height / 4)
                         if (!hasInitializedPosition) {
                             mapView.controller.setZoom(18.5)
                             hasInitializedPosition = true
                         }
                         if (loc.hasBearing() && !isStationary) {
                             val newOrientation = 360f - targetBearing
-                            mapView.mapOrientation = newOrientation
+                            mapOrientation = newOrientation
                             currentMapRotation = newOrientation
                         }
                     }
                 } else {
                     animator?.cancel()
                     val startGeo = carMarker!!.position
-                    
                     val startLat = startGeo.latitude
                     val startLon = startGeo.longitude
                     val deltaLat = newGeo.latitude - startLat
                     val deltaLon = newGeo.longitude - startLon
 
-                    // Calcular la rotación del mapa suavemente
+                    // RACING MODE: El mapa rota, el ícono es estático
                     var startMapRot = currentMapRotation % 360f
                     if (startMapRot < 0) startMapRot += 360f
-                    val targetMapRot = if (!isStationary && loc.hasBearing()) 360f - targetBearing else startMapRot
+                    val targetMapRot = if (!isStationary) 360f - targetBearing else startMapRot
                     var deltaMapRot = targetMapRot - startMapRot
                     if (deltaMapRot > 180f) deltaMapRot -= 360f
                     if (deltaMapRot < -180f) deltaMapRot += 360f
@@ -347,13 +361,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
                         duration = 500 
                         interpolator = LinearInterpolator()
-
                         addUpdateListener { anim ->
                             val fraction = anim.animatedFraction
                             val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
                             
                             carMarker!!.position = currentPos
-                            carMarker!!.rotation = 0f // SIEMPRE fijo mirando arriba
+                            carMarker!!.rotation = 0f // NUNCA rota el ícono
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
@@ -361,7 +374,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 var interpMapRot = startMapRot + (deltaMapRot * fraction)
                                 interpMapRot %= 360f
                                 if (interpMapRot < 0) interpMapRot += 360f
-                                mapView.mapOrientation = interpMapRot
+                                mapOrientation = interpMapRot
                                 currentMapRotation = interpMapRot
                             }
                             mapView.invalidate()
@@ -370,7 +383,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                 }
 
-                // LÓGICA DEL RECORRIDO Y AUTO-RECÁLCULO
+                // LÓGICA DEL RECORRIDO, AUTO-RECÁLCULO Y TURN-INDICATORS
                 if (currentRoutePoints.isNotEmpty() && selectedDestination != null) {
                     var minDistance = Float.MAX_VALUE
                     var closestIndex = 0
@@ -378,17 +391,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     
                     for (i in 0 until searchLimit) {
                         val pt = currentRoutePoints[i]
-                        val l1 = android.location.Location("").apply { latitude = loc.latitude; longitude = loc.longitude }
-                        val l2 = android.location.Location("").apply { latitude = pt.latitude; longitude = pt.longitude }
-                        val dist = l1.distanceTo(l2)
+                        val dist = FloatArray(1).also { android.location.Location.distanceBetween(loc.latitude, loc.longitude, pt.latitude, pt.longitude, it) }[0]
                         if (dist < minDistance) { minDistance = dist; closestIndex = i }
                     }
 
-                    // AUTO-RECÁLCULO: Si nos alejamos más de 100m del punto más cercano de la ruta
+                    // AUTO-RECÁLCULO
                     if (minDistance > 100f && !isCalculatingRoute) {
                         calculateRoute(GeoPoint(loc.latitude, loc.longitude), selectedDestination!!)
                     } 
-                    // SEGUIMIENTO: Borramos el rastro por detrás de nosotros
+                    // SEGUIMIENTO
                     else if (closestIndex > 0 && minDistance < 60f) {
                         for (i in 0 until closestIndex) {
                             if (currentRoutePoints.isNotEmpty()) currentRoutePoints.removeAt(0)
@@ -397,15 +408,22 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         mainPoly?.setPoints(currentRoutePoints.toList())
                     }
 
+                    // Actualizar steps (eliminar los que ya pasamos)
+                    if (activeRouteSteps.isNotEmpty()) {
+                        val nextStep = activeRouteSteps[0]
+                        val distToStep = FloatArray(1).also { android.location.Location.distanceBetween(loc.latitude, loc.longitude, nextStep.maneuverLat, nextStep.maneuverLon, it) }[0]
+                        if (distToStep < 20f) { // Hemos llegado al punto de maniobra
+                            activeRouteSteps.removeAt(0)
+                        }
+                    }
+
                     // LLEGADA AL DESTINO
                     if (currentRoutePoints.size < 10) {
                         val endPt = currentRoutePoints.last()
-                        val lDest = android.location.Location("").apply { latitude = endPt.latitude; longitude = endPt.longitude }
-                        if (loc.distanceTo(lDest) < 30f) { 
+                        val distToDest = FloatArray(1).also { android.location.Location.distanceBetween(loc.latitude, loc.longitude, endPt.latitude, endPt.longitude, it) }[0]
+                        if (distToDest < 30f) { 
                             showArrivalAlert = true
-                            currentRoutePoints.clear()
-                            routeDistanceText = ""
-                            selectedDestination = null
+                            NavigationState.clearActiveRoute()
                             mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
                             mapView.invalidate()
                         }
@@ -445,10 +463,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         if (h > 0) { setMapCenterOffset(0, h / 4) }
                     }
 
-                    val rotationGestureOverlay = RotationGestureOverlay(this)
-                    rotationGestureOverlay.isEnabled = true
-                    overlays.add(rotationGestureOverlay)
-
+                    // NO RotationGestureOverlay - El mapa rota solo por GPS
+                    
                     setOnTouchListener { _, event ->
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
@@ -462,7 +478,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     isFollowingLocation = true
                                     NavigationState.currentLocation.value?.let {
                                         controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        // Usar último bearing conocido para orientar el mapa
                                         mapOrientation = 360f - lastKnownBearing
                                         currentMapRotation = 360f - lastKnownBearing
                                     }
@@ -475,36 +490,28 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     addMapListener(object : MapListener {
                         override fun onScroll(event: ScrollEvent?): Boolean {
                             if (event != null && (event.x != 0 || event.y != 0)) {
-                                isFollowingLocation = false
-                                currentMapRotation = this@apply.mapOrientation
-                                
-                                autoCenterJob?.cancel()
-                                autoCenterJob = coroutineScope.launch {
-                                    delay(6000)
-                                    isFollowingLocation = true
-                                    NavigationState.currentLocation.value?.let {
-                                        controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        mapOrientation = 360f - lastKnownBearing
-                                        currentMapRotation = 360f - lastKnownBearing
+                                if (isFollowingLocation) {
+                                    isFollowingLocation = false
+                                    autoCenterJob?.cancel()
+                                    autoCenterJob = coroutineScope.launch {
+                                        delay(6000)
+                                        isFollowingLocation = true
+                                        NavigationState.currentLocation.value?.let {
+                                            controller.animateTo(GeoPoint(it.latitude, it.longitude))
+                                            mapOrientation = 360f - lastKnownBearing
+                                            currentMapRotation = 360f - lastKnownBearing
+                                        }
                                     }
-                                    autoCenterJob = null
                                 }
                             }
                             return false
                         }
                         override fun onZoom(event: ZoomEvent?): Boolean {
                             isFollowingLocation = false
-                            currentMapRotation = this@apply.mapOrientation
-                            
                             autoCenterJob?.cancel()
                             autoCenterJob = coroutineScope.launch {
                                 delay(6000)
                                 isFollowingLocation = true
-                                NavigationState.currentLocation.value?.let {
-                                    controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                    mapOrientation = 360f - lastKnownBearing
-                                    currentMapRotation = 360f - lastKnownBearing
-                                }
                             }
                             return false
                         }
@@ -522,9 +529,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             return false
                         }
                         override fun longPressHelper(p: GeoPoint?): Boolean {
-                            if (currentRoutePoints.isNotEmpty()) {
-                                return true 
-                            }
+                            if (NavigationState.isRouteActive.value) return true 
                             
                             if (p != null) {
                                 selectedDestination = p
@@ -538,7 +543,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     icon = BitmapDrawable(ctx.resources, drawCustomPin(uiColor))
                                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                                     title = "Destino Seleccionado"
-                                    
                                     setOnMarkerClickListener { _, _ ->
                                         favoriteLocationToSave = p
                                         favoriteNameToSave = "Mi Lugar"
@@ -548,7 +552,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 }
                                 overlays.add(marker)
                                 invalidate()
-                                Toast.makeText(context, "Toca el pin para guardar en Favoritos", Toast.LENGTH_SHORT).show()
                             }
                             return true
                         }
@@ -557,6 +560,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { view ->
+
                 if (isMapDarkMode) {
                     val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
                         -1.0f, 0.0f, 0.0f, 0.0f, 255f,
@@ -881,28 +885,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
             if (routeDistanceText.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    Text(routeDistanceText, modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-            }
-
-            if (selectedDestination != null || currentRoutePoints.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    ExtendedFloatingActionButton(
-                        onClick = {
-                            selectedDestination = null
-                            routeDistanceText = ""
-                            currentRoutePoints.clear()
-                            mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
-                            mapView.invalidate()
-                        },
-                        icon = { Icon(Icons.Default.Close, "Cancelar") }, text = { Text("Cancelar") }, 
-                        containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError
-                    )
-
-                    if (currentRoutePoints.isEmpty()) {
-                        ExtendedFloatingActionButton(
-                            onClick = {
-                                val start = NavigationState.currentLocation.value
                                 val dest = selectedDestination
                                 if (start != null && dest != null) {
                                     calculateRoute(GeoPoint(start.latitude, start.longitude), dest)

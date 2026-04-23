@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
         AppSettings.init(this)
         
         // Limpiar rutas antiguas de la papelera
+        com.tuusuario.carlauncher.services.RouteTracker.init(this)
         com.tuusuario.carlauncher.services.RouteTracker.cleanupOldTrash()
 
         setContent {
