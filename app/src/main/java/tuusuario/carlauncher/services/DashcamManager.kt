@@ -16,6 +16,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import androidx.camera.core.Preview as CameraPreview
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.mutableStateOf
@@ -24,7 +25,12 @@ object DashcamManager {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
     private var cameraExecutor: ExecutorService? = null
-    
+    private var autoStopJob: Job? = null
+    private val isStopping = AtomicBoolean(false)
+
+    // Scope dedicado con Job propio para poder cancelarlo limpiamente
+    private var managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     var isRecording = mutableStateOf(false)
     var currentVideoId: String? = null
     var activePreview = mutableStateOf<CameraPreview?>(null)
@@ -38,20 +44,36 @@ object DashcamManager {
     @SuppressLint("MissingPermission")
     fun startRecording(context: Context, lifecycleOwner: LifecycleOwner) {
         if (isRecording.value) return
-        
+        if (isStopping.get()) {
+            // Esperar a que termine la parada anterior antes de arrancar
+            Log.w("Dashcam", "startRecording ignorado: todavía deteniéndose")
+            return
+        }
+
+        // Crear un executor fresco; nunca reutilizar uno ya cerrado
         cameraExecutor = Executors.newSingleThreadExecutor()
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
 
         cameraProviderFuture.addListener({
             try {
+                val executor = cameraExecutor
+                if (executor == null || executor.isShutdown) {
+                    Log.w("Dashcam", "Executor no disponible al intentar iniciar la cámara")
+                    return@addListener
+                }
+
                 val cameraProvider = cameraProviderFuture.get()
-                
-                val qualitySelector = QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.HD))
+
+                val qualitySelector = QualitySelector.from(
+                    Quality.HD,
+                    FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)
+                )
                 val recorder = Recorder.Builder()
-                    .setExecutor(cameraExecutor!!)
+                    .setExecutor(executor)
                     .setQualitySelector(qualitySelector)
                     .build()
-                    
+
                 videoCapture = VideoCapture.withOutput(recorder)
 
                 val preview = CameraPreview.Builder().build()
@@ -61,12 +83,12 @@ object DashcamManager {
 
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, videoCapture, preview)
-                
+
                 val videoId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val videoFile = File(getVideosDir(), "VID_${videoId}.mp4")
-                
+
                 val outputOptions = FileOutputOptions.Builder(videoFile).build()
-                
+
                 recording = videoCapture!!.output
                     .prepareRecording(context, outputOptions)
                     .withAudioEnabled()
@@ -76,10 +98,11 @@ object DashcamManager {
                                 isRecording.value = true
                                 currentVideoId = videoId
                                 DashcamRouteTracker.startSession(videoId)
-                                
-                                // Detener automáticamente a los 4 minutos
-                                CoroutineScope(Dispatchers.Main).launch {
-                                    delay(4 * 60 * 1000L) // 4 min
+
+                                // Auto-stop a los 4 minutos usando el scope del manager
+                                autoStopJob?.cancel()
+                                autoStopJob = managerScope.launch {
+                                    delay(4 * 60 * 1000L)
                                     if (isRecording.value) stopRecording()
                                 }
                             }
@@ -87,21 +110,48 @@ object DashcamManager {
                                 isRecording.value = false
                                 currentVideoId = null
                                 activePreview.value = null
+                                isStopping.set(false)
                                 DashcamRouteTracker.stopSession()
-                                cameraExecutor?.shutdown()
+
+                                // Apagar el executor en un hilo secundario para no bloquear el main
+                                val executorToShutdown = cameraExecutor
                                 cameraExecutor = null
+                                executorToShutdown?.let {
+                                    if (!it.isShutdown) {
+                                        it.shutdown()
+                                    }
+                                }
                             }
                         }
                     }
             } catch (e: Exception) {
                 Log.e("Dashcam", "Error binding camera", e)
+                isStopping.set(false)
+                // Limpiar executor si hubo error antes de conectar
+                cameraExecutor?.let { if (!it.isShutdown) it.shutdown() }
+                cameraExecutor = null
             }
         }, ContextCompat.getMainExecutor(context))
     }
 
     fun stopRecording() {
+        if (!isRecording.value && !isStopping.get()) return
+        autoStopJob?.cancel()
+        autoStopJob = null
+        isStopping.set(true)
         recording?.stop()
         recording = null
-        // executor shutdown is handled in VideoRecordEvent.Finalize callback
+        // El executor se cierra en el callback Finalize para evitar la RejectedExecutionException
+    }
+
+    /**
+     * Llamar cuando la actividad/servicio que posee este manager se destruye definitivamente.
+     * Cancela el scope para evitar fugas de coroutines.
+     */
+    fun release() {
+        stopRecording()
+        managerScope.cancel()
+        // Reinicializar el scope para que pueda volver a usarse si la app sigue viva
+        managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     }
 }

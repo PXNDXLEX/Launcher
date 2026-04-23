@@ -254,14 +254,21 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
-            .setMinUpdateIntervalMillis(250)
-            .setMinUpdateDistanceMeters(0f)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+            .setMinUpdateIntervalMillis(500)
+            .setMinUpdateDistanceMeters(1f)  // Ignorar si se movió menos de 1 metro
+            .setMaxUpdateDelayMillis(2000)    // No atrasar más de 2s
             .build()
 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
+
+                // Descartar puntos imprecisos para evitar saltos en el mapa.
+                // Umbral relajado a 40m para no bloquear señal en zonas con poca cobertura,
+                // pero suficiente para eliminar los saltos típicos de reflejos urbanos.
+                if (loc.hasAccuracy() && loc.accuracy > 40f) return
+
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
                 // Usamos el bearing nativo si estamos en movimiento, de lo contrario mantenemos el anterior
