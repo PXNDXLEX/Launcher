@@ -113,9 +113,20 @@ fun SpeedometerWidget() {
     }
 
     val isHighSpeed = animatedSpeed >= 50f
-    val shakeMult = if (isHighSpeed) ((animatedSpeed - 50f) * 0.08f + 3f) else 0f
-    val shakeX = if ((style == "SHONEN" || style == "OMNIMON") && isHighSpeed) (Math.random() * shakeMult * 2 - shakeMult).toFloat() else 0f
-    val shakeY = if ((style == "SHONEN" || style == "OMNIMON") && isHighSpeed) (Math.random() * shakeMult * 2 - shakeMult).toFloat() else 0f
+    // Shake: OVERDRIVE/NEBULA/DEMONIC tienen su propio shake agresivo; SHONEN/OMNIMON tienen el normal
+    val shakeX: Float
+    val shakeY: Float
+    if (style in listOf("OVERDRIVE", "NEBULA", "DEMONIC")) {
+        val isUnchainedHighSpeed = animatedSpeed >= 40f
+        val spProg = (animatedSpeed / 220f).coerceIn(0f, 1f)
+        val shakeMultUnchained = if (isUnchainedHighSpeed) (Math.pow(spProg.toDouble(), 2.0).toFloat() * 15f + 2f) else 0f
+        shakeX = if (isUnchainedHighSpeed) (Math.random() * shakeMultUnchained * 2 - shakeMultUnchained).toFloat() else 0f
+        shakeY = if (isUnchainedHighSpeed) (Math.random() * shakeMultUnchained * 2 - shakeMultUnchained).toFloat() else 0f
+    } else {
+        val shakeMult = if (isHighSpeed) ((animatedSpeed - 50f) * 0.08f + 3f) else 0f
+        shakeX = if ((style == "SHONEN" || style == "OMNIMON") && isHighSpeed) (Math.random() * shakeMult * 2 - shakeMult).toFloat() else 0f
+        shakeY = if ((style == "SHONEN" || style == "OMNIMON") && isHighSpeed) (Math.random() * shakeMult * 2 - shakeMult).toFloat() else 0f
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val boxSize = min(maxWidth, maxHeight) * 1.20f 
@@ -254,6 +265,31 @@ fun SpeedometerWidget() {
                         Text(text = "K M / H", color = reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 10.sp)
                     }
                 }
+                "OVERDRIVE" -> {
+                    val glitchOffset = if (speed > 150f) (Math.random() * 6 - 3).dp else 0.dp
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.08f).dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (speed > 100f) {
+                                Text(text = speed.toInt().toString(), color = Color.Red.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = glitchOffset * 2))
+                                Text(text = speed.toInt().toString(), color = Color.Cyan.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = -glitchOffset * 2))
+                            }
+                            Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = Shadow(color = reactiveColorText, blurRadius = 30f)))
+                        }
+                        Text(text = "KM/H", color = reactiveColorText, fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Black, letterSpacing = 8.sp, style = TextStyle(fontStyle = FontStyle.Italic))
+                    }
+                }
+                "NEBULA" -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Thin, style = TextStyle(fontFamily = FontFamily.Serif, shadow = Shadow(color = reactiveColorText, blurRadius = 40f)))
+                        Text(text = "KM/H", color = Color.White.copy(alpha=0.8f), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Black, letterSpacing = 15.sp)
+                    }
+                }
+                "DEMONIC" -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.06f).dp)) {
+                        Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.40f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = Shadow(color = Color.Black, offset = Offset(0f, 10f), blurRadius = 20f)))
+                        Text(text = "P O W E R", color = Color.White, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp, style = TextStyle(shadow = Shadow(color = reactiveColorText, blurRadius = 10f)))
+                    }
+                }
                 "CUSTOM" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.04f).dp)) {
                         val textShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 25f) else null
@@ -348,7 +384,7 @@ fun SpeedometerDraw(
     var cumPulse by remember { mutableStateOf(0f) }
 
     LaunchedEffect(style) {
-        val animatedStyles = listOf("AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
+        val animatedStyles = listOf("AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM", "OVERDRIVE", "NEBULA", "DEMONIC")
         if (style in animatedStyles) {
             var lastFrameTime = withFrameNanos { it }
             while (true) {

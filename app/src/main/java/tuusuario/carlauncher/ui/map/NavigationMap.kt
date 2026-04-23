@@ -287,6 +287,63 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             .setMaxUpdateDelayMillis(2000)
             .build()
 
+        // Función interna para procesar una Location y actualizar el mapa
+        fun processLocation(loc: android.location.Location) {
+            if (loc.hasAccuracy() && loc.accuracy > 40f) return
+            val newGeo = GeoPoint(loc.latitude, loc.longitude)
+            var targetBearing = lastKnownBearing
+            if (loc.hasBearing() && loc.speed > 0.8f) {
+                targetBearing = loc.bearing
+                lastKnownBearing = targetBearing
+            }
+            NavigationState.currentLocation.value = loc
+            val speedKmH = loc.speed * 3.6f
+            if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = speedKmH
+            val isStationary = speedKmH < 3f
+            if (carMarker == null) {
+                carMarker = Marker(mapView).apply {
+                    val iconBitmap = if (AppSettings.vehicleType.value == "CUSTOM" && AppSettings.customVehicleIconPath.value.isNotEmpty()) {
+                        try {
+                            val file = java.io.File(AppSettings.customVehicleIconPath.value)
+                            if (file.exists()) {
+                                val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                                android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
+                            } else { drawVehicleBitmap("SEDAN", uiColor) }
+                        } catch (e: Exception) { drawVehicleBitmap("SEDAN", uiColor) }
+                    } else { drawVehicleBitmap(vehicleType, uiColor) }
+                    icon = BitmapDrawable(context.resources, iconBitmap)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    isFlat = true
+                    position = newGeo
+                    rotation = 0f
+                }
+                mapView.overlays.add(carMarker)
+                if (isFollowingLocation || !hasInitializedPosition) {
+                    mapView.controller.setCenter(newGeo)
+                    mapView.setMapCenterOffset(0, mapView.height / 4)
+                    if (!hasInitializedPosition) {
+                        mapView.controller.setZoom(18.5)
+                        hasInitializedPosition = true
+                    }
+                    if (loc.hasBearing() && !isStationary) {
+                        val newOrientation = 360f - targetBearing
+                        mapView.mapOrientation = newOrientation
+                        currentMapRotation = newOrientation
+                    }
+                }
+                mapView.invalidate()
+            }
+        }
+
+        // ── OBTENER LA ÚLTIMA POSICIÓN CONOCIDA INMEDIATAMENTE (elimina el delay de 5s) ──
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                if (loc != null && carMarker == null) {
+                    processLocation(loc)
+                }
+            }
+        }
+
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
