@@ -50,7 +50,8 @@ fun DashcamGalleryScreen() {
 
     // ── Estado de selección ──
     var selectionMode by remember { mutableStateOf(false) }
-    val selectedVideos = remember { mutableStateSetOf<String>() }  // paths seleccionados
+    // Usamos mutableStateListOf para asegurar compatibilidad con versiones antiguas de Compose
+    val selectedVideos = remember { mutableStateListOf<String>() } 
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     fun reloadVideos() {
@@ -59,12 +60,12 @@ fun DashcamGalleryScreen() {
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
 
-    fun deleteFiles(filePaths: Set<String>) {
+    fun deleteFiles(filePaths: List<String>) {
         filePaths.forEach { path ->
             val videoFile = File(path)
             val videoId = videoFile.nameWithoutExtension.removePrefix("VID_")
             // Borrar el video
-            videoFile.delete()
+            if (videoFile.exists()) videoFile.delete()
             // Borrar el JSON de metadatos asociado
             val metaFile = File(DashcamManager.getVideosDir(), "Metadata/VID_${videoId}.json")
             if (metaFile.exists()) metaFile.delete()
@@ -117,8 +118,12 @@ fun DashcamGalleryScreen() {
                     val allSelected = selectedVideos.size == videos.size && videos.isNotEmpty()
                     TextButton(
                         onClick = {
-                            if (allSelected) selectedVideos.clear()
-                            else { selectedVideos.clear(); selectedVideos.addAll(videos.map { it.absolutePath }) }
+                            if (allSelected) {
+                                selectedVideos.clear()
+                            } else {
+                                selectedVideos.clear()
+                                selectedVideos.addAll(videos.map { it.absolutePath })
+                            }
                         },
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -188,8 +193,11 @@ fun DashcamGalleryScreen() {
                         onPlayClick = {
                             if (selectionMode) {
                                 // En modo selección, el clic toggle-ea la selección
-                                if (isSelected) selectedVideos.remove(video.absolutePath)
-                                else selectedVideos.add(video.absolutePath)
+                                if (isSelected) {
+                                    selectedVideos.remove(video.absolutePath)
+                                } else {
+                                    selectedVideos.add(video.absolutePath)
+                                }
                             } else {
                                 try {
                                     val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -211,7 +219,9 @@ fun DashcamGalleryScreen() {
                         },
                         onLongClick = {
                             selectionMode = true
-                            selectedVideos.add(video.absolutePath)
+                            if (!selectedVideos.contains(video.absolutePath)) {
+                                selectedVideos.add(video.absolutePath)
+                            }
                         },
                         onShowRouteClick = {
                             val videoId = video.nameWithoutExtension.removePrefix("VID_")
@@ -289,7 +299,7 @@ fun DashcamGalleryScreen() {
                 Button(
                     onClick = {
                         showDeleteConfirm = false
-                        deleteFiles(selectedVideos.toSet())
+                        deleteFiles(selectedVideos.toList())
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
@@ -329,8 +339,7 @@ private fun VideoCard(
             MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
         else
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        animationSpec = tween(200),
-        label = "cardColor"
+        animationSpec = tween(200)
     )
 
     val borderColor by animateColorAsState(
@@ -338,8 +347,7 @@ private fun VideoCard(
             MaterialTheme.colorScheme.primary
         else
             Color.Transparent,
-        animationSpec = tween(200),
-        label = "borderColor"
+        animationSpec = tween(200)
     )
 
     Card(
