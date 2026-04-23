@@ -11,6 +11,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -45,10 +46,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.cachemanager.CacheManager
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.BoundingBox
+import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.camera.view.PreviewView
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -123,6 +131,8 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                     IconButton(onClick = { currentScreen = "DASHBOARD" }) { Icon(Icons.Default.Dashboard, "Dashboard", tint = if (currentScreen == "DASHBOARD") activeUiColor else MaterialTheme.colorScheme.onSurface) }
                     IconButton(onClick = { currentScreen = "MAPA_FULL" }) { Icon(Icons.Default.Map, "Mapa", tint = if (currentScreen == "MAPA_FULL") activeUiColor else MaterialTheme.colorScheme.onSurface) }
                     IconButton(onClick = { currentScreen = "YOUTUBE" }) { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) }
+                    IconButton(onClick = { currentScreen = "RUTAS" }) { Icon(Icons.Default.History, "Rutas", tint = if (currentScreen == "RUTAS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
+                    IconButton(onClick = { currentScreen = "VIDEOS" }) { Icon(Icons.Default.VideoLibrary, "Videos", tint = if (currentScreen == "VIDEOS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     IconButton(onClick = { showSettingsDialog = true }) { Icon(Icons.Default.Settings, "Ajustes") }
@@ -140,8 +150,9 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                     NavigationBarItem(selected = currentScreen == "DASHBOARD", onClick = { currentScreen = "DASHBOARD" }, icon = { Icon(Icons.Default.Dashboard, "Dashboard", tint = if (currentScreen == "DASHBOARD") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = currentScreen == "MAPA_FULL", onClick = { currentScreen = "MAPA_FULL" }, icon = { Icon(Icons.Default.Map, "Mapa", tint = if (currentScreen == "MAPA_FULL") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = currentScreen == "YOUTUBE", onClick = { currentScreen = "YOUTUBE" }, icon = { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) })
+                    NavigationBarItem(selected = currentScreen == "RUTAS", onClick = { currentScreen = "RUTAS" }, icon = { Icon(Icons.Default.History, "Rutas", tint = if (currentScreen == "RUTAS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
+                    NavigationBarItem(selected = currentScreen == "VIDEOS", onClick = { currentScreen = "VIDEOS" }, icon = { Icon(Icons.Default.VideoLibrary, "Videos", tint = if (currentScreen == "VIDEOS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = false, onClick = { showSettingsDialog = true }, icon = { Icon(Icons.Default.Settings, "Ajustes") })
-                    NavigationBarItem(selected = false, onClick = onToggleTheme, icon = { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema") })
                 }
             }
         }
@@ -191,6 +202,17 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             PremiumSettingsDialog(onDismiss = { showSettingsDialog = false })
         }
 
+        if (NavigationState.selectedHistoryRoute.value != null || NavigationState.selectedDashcamRoute.value != null) {
+            RouteMapFloatingDialog(onDismiss = {
+                NavigationState.selectedHistoryRoute.value = null
+                NavigationState.selectedDashcamRoute.value = null
+            })
+        }
+
+        if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) {
+            DashcamPreviewOverlay()
+        }
+
         AnimatedVisibility(
             visible = showWelcome,
             enter = fadeIn(animationSpec = tween(500)),
@@ -220,8 +242,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
     var expandedSection by remember { mutableStateOf("") }
     var showSpeedoCropper by remember { mutableStateOf(false) }
     var showVehicleCropper by remember { mutableStateOf(false) }
-    var showRouteHistoryDialog by remember { mutableStateOf(false) }
-    var showDashcamGalleryDialog by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
     val speedoBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -452,8 +472,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             onClick = { expandedSection = if (expandedSection == "offline_maps") "" else "offline_maps" }
                         ) { OfflineMapDownloader(context, coroutineScope) }
                         SettingsDivider()
-                        SettingsRow(Icons.Default.History, "Registro de Rutas", "Ver historiales guardados",
-                            onClick = { showRouteHistoryDialog = true })
                     }
 
                     // ── SISTEMA ──
@@ -462,25 +480,13 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) })
                     }
 
-                    // ── DASHCAM ──
-                    SettingsGroupCard("Dashcam") {
-                        SettingsRow(Icons.Default.VideoLibrary, "Videos (Dashcam)", "Ver videos guardados",
-                            onClick = { showDashcamGalleryDialog = true })
-                    }
-
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
     }
 
-    if (showRouteHistoryDialog) {
-        RouteHistoryDialog(onDismiss = { showRouteHistoryDialog = false })
-    }
 
-    if (showDashcamGalleryDialog) {
-        com.tuusuario.carlauncher.ui.widgets.DashcamGalleryDialog(onDismiss = { showDashcamGalleryDialog = false })
-    }
 
     // Croppers
     if (showSpeedoCropper && pendingCropUri != null) {
@@ -502,75 +508,73 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-fun RouteHistoryDialog(onDismiss: () -> Unit) {
+fun RouteHistoryScreen() {
     var routes by remember { mutableStateOf(com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()) }
     var showingTrash by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Card(
-            modifier = Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(if (showingTrash) "Papelera (Rutas)" else "Registro de Rutas", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Row {
-                        IconButton(onClick = { showingTrash = !showingTrash }) { Icon(if (showingTrash) Icons.Default.List else Icons.Default.DeleteOutline, "Alternar Papelera", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
-                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
-                    }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(28.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    if (showingTrash) "Papelera" else "Historial de Rutas",
+                    fontWeight = FontWeight.Bold, fontSize = 22.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            IconButton(onClick = { showingTrash = !showingTrash }) {
+                Icon(if (showingTrash) Icons.Default.List else Icons.Default.DeleteOutline, "Alternar Papelera", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+
+        val displayedRoutes = routes.filter { it.isDeleted == showingTrash }
+
+        if (displayedRoutes.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(64.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(if (showingTrash) "La papelera está vacía" else "No hay rutas registradas", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
-                val displayedRoutes = routes.filter { it.isDeleted == showingTrash }
-
-                if (displayedRoutes.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(if (showingTrash) "La papelera está vacía" else "No hay rutas registradas", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(displayedRoutes.size) { i ->
-                            val route = displayedRoutes[i]
-                            Card(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    if (!showingTrash) {
-                                        NavigationState.selectedHistoryRoute.value = route
-                                        onDismiss()
-                                    }
-                                },
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Ruta del ${route.date}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                        Text("${route.points.size} puntos registrados", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        if (showingTrash && route.deletedAt != null) {
-                                            Text("Borrado: ${route.deletedAt?.split("T")?.get(0)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                                        }
-                                    }
-                                    if (showingTrash) {
-                                        IconButton(onClick = {
-                                            route.isDeleted = false
-                                            route.deletedAt = null
-                                            com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
-                                            routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
-                                        }) { Icon(Icons.Default.Restore, "Restaurar", tint = MaterialTheme.colorScheme.primary) }
-                                    } else {
-                                        IconButton(onClick = {
-                                            route.isDeleted = true
-                                            route.deletedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                                            com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
-                                            routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
-                                        }) { Icon(Icons.Default.Delete, "Borrar", tint = MaterialTheme.colorScheme.error) }
-                                    }
+            }
+        } else {
+            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(displayedRoutes.size) { i ->
+                    val route = displayedRoutes[i]
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            if (!showingTrash) { NavigationState.selectedHistoryRoute.value = route }
+                        },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Ruta del ${route.date}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("${route.points.size} puntos registrados", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (showingTrash && route.deletedAt != null) {
+                                    Text("Borrado: ${route.deletedAt?.split("T")?.get(0)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
                                 }
+                            }
+                            if (showingTrash) {
+                                IconButton(onClick = {
+                                    route.isDeleted = false; route.deletedAt = null
+                                    com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
+                                    routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+                                }) { Icon(Icons.Default.Restore, "Restaurar", tint = MaterialTheme.colorScheme.primary) }
+                            } else {
+                                IconButton(onClick = {
+                                    route.isDeleted = true
+                                    route.deletedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                    com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
+                                    routes = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+                                }) { Icon(Icons.Default.Delete, "Borrar", tint = MaterialTheme.colorScheme.error) }
                             }
                         }
                     }
@@ -760,6 +764,8 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
                 }
             }
             "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
+            "RUTAS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RouteHistoryScreen() }
+            "VIDEOS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { com.tuusuario.carlauncher.ui.widgets.DashcamGalleryScreen() }
             "DASHBOARD" -> {
                 if (isLandscape) {
                     Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -801,3 +807,188 @@ fun DashboardMediaWidget(showYoutubeInDashboard: Boolean, youtubeContent: @Compo
         }
     }
 }
+
+@Composable
+fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val historyRoute = NavigationState.selectedHistoryRoute.value
+    val dashcamRoute = NavigationState.selectedDashcamRoute.value
+
+    val routePoints: List<GeoPoint> = remember(historyRoute, dashcamRoute) {
+        when {
+            historyRoute != null -> historyRoute.points.map { GeoPoint(it.lat, it.lon) }
+            dashcamRoute != null -> dashcamRoute.map { GeoPoint(it.lat, it.lon) }
+            else -> emptyList()
+        }
+    }
+
+    val routeColor = if (historyRoute != null)
+        android.graphics.Color.parseColor("#4CAF50")
+    else
+        android.graphics.Color.parseColor("#FF9800")
+
+    val routeTitle = when {
+        historyRoute != null -> "Ruta del ${historyRoute.date} · ${historyRoute.points.size} puntos"
+        dashcamRoute != null -> "Ruta de Video · ${dashcamRoute.size} puntos"
+        else -> ""
+    }
+
+    val mapView = remember { MapView(context) }
+
+    LaunchedEffect(routePoints) {
+        if (routePoints.isNotEmpty()) {
+            delay(300)
+            try {
+                val bbox = org.osmdroid.util.BoundingBox.fromGeoPoints(routePoints)
+                mapView.zoomToBoundingBox(bbox, true, 120)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.88f),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        Configuration.getInstance().userAgentValue = ctx.packageName
+                        mapView.apply {
+                            setTileSource(TileSourceFactory.MAPNIK)
+                            setMultiTouchControls(true)
+                            setBuiltInZoomControls(false)
+
+                            if (routePoints.isNotEmpty()) {
+                                val polyline = Polyline(this).apply {
+                                    id = "FLOAT_ROUTE"
+                                    setPoints(routePoints)
+                                    outlinePaint.color = routeColor
+                                    outlinePaint.strokeWidth = 14f
+                                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                                    outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                                }
+                                overlays.add(polyline)
+
+                                val startMarker = Marker(this).apply {
+                                    position = routePoints.first()
+                                    icon = android.graphics.drawable.BitmapDrawable(
+                                        ctx.resources,
+                                        com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#4CAF50"))
+                                    )
+                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                    title = "Inicio"
+                                }
+                                val endMarker = Marker(this).apply {
+                                    position = routePoints.last()
+                                    icon = android.graphics.drawable.BitmapDrawable(
+                                        ctx.resources,
+                                        com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#F44336"))
+                                    )
+                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                    title = "Fin"
+                                }
+                                overlays.add(startMarker)
+                                overlays.add(endMarker)
+
+                                controller.setCenter(
+                                    GeoPoint(
+                                        (routePoints.first().latitude + routePoints.last().latitude) / 2,
+                                        (routePoints.first().longitude + routePoints.last().longitude) / 2
+                                    )
+                                )
+                                controller.setZoom(14.0)
+                            }
+                        }
+                    }
+                )
+
+                // Header overlay
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .align(Alignment.TopCenter),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(routeTitle, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DashcamPreviewOverlay() {
+    val preview = com.tuusuario.carlauncher.services.DashcamManager.activePreview.value ?: return
+
+    var offsetX by remember { mutableStateOf(40f) }
+    var offsetY by remember { mutableStateOf(120f) }
+
+    Card(
+        modifier = Modifier
+            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    offsetX += dragAmount.x
+                    offsetY += dragAmount.y
+                }
+            }
+            .width(220.dp)
+            .height(160.dp),
+        shape = RoundedCornerShape(14.dp),
+        elevation = CardDefaults.cardElevation(12.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    PreviewView(ctx).also { pv ->
+                        pv.scaleType = PreviewView.ScaleType.FILL_CENTER
+                        preview.setSurfaceProvider(pv.surfaceProvider)
+                    }
+                }
+            )
+            // REC badge
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .background(Color.Red.copy(alpha = 0.88f), RoundedCornerShape(5.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .background(Color.White, androidx.compose.foundation.shape.CircleShape)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text("REC", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            // Drag hint
+            Text(
+                "⠿",
+                modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 16.sp
+            )
+        }
+    }
+}
+

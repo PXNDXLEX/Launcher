@@ -16,6 +16,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import androidx.camera.core.Preview as CameraPreview
+import androidx.camera.view.PreviewView
 import androidx.compose.runtime.mutableStateOf
 
 object DashcamManager {
@@ -25,6 +27,7 @@ object DashcamManager {
     
     var isRecording = mutableStateOf(false)
     var currentVideoId: String? = null
+    var activePreview = mutableStateOf<CameraPreview?>(null)
 
     fun getVideosDir(): File {
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "CarLauncher/Videos")
@@ -51,10 +54,13 @@ object DashcamManager {
                     
                 videoCapture = VideoCapture.withOutput(recorder)
 
+                val preview = CameraPreview.Builder().build()
+                activePreview.value = preview
+
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, videoCapture)
+                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, videoCapture, preview)
                 
                 val videoId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val videoFile = File(getVideosDir(), "VID_${videoId}.mp4")
@@ -80,7 +86,10 @@ object DashcamManager {
                             is VideoRecordEvent.Finalize -> {
                                 isRecording.value = false
                                 currentVideoId = null
+                                activePreview.value = null
                                 DashcamRouteTracker.stopSession()
+                                cameraExecutor?.shutdown()
+                                cameraExecutor = null
                             }
                         }
                     }
@@ -93,6 +102,6 @@ object DashcamManager {
     fun stopRecording() {
         recording?.stop()
         recording = null
-        cameraExecutor?.shutdown()
+        // executor shutdown is handled in VideoRecordEvent.Finalize callback
     }
 }

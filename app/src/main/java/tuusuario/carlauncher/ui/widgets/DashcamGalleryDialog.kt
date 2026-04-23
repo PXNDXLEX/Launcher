@@ -28,20 +28,168 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
+// ── Pantalla completa (para tab en dashboard) ──
 @Composable
-fun DashcamGalleryDialog(onDismiss: () -> Unit) {
+fun DashcamGalleryScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+
     var videos by remember { mutableStateOf<List<File>>(emptyList()) }
     var addresses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loadingAddressFor by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         val dir = DashcamManager.getVideosDir()
-        videos = dir.listFiles { file -> file.extension == "mp4" }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        videos = dir.listFiles { file -> file.extension == "mp4" }
+            ?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
 
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.VideoLibrary, null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                "Galería Dashcam",
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+
+        if (videos.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.Videocam, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("No hay videos grabados aún.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(videos.size) { i ->
+                    VideoCard(
+                        video = videos[i],
+                        address = addresses[videos[i].nameWithoutExtension.removePrefix("VID_")],
+                        isLoading = loadingAddressFor == videos[i].nameWithoutExtension.removePrefix("VID_"),
+                        onPlayClick = {
+                            val video = videos[i]
+                            try {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context, "${context.packageName}.provider", video
+                                )
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "video/mp4")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Error al abrir video: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onShowRouteClick = {
+                            val video = videos[i]
+                            val videoId = video.nameWithoutExtension.removePrefix("VID_")
+                            loadingAddressFor = videoId
+                            scope.launch {
+                                try {
+                                    val metadataDir = File(DashcamManager.getVideosDir(), "Metadata")
+                                    val jsonFile = File(metadataDir, "VID_${videoId}.json")
+                                    if (jsonFile.exists()) {
+                                        val json = JSONObject(jsonFile.readText())
+                                        val pointsArray = json.getJSONArray("points")
+                                        val parsedPoints = mutableListOf<com.tuusuario.carlauncher.services.RoutePoint>()
+                                        for (j in 0 until pointsArray.length()) {
+                                            val pt = pointsArray.getJSONObject(j)
+                                            parsedPoints.add(
+                                                com.tuusuario.carlauncher.services.RoutePoint(
+                                                    lat = pt.getDouble("lat"),
+                                                    lon = pt.getDouble("lon"),
+                                                    timestamp = pt.getString("timestamp")
+                                                )
+                                            )
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            if (parsedPoints.isNotEmpty()) {
+                                                com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value = parsedPoints
+                                            } else {
+                                                addresses = addresses + (videoId to "Sin datos GPS registrados")
+                                            }
+                                        }
+                                    } else {
+                                        withContext(Dispatchers.Main) {
+                                            addresses = addresses + (videoId to "No tiene metadatos de ruta")
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        addresses = addresses + (videos[i].nameWithoutExtension.removePrefix("VID_") to "Error al leer ruta")
+                                    }
+                                }
+                                loadingAddressFor = null
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Card de video reutilizable ──
+@Composable
+private fun VideoCard(
+    video: File,
+    address: String?,
+    isLoading: Boolean,
+    onPlayClick: () -> Unit,
+    onShowRouteClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onPlayClick() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(video.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                val sizeMb = video.length() / (1024 * 1024)
+                Text("$sizeMb MB", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (address != null) {
+                    Text(address, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
+                }
+            }
+            if (address == null) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    TextButton(onClick = onShowRouteClick) { Text("Ver Ruta") }
+                }
+            }
+        }
+    }
+}
+
+// ── Dialog (legacy, mantener por compatibilidad) ──
+@Composable
+fun DashcamGalleryDialog(onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
             modifier = Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.85f),
@@ -49,7 +197,6 @@ fun DashcamGalleryDialog(onDismiss: () -> Unit) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -58,92 +205,7 @@ fun DashcamGalleryDialog(onDismiss: () -> Unit) {
                     Text("Galería Dashcam", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
                 }
-
-                if (videos.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No hay videos grabados aún.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(videos.size) { i ->
-                            val video = videos[i]
-                            val videoId = video.nameWithoutExtension.removePrefix("VID_")
-                            val address = addresses[videoId]
-
-                            Card(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    // Reproducir video con intent nativo
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.provider", video)
-                                        setDataAndType(uri, "video/mp4")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(intent)
-                                },
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(video.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                        val sizeMb = video.length() / (1024 * 1024)
-                                        Text("$sizeMb MB", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        if (address != null) {
-                                            Text(address, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
-                                        }
-                                    }
-
-                                    if (address == null) {
-                                        if (loadingAddressFor == videoId) {
-                                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                                        } else {
-                                            TextButton(onClick = {
-                                                loadingAddressFor = videoId
-                                                scope.launch {
-                                                    try {
-                                                        // Leer JSON de metadatos
-                                                        val metadataDir = File(DashcamManager.getVideosDir(), "Metadata")
-                                                        val jsonFile = File(metadataDir, "VID_${videoId}.json")
-                                                        if (jsonFile.exists()) {
-                                                            val json = JSONObject(jsonFile.readText())
-                                                            val pointsArray = json.getJSONArray("points")
-                                                            val parsedPoints = mutableListOf<com.tuusuario.carlauncher.services.RoutePoint>()
-                                                            for (j in 0 until pointsArray.length()) {
-                                                                val pt = pointsArray.getJSONObject(j)
-                                                                parsedPoints.add(
-                                                                    com.tuusuario.carlauncher.services.RoutePoint(
-                                                                        lat = pt.getDouble("lat"),
-                                                                        lon = pt.getDouble("lon"),
-                                                                        timestamp = pt.getString("timestamp")
-                                                                    )
-                                                                )
-                                                            }
-                                                            
-                                                            withContext(Dispatchers.Main) {
-                                                                if (parsedPoints.isNotEmpty()) {
-                                                                    com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value = parsedPoints
-                                                                    onDismiss()
-                                                                } else {
-                                                                    addresses = addresses + (videoId to "Sin datos GPS registrados")
-                                                                }
-                                                            }
-                                                        } else {
-                                                            addresses = addresses + (videoId to "No tiene metadatos de ruta")
-                                                        }
-                                                    } catch (e: Exception) {
-                                                        addresses = addresses + (videoId to "Error al leer ruta")
-                                                    }
-                                                    loadingAddressFor = null
-                                                }
-                                            }) { Text("Ver Ruta en Mapa") }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                DashcamGalleryScreen()
             }
         }
     }
