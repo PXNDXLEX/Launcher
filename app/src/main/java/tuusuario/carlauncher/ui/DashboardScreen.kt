@@ -46,7 +46,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.cachemanager.CacheManager
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
@@ -858,7 +857,7 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
-                        Configuration.getInstance().userAgentValue = ctx.packageName
+                        org.osmdroid.config.Configuration.getInstance().userAgentValue = ctx.packageName
                         mapView.apply {
                             setTileSource(TileSourceFactory.MAPNIK)
                             setMultiTouchControls(true)
