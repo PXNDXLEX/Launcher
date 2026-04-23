@@ -655,6 +655,40 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                 }
 
+                // ── RESTAURAR RUTA ACTIVA si se perdió (ej: rotación de pantalla) ──
+                val existingMainPolyline = view.overlays.find { it is Polyline && it.id == "ROUTE_MAIN" }
+                if (NavigationState.isRouteActive.value && NavigationState.activeRoutePoints.isNotEmpty()) {
+                    if (existingMainPolyline == null) {
+                        val polyline = Polyline(view).apply {
+                            id = "ROUTE_MAIN"
+                            setPoints(NavigationState.activeRoutePoints.toList())
+                            outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
+                            outlinePaint.strokeWidth = 20f
+                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                            outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                        }
+                        view.overlays.add(0, polyline)
+                    }
+                } else if (!NavigationState.isRouteActive.value && existingMainPolyline != null) {
+                    view.overlays.remove(existingMainPolyline)
+                }
+
+                // Restaurar marcador de destino si se perdió
+                val existingDestMarker = view.overlays.find { it is Marker && (it as Marker).id == "DEST" }
+                val activeDest = NavigationState.activeDestination.value
+                if (activeDest != null && existingDestMarker == null) {
+                    val marker = Marker(view).apply {
+                        position = activeDest
+                        id = "DEST"
+                        icon = android.graphics.drawable.BitmapDrawable(
+                            view.context.resources,
+                            drawCustomPin(AppSettings.uiColor.value)
+                        )
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    }
+                    view.overlays.add(marker)
+                }
+
                 view.invalidate()
             }
         )
