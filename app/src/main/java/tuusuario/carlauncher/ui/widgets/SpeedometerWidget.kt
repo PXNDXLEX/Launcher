@@ -1003,7 +1003,7 @@ fun SpeedometerDraw(
                         
                         if (isLit && isLight) {
                             val strokePaint = android.graphics.Paint(paint).apply {
-                                style = android.graphics.Paint.Style.STROKE
+                                this.style = android.graphics.Paint.Style.STROKE
                                 strokeWidth = radius * 0.01f
                                 color = android.graphics.Color.argb((activeColor.alpha*255).toInt(), (activeColor.red*255).toInt(), (activeColor.green*255).toInt(), (activeColor.blue*255).toInt())
                             }
