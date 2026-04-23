@@ -18,8 +18,12 @@ object AppSettings {
     val customSpeedoShape = mutableStateOf("ARC")
     val customSpeedoNeedle = mutableStateOf("PLASMA")
     val customSpeedoThickness = mutableStateOf(0.08f)
-    val customSpeedoBgUri = mutableStateOf("")    // URI de imagen de fondo
+    val customSpeedoBgUri = mutableStateOf("")    // URI de imagen de fondo (legacy)
+    val customSpeedoBgPath = mutableStateOf("")    // Ruta del archivo recortado
     val customSpeedoBgOpacity = mutableStateOf(0.5f) // opacidad del fondo
+    
+    // Custom Vehicle Icon
+    val customVehicleIconPath = mutableStateOf("") // Ruta del ícono personalizado del vehículo
 
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
@@ -39,7 +43,9 @@ object AppSettings {
         customSpeedoNeedle.value = prefs?.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
         customSpeedoThickness.value = prefs?.getFloat("customSpeedoThickness", 0.08f) ?: 0.08f
         customSpeedoBgUri.value = prefs?.getString("customSpeedoBgUri", "") ?: ""
+        customSpeedoBgPath.value = prefs?.getString("customSpeedoBgPath", "") ?: ""
         customSpeedoBgOpacity.value = prefs?.getFloat("customSpeedoBgOpacity", 0.5f) ?: 0.5f
+        customVehicleIconPath.value = prefs?.getString("customVehicleIconPath", "") ?: ""
         
         isInitialized = true
     }
@@ -98,5 +104,15 @@ object AppSettings {
     fun setCustomSpeedoBgOpacity(opacity: Float) {
         customSpeedoBgOpacity.value = opacity
         prefs?.edit()?.putFloat("customSpeedoBgOpacity", opacity)?.apply()
+    }
+
+    fun setCustomSpeedoBgPath(path: String) {
+        customSpeedoBgPath.value = path
+        prefs?.edit()?.putString("customSpeedoBgPath", path)?.apply()
+    }
+
+    fun setCustomVehicleIconPath(path: String) {
+        customVehicleIconPath.value = path
+        prefs?.edit()?.putString("customVehicleIconPath", path)?.apply()
     }
 }

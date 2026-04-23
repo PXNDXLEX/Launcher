@@ -261,26 +261,35 @@ fun SpeedometerDraw(
     val customNeedle = AppSettings.customSpeedoNeedle.value
     val customThickness = AppSettings.customSpeedoThickness.value
     val customBgUri = AppSettings.customSpeedoBgUri.value
+    val customBgPath = AppSettings.customSpeedoBgPath.value
     val customBgOpacity = AppSettings.customSpeedoBgOpacity.value
     
     val context = LocalContext.current
 
     var customBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(customBgUri) {
-        if (customBgUri.isNotEmpty()) {
-            withContext(Dispatchers.IO) {
-                try {
+    LaunchedEffect(customBgUri, customBgPath) {
+        withContext(Dispatchers.IO) {
+            try {
+                if (customBgPath.isNotEmpty()) {
+                    val file = java.io.File(customBgPath)
+                    if (file.exists()) {
+                        customBgBitmap = BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                        return@withContext
+                    }
+                }
+                
+                if (customBgUri.isNotEmpty()) {
                     val uri = Uri.parse(customBgUri)
                     val stream = context.contentResolver.openInputStream(uri)
                     customBgBitmap = stream?.let { BitmapFactory.decodeStream(it)?.asImageBitmap() }
                     stream?.close()
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                } else {
                     customBgBitmap = null
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                customBgBitmap = null
             }
-        } else {
-            customBgBitmap = null
         }
     }
 

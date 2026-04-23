@@ -193,247 +193,285 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PremiumSettingsDialog(onDismiss: () -> Unit) {
-    var selectedTab by remember { mutableStateOf(0) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    var expandedSection by remember { mutableStateOf("") }
+    var showSpeedoCropper by remember { mutableStateOf(false) }
+    var showVehicleCropper by remember { mutableStateOf(false) }
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+
+    val speedoBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { pendingCropUri = it; showSpeedoCropper = true }
+    }
+    val vehicleIconPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { pendingCropUri = it; showVehicleCropper = true }
+    }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
             modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(
+                // Header
+                Box(
                     modifier = Modifier.fillMaxWidth()
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            )
-                        )
-                        .padding(16.dp), 
-                    verticalAlignment = Alignment.CenterVertically, 
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), MaterialTheme.colorScheme.surface)))
+                        .padding(20.dp)
                 ) {
-                    Text("Configuración del Launcher", fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
-                }
-
-                TabRow(selectedTabIndex = selectedTab, containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-                    Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Apariencia") })
-                    Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Velocímetro") })
-                    Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Mapas Offline") })
-                }
-
-                AnimatedContent(
-                    targetState = selectedTab,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(300)) + slideInHorizontally(
-                            initialOffsetX = { if (targetState > initialState) it / 4 else -it / 4 },
-                            animationSpec = tween(300)
-                        ) togetherWith fadeOut(animationSpec = tween(200)) + slideOutHorizontally(
-                            targetOffsetX = { if (targetState > initialState) -it / 4 else it / 4 },
-                            animationSpec = tween(200)
-                        )
-                    },
-                    label = "SettingsTabAnimation"
-                ) { tab ->
-                Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState())) {
-                    when (tab) {
-                        0 -> 
-                            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                SettingsSection("Color de Interfaz y Mapas") {
-                                    ColorPicker(selectedColor = AppSettings.uiColor.value, onColorSelected = { AppSettings.setUiColor(it) })
-                                }
-                                SettingsSection("Ícono del Vehículo") {
-                                    var expandedVehicle by remember { mutableStateOf(false) }
-                                    val vehicleOptions = listOf("FLECHA", "SEDAN", "HATCHBACK")
-                                    
-                                    ExposedDropdownMenuBox(
-                                        expanded = expandedVehicle,
-                                        onExpandedChange = { expandedVehicle = !expandedVehicle }
-                                    ) {
-                                        OutlinedTextField(
-                                            value = AppSettings.vehicleType.value,
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            label = { Text("Selecciona tu vehículo") },
-                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedVehicle) },
-                                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                                            modifier = Modifier.menuAnchor().fillMaxWidth()
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = expandedVehicle,
-                                            onDismissRequest = { expandedVehicle = false }
-                                        ) {
-                                            vehicleOptions.forEach { selectionOption ->
-                                                DropdownMenuItem(
-                                                    text = { Text(selectionOption) },
-                                                    onClick = {
-                                                        AppSettings.setVehicleType(selectionOption)
-                                                        expandedVehicle = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                SettingsSection("Sistema") {
-                                    Button(
-                                        onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
-                                    ) { Text("Quitar Límite de Batería (Música en 2do Plano)") }
-                                }
-                                Spacer(modifier = Modifier.height(20.dp))
-                            }
-                        1 -> 
-                            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                SettingsSection("Estilo del Tablero") {
-                                    var expandedSpeedo by remember { mutableStateOf(false) }
-                                    val speedoOptions = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
-                                    
-                                    ExposedDropdownMenuBox(
-                                        expanded = expandedSpeedo,
-                                        onExpandedChange = { expandedSpeedo = !expandedSpeedo }
-                                    ) {
-                                        OutlinedTextField(
-                                            value = AppSettings.speedoStyle.value,
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            label = { Text("Diseño del Velocímetro") },
-                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedSpeedo) },
-                                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                                            modifier = Modifier.menuAnchor().fillMaxWidth()
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = expandedSpeedo,
-                                            onDismissRequest = { expandedSpeedo = false }
-                                        ) {
-                                            speedoOptions.forEach { selectionOption ->
-                                                DropdownMenuItem(
-                                                    text = { Text(selectionOption) },
-                                                    onClick = {
-                                                        AppSettings.setSpeedoStyle(selectionOption)
-                                                        expandedSpeedo = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                SettingsSection("Color de Retroiluminación (Independiente)") {
-                                    ColorPicker(selectedColor = AppSettings.speedoColor.value, onColorSelected = { AppSettings.setSpeedoColor(it) })
-                                }
-                                AnimatedVisibility(visible = AppSettings.speedoStyle.value == "CUSTOM") {
-                                    Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                        SettingsSection("Editor Personalizado - Forma Base") {
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                listOf("ARC", "CIRCLE", "LINE").forEach { shape ->
-                                                    FilterChip(
-                                                        selected = AppSettings.customSpeedoShape.value == shape,
-                                                        onClick = { AppSettings.setCustomSpeedoShape(shape) },
-                                                        label = { Text(shape) }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        SettingsSection("Editor Personalizado - Estilo de Aguja") {
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                listOf("PLASMA", "KATANA", "ARROW").forEach { needle ->
-                                                    FilterChip(
-                                                        selected = AppSettings.customSpeedoNeedle.value == needle,
-                                                        onClick = { AppSettings.setCustomSpeedoNeedle(needle) },
-                                                        label = { Text(needle) }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        SettingsSection("Editor Personalizado - Grosor") {
-                                            Slider(
-                                                value = AppSettings.customSpeedoThickness.value,
-                                                onValueChange = { AppSettings.setCustomSpeedoThickness(it) },
-                                                valueRange = 0.02f..0.15f
-                                            )
-                                        }
-                                        SettingsSection("Imagen de Fondo") {
-                                            val bgPickerLauncher = rememberLauncherForActivityResult(
-                                                contract = ActivityResultContracts.GetContent()
-                                            ) { uri: Uri? ->
-                                                uri?.let {
-                                                    // Persistir permiso de lectura
-                                                    try {
-                                                        context.contentResolver.takePersistableUriPermission(
-                                                            it, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                                        )
-                                                    } catch (_: Exception) {}
-                                                    AppSettings.setCustomSpeedoBgUri(it.toString())
-                                                }
-                                            }
-                                            
-                                            Button(
-                                                onClick = { bgPickerLauncher.launch("image/*") },
-                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                                            ) {
-                                                Icon(Icons.Default.Image, null)
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(if (AppSettings.customSpeedoBgUri.value.isNotEmpty()) "Cambiar Imagen" else "Seleccionar Imagen")
-                                            }
-                                            if (AppSettings.customSpeedoBgUri.value.isNotEmpty()) {
-                                                TextButton(onClick = { AppSettings.setCustomSpeedoBgUri("") }) {
-                                                    Text("Quitar Imagen", color = MaterialTheme.colorScheme.error)
-                                                }
-                                            }
-                                        }
-                                        SettingsSection("Opacidad del Fondo") {
-                                            Slider(
-                                                value = AppSettings.customSpeedoBgOpacity.value,
-                                                onValueChange = { AppSettings.setCustomSpeedoBgOpacity(it) },
-                                                valueRange = 0.1f..1.0f
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(20.dp))
-                            }
-                        2 -> 
-                            OfflineMapDownloader(context, coroutineScope)
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Configuración", fontWeight = FontWeight.Black, fontSize = 26.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Personaliza tu experiencia", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar", modifier = Modifier.size(28.dp)) }
                     }
                 }
+
+                Column(
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // ── APARIENCIA ──
+                    SettingsGroupCard("Apariencia") {
+                        SettingsRow(Icons.Default.Palette, "Color de Interfaz", "Personaliza el color principal",
+                            isExpanded = expandedSection == "color_ui",
+                            onClick = { expandedSection = if (expandedSection == "color_ui") "" else "color_ui" }
+                        ) { ColorPicker(AppSettings.uiColor.value) { AppSettings.setUiColor(it) } }
+
+                        SettingsDivider()
+
+                        SettingsRowSwitch(
+                            icon = if (AppSettings.isDarkMode.value) Icons.Default.DarkMode else Icons.Default.LightMode,
+                            title = "Modo Oscuro",
+                            checked = AppSettings.isDarkMode.value,
+                            onCheckedChange = { AppSettings.setDarkMode(it) }
+                        )
+                    }
+
+                    // ── VEHÍCULO ──
+                    SettingsGroupCard("Vehículo") {
+                        SettingsRow(Icons.Default.DirectionsCar, "Ícono del Vehículo", AppSettings.vehicleType.value,
+                            isExpanded = expandedSection == "vehicle_type",
+                            onClick = { expandedSection = if (expandedSection == "vehicle_type") "" else "vehicle_type" }
+                        ) {
+                            listOf("FLECHA", "SEDAN", "HATCHBACK", "CUSTOM").forEach { option ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                        .background(if (AppSettings.vehicleType.value == option) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                                        .clickable { AppSettings.setVehicleType(option) }.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(selected = AppSettings.vehicleType.value == option, onClick = { AppSettings.setVehicleType(option) }, colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(visible = AppSettings.vehicleType.value == "CUSTOM") {
+                            Column {
+                                SettingsDivider()
+                                SettingsRow(Icons.Default.AddPhotoAlternate, "Imagen Personalizada",
+                                    if (AppSettings.customVehicleIconPath.value.isNotEmpty()) "Imagen configurada ✓" else "Selecciona una imagen",
+                                    onClick = { vehicleIconPicker.launch("image/*") })
+                                if (AppSettings.customVehicleIconPath.value.isNotEmpty()) {
+                                    Row(modifier = Modifier.padding(start = 56.dp, bottom = 8.dp)) {
+                                        TextButton(onClick = { AppSettings.setCustomVehicleIconPath(""); AppSettings.setVehicleType("SEDAN") }) {
+                                            Text("Quitar imagen", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── VELOCÍMETRO ──
+                    SettingsGroupCard("Velocímetro") {
+                        SettingsRow(Icons.Default.Speed, "Estilo del Tablero", AppSettings.speedoStyle.value,
+                            isExpanded = expandedSection == "speedo_style",
+                            onClick = { expandedSection = if (expandedSection == "speedo_style") "" else "speedo_style" }
+                        ) {
+                            val opts = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM")
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                opts.chunked(3).forEach { row ->
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        row.forEach { o -> FilterChip(selected = AppSettings.speedoStyle.value == o, onClick = { AppSettings.setSpeedoStyle(o) }, label = { Text(o, fontSize = 11.sp, maxLines = 1) }, modifier = Modifier.weight(1f), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) }
+                                        repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                                    }
+                                }
+                            }
+                        }
+
+                        SettingsDivider()
+                        SettingsRow(Icons.Default.Lightbulb, "Color Retroiluminación", "Color independiente",
+                            isExpanded = expandedSection == "speedo_color",
+                            onClick = { expandedSection = if (expandedSection == "speedo_color") "" else "speedo_color" }
+                        ) { ColorPicker(AppSettings.speedoColor.value) { AppSettings.setSpeedoColor(it) } }
+
+                        AnimatedVisibility(visible = AppSettings.speedoStyle.value == "CUSTOM") {
+                            Column {
+                                SettingsDivider()
+                                SettingsRow(Icons.Default.Category, "Forma Base", AppSettings.customSpeedoShape.value,
+                                    isExpanded = expandedSection == "custom_shape",
+                                    onClick = { expandedSection = if (expandedSection == "custom_shape") "" else "custom_shape" }
+                                ) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("ARC", "CIRCLE", "LINE").forEach { s -> FilterChip(selected = AppSettings.customSpeedoShape.value == s, onClick = { AppSettings.setCustomSpeedoShape(s) }, label = { Text(s) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) } } }
+
+                                SettingsDivider()
+                                SettingsRow(Icons.Default.Straighten, "Estilo de Aguja", AppSettings.customSpeedoNeedle.value,
+                                    isExpanded = expandedSection == "custom_needle",
+                                    onClick = { expandedSection = if (expandedSection == "custom_needle") "" else "custom_needle" }
+                                ) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("PLASMA", "KATANA", "ARROW").forEach { n -> FilterChip(selected = AppSettings.customSpeedoNeedle.value == n, onClick = { AppSettings.setCustomSpeedoNeedle(n) }, label = { Text(n) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) } } }
+
+                                SettingsDivider()
+                                SettingsRow(Icons.Default.LineWeight, "Grosor", "Ajusta el grosor del arco",
+                                    isExpanded = expandedSection == "custom_thickness",
+                                    onClick = { expandedSection = if (expandedSection == "custom_thickness") "" else "custom_thickness" }
+                                ) { Slider(value = AppSettings.customSpeedoThickness.value, onValueChange = { AppSettings.setCustomSpeedoThickness(it) }, valueRange = 0.02f..0.15f) }
+
+                                SettingsDivider()
+                                SettingsRow(Icons.Default.Image, "Imagen de Fondo",
+                                    if (AppSettings.customSpeedoBgPath.value.isNotEmpty()) "Imagen configurada ✓" else "Selecciona imagen o GIF",
+                                    onClick = { speedoBgPicker.launch("image/*") })
+                                if (AppSettings.customSpeedoBgPath.value.isNotEmpty()) {
+                                    Column(modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 8.dp)) {
+                                        Text("Opacidad del fondo", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Slider(value = AppSettings.customSpeedoBgOpacity.value, onValueChange = { AppSettings.setCustomSpeedoBgOpacity(it) }, valueRange = 0.1f..1.0f)
+                                        TextButton(onClick = { AppSettings.setCustomSpeedoBgPath(""); AppSettings.setCustomSpeedoBgUri("") }) {
+                                            Text("Quitar imagen", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── MAPA ──
+                    SettingsGroupCard("Mapa") {
+                        SettingsRowSwitch(
+                            icon = if (AppSettings.isMapDarkMode.value) Icons.Default.DarkMode else Icons.Default.LightMode,
+                            title = "Modo Oscuro del Mapa",
+                            checked = AppSettings.isMapDarkMode.value,
+                            onCheckedChange = { AppSettings.setMapDarkMode(it) }
+                        )
+                        SettingsDivider()
+                        SettingsRow(Icons.Default.CloudDownload, "Mapas Offline", "Descargar zona actual",
+                            isExpanded = expandedSection == "offline_maps",
+                            onClick = { expandedSection = if (expandedSection == "offline_maps") "" else "offline_maps" }
+                        ) { OfflineMapDownloader(context, coroutineScope) }
+                    }
+
+                    // ── SISTEMA ──
+                    SettingsGroupCard("Sistema") {
+                        SettingsRow(Icons.Default.BatteryAlert, "Optimización de Batería", "Música en segundo plano",
+                            onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) })
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
+            }
+        }
+    }
+
+    // Croppers
+    if (showSpeedoCropper && pendingCropUri != null) {
+        com.tuusuario.carlauncher.ui.widgets.ImageCropperDialog(
+            imageUri = pendingCropUri!!, outputFileName = "custom_speedo_bg.png",
+            initialCropShape = com.tuusuario.carlauncher.ui.widgets.CropShape.CIRCLE,
+            onCropped = { path -> AppSettings.setCustomSpeedoBgPath(path); AppSettings.setCustomSpeedoBgUri(path); showSpeedoCropper = false; pendingCropUri = null },
+            onDismiss = { showSpeedoCropper = false; pendingCropUri = null }
+        )
+    }
+    if (showVehicleCropper && pendingCropUri != null) {
+        com.tuusuario.carlauncher.ui.widgets.ImageCropperDialog(
+            imageUri = pendingCropUri!!, outputFileName = "custom_vehicle.png",
+            initialCropShape = com.tuusuario.carlauncher.ui.widgets.CropShape.CIRCLE,
+            onCropped = { path -> AppSettings.setCustomVehicleIconPath(path); showVehicleCropper = false; pendingCropUri = null },
+            onDismiss = { showVehicleCropper = false; pendingCropUri = null }
+        )
+    }
+}
+
+// ── Componentes de Settings ──
+
+@Composable
+fun SettingsGroupCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column {
+        Text(title.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), letterSpacing = 1.sp, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.animateContentSize(animationSpec = tween(300))) { content() }
+        }
+    }
+}
+
+@Composable
+fun SettingsRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String,
+    isExpanded: Boolean = false, onClick: (() -> Unit)? = null,
+    expandedContent: (@Composable () -> Unit)? = null
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable { onClick() } else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (expandedContent != null) {
+                Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Expandir", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            } else if (onClick != null) {
+                Icon(Icons.Default.ChevronRight, "Ir", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            }
+        }
+        if (expandedContent != null) {
+            AnimatedVisibility(visible = isExpanded, enter = fadeIn(tween(200)) + expandVertically(tween(300)), exit = fadeOut(tween(150)) + shrinkVertically(tween(250))) {
+                Box(modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp)) { expandedContent() }
             }
         }
     }
 }
 
 @Composable
-fun SettingsSection(title: String, content: @Composable () -> Unit) {
-    Column {
-        Text(title, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
-        Spacer(modifier = Modifier.height(12.dp))
-        content()
-        Spacer(modifier = Modifier.height(8.dp))
-        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+fun SettingsRowSwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(if (checked) "Activado" else "Desactivado", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary))
     }
+}
+
+@Composable
+fun SettingsDivider() {
+    Divider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
 }
 
 @Composable
 fun ColorPicker(selectedColor: Int, onColorSelected: (Int) -> Unit) {
-    val colors = listOf(Color(0xFF007AFF), Color(0xFFE91E63), Color.White, Color.Black, Color.DarkGray, Color.Green, Color.Yellow, Color.Cyan, Color.Magenta, Color(0xFFFFA500))
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        colors.chunked(5).forEach { rowColors ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                rowColors.forEach { color ->
-                    Box(modifier = Modifier.size(42.dp).clip(RoundedCornerShape(50)).background(color).border(3.dp, if (selectedColor == color.toArgb()) MaterialTheme.colorScheme.onSurface else Color.Transparent, RoundedCornerShape(50))) {
-                        IconButton(onClick = { onColorSelected(color.toArgb()) }) {}
-                    }
-                }
-            }
+    val colors = listOf(Color(0xFF007AFF), Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF4CAF50), Color(0xFFFF5722), Color.White, Color(0xFF00BCD4), Color.Yellow, Color.Cyan, Color(0xFFFFA500))
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        colors.forEach { color ->
+            Box(modifier = Modifier.size(28.dp).clip(RoundedCornerShape(50)).background(color).border(if (selectedColor == color.toArgb()) 3.dp else 1.dp, if (selectedColor == color.toArgb()) MaterialTheme.colorScheme.onSurface else Color.Transparent, RoundedCornerShape(50)).clickable { onColorSelected(color.toArgb()) })
         }
     }
 }
+
+
 
 @Composable
 fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.CoroutineScope) {

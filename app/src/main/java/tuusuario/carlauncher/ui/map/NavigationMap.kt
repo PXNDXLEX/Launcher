@@ -252,7 +252,24 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                 if (carMarker == null) {
                     carMarker = Marker(mapView).apply {
-                        icon = BitmapDrawable(context.resources, drawVehicleBitmap(vehicleType, uiColor))
+                        val iconBitmap = if (AppSettings.vehicleType.value == "CUSTOM" && AppSettings.customVehicleIconPath.value.isNotEmpty()) {
+                            try {
+                                val file = java.io.File(AppSettings.customVehicleIconPath.value)
+                                if (file.exists()) {
+                                    val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                                    val scaled = android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
+                                    scaled
+                                } else {
+                                    drawVehicleBitmap("SEDAN", uiColor)
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                drawVehicleBitmap("SEDAN", uiColor)
+                            }
+                        } else {
+                            drawVehicleBitmap(vehicleType, uiColor)
+                        }
+                        icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         isFlat = true
                         position = newGeo
@@ -816,7 +833,7 @@ fun drawVehicleBitmap(type: String, color: Int): Bitmap {
 
     when (type) {
         "FLECHA" -> { val path = Path().apply { moveTo(size / 2f / scale, 10f); lineTo((size - 20f) / scale, (size - 15f) / scale); lineTo(size / 2f / scale, (size - 30f) / scale); lineTo(20f / scale, (size - 15f) / scale); close() }; canvas.drawPath(path, bodyPaint) }
-        "SEDAN" -> { canvas.drawRoundRect(25f, 10f, 75f, 90f, 15f, 15f, bodyPaint); canvas.drawRoundRect(30f, 30f, 70f, 45f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 65f, 70f, 75f, 5f, 5f, glassPaint); canvas.drawCircle(35f, 15f, 6f, lightPaint); canvas.drawCircle(65f, 15f, 6f, lightPaint) }
+        "SEDAN", "CUSTOM" -> { canvas.drawRoundRect(25f, 10f, 75f, 90f, 15f, 15f, bodyPaint); canvas.drawRoundRect(30f, 30f, 70f, 45f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 65f, 70f, 75f, 5f, 5f, glassPaint); canvas.drawCircle(35f, 15f, 6f, lightPaint); canvas.drawCircle(65f, 15f, 6f, lightPaint) }
         "HATCHBACK" -> { canvas.drawRoundRect(25f, 20f, 75f, 85f, 12f, 12f, bodyPaint); canvas.drawRoundRect(30f, 40f, 70f, 55f, 5f, 5f, glassPaint); canvas.drawRoundRect(30f, 75f, 70f, 82f, 3f, 3f, glassPaint); canvas.drawCircle(35f, 25f, 6f, lightPaint); canvas.drawCircle(65f, 25f, 6f, lightPaint) }
     }
     return bitmap
