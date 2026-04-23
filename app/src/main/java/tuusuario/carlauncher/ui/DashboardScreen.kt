@@ -289,6 +289,35 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
 
                     // ── VELOCÍMETRO ──
                     SettingsGroupCard("Velocímetro") {
+                        // Vista previa en vivo del velocímetro
+                        val configuration = LocalConfiguration.current
+                        val previewIsLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                        val previewHeight = if (previewIsLandscape) 280.dp else 200.dp
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(previewHeight)
+                                .padding(12.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (AppSettings.isDarkMode.value) Color(0xFF1A1A2E) 
+                                    else Color(0xFFF0F0F5)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SpeedometerWidget()
+                            // Etiqueta
+                            Text(
+                                "Vista Previa • ${AppSettings.speedoStyle.value}",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)
+                            )
+                        }
+
+                        SettingsDivider()
+
                         SettingsRow(Icons.Default.Speed, "Estilo del Tablero", AppSettings.speedoStyle.value,
                             isExpanded = expandedSection == "speedo_style",
                             onClick = { expandedSection = if (expandedSection == "speedo_style") "" else "speedo_style" }
@@ -319,10 +348,46 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                 ) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("ARC", "CIRCLE", "LINE").forEach { s -> FilterChip(selected = AppSettings.customSpeedoShape.value == s, onClick = { AppSettings.setCustomSpeedoShape(s) }, label = { Text(s) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) } } }
 
                                 SettingsDivider()
+                                // Selector moderno de agujas con descripciones
                                 SettingsRow(Icons.Default.Straighten, "Estilo de Aguja", AppSettings.customSpeedoNeedle.value,
                                     isExpanded = expandedSection == "custom_needle",
                                     onClick = { expandedSection = if (expandedSection == "custom_needle") "" else "custom_needle" }
-                                ) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("PLASMA", "KATANA", "ARROW").forEach { n -> FilterChip(selected = AppSettings.customSpeedoNeedle.value == n, onClick = { AppSettings.setCustomSpeedoNeedle(n) }, label = { Text(n) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) } } }
+                                ) {
+                                    val needleOptions = listOf(
+                                        Triple("PLASMA", "🔥 Flama", "Aguja ondulante de fuego"),
+                                        Triple("KATANA", "⚔️ Katana", "Hoja afilada japonesa"),
+                                        Triple("ARROW", "➤ Flecha", "Punto + línea clásica"),
+                                        Triple("NEON", "💡 Neón", "Barra con halo brillante"),
+                                        Triple("LASER", "✨ Láser", "Rayo con partículas"),
+                                        Triple("BOLT", "⚡ Rayo", "Zigzag eléctrico")
+                                    )
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        needleOptions.chunked(2).forEach { row ->
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                row.forEach { (key, icon, desc) ->
+                                                    val isSelected = AppSettings.customSpeedoNeedle.value == key
+                                                    Card(
+                                                        modifier = Modifier.weight(1f).clickable { AppSettings.setCustomSpeedoNeedle(key) },
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        colors = CardDefaults.cardColors(
+                                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) 
+                                                                           else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                                        ),
+                                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+                                                    ) {
+                                                        Column(modifier = Modifier.padding(10.dp)) {
+                                                            Text(icon, fontSize = 16.sp)
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(key, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, fontSize = 13.sp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                                            Text(desc, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                                        }
+                                                    }
+                                                }
+                                                repeat(2 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                                            }
+                                        }
+                                    }
+                                }
 
                                 SettingsDivider()
                                 SettingsRow(Icons.Default.LineWeight, "Grosor", "Ajusta el grosor del arco",

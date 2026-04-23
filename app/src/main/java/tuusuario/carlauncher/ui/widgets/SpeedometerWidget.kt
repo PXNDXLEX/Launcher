@@ -52,6 +52,8 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import android.os.Build
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 
 @Composable
@@ -136,7 +138,7 @@ fun SpeedometerWidget() {
                     .then(
                         if (customShape == "CIRCLE") Modifier.clip(CircleShape) else Modifier
                     ),
-                contentScale = coil.layout.ContentScale.Crop
+                contentScale = ContentScale.Crop
             )
         }
 
@@ -458,6 +460,77 @@ fun SpeedometerDraw(
                                 close()
                             }
                             drawPath(path = katanaPath, color = reactiveColor)
+                        }
+                    } else if (customNeedle == "NEON") {
+                        // Aguja NEON — línea gruesa con halo brillante
+                        withTransform({
+                            translate(center.x, center.y)
+                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
+                        }) {
+                            val nLen = trackRadius * 0.95f
+                            // Halo exterior (glow)
+                            drawLine(color = reactiveColor.copy(alpha = 0.15f), start = Offset(0f, 0f), end = Offset(0f, -nLen), strokeWidth = radius * 0.10f, cap = StrokeCap.Round)
+                            drawLine(color = reactiveColor.copy(alpha = 0.3f), start = Offset(0f, 0f), end = Offset(0f, -nLen), strokeWidth = radius * 0.06f, cap = StrokeCap.Round)
+                            // Núcleo brillante
+                            drawLine(color = reactiveColor, start = Offset(0f, 0f), end = Offset(0f, -nLen), strokeWidth = radius * 0.025f, cap = StrokeCap.Round)
+                            drawLine(color = Color.White, start = Offset(0f, -nLen * 0.1f), end = Offset(0f, -nLen), strokeWidth = radius * 0.012f, cap = StrokeCap.Round)
+                            // Punto de punta
+                            drawCircle(color = Color.White, radius = radius * 0.035f, center = Offset(0f, -nLen))
+                            drawCircle(color = reactiveColor.copy(alpha = 0.4f), radius = radius * 0.07f, center = Offset(0f, -nLen))
+                        }
+                    } else if (customNeedle == "LASER") {
+                        // Aguja LASER — rayo delgado con partículas
+                        withTransform({
+                            translate(center.x, center.y)
+                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
+                        }) {
+                            val laserLen = trackRadius * 1.0f
+                            // Rayo principal
+                            drawLine(color = reactiveColor, start = Offset(0f, -(radius * 0.05f)), end = Offset(0f, -laserLen), strokeWidth = radius * 0.008f, cap = StrokeCap.Round)
+                            // Glow del rayo
+                            drawLine(color = reactiveColor.copy(alpha = 0.25f), start = Offset(0f, -(radius * 0.05f)), end = Offset(0f, -laserLen), strokeWidth = radius * 0.03f, cap = StrokeCap.Round)
+                            // Partículas a lo largo del rayo
+                            val numParticles = 8
+                            for (p in 0 until numParticles) {
+                                val pY = -(radius * 0.1f) - (laserLen * 0.85f * p / numParticles)
+                                val pX = sin(cumTime * 20f + p * 3f).toFloat() * radius * 0.02f
+                                val pSize = (radius * 0.008f) + (sin(cumTime * 15f + p * 5f).toFloat() * radius * 0.005f)
+                                drawCircle(color = Color.White.copy(alpha = 0.7f), radius = pSize, center = Offset(pX, pY))
+                            }
+                            // Punto de origen
+                            drawCircle(color = reactiveColor, radius = radius * 0.025f, center = Offset(0f, -(radius * 0.05f)))
+                            // Punto terminal
+                            val termPulse = 0.5f + sin(cumTime * 12f).toFloat() * 0.5f
+                            drawCircle(color = Color.White.copy(alpha = termPulse), radius = radius * 0.02f, center = Offset(0f, -laserLen))
+                        }
+                    } else if (customNeedle == "BOLT") {
+                        // Aguja BOLT — rayo eléctrico zigzag
+                        withTransform({
+                            translate(center.x, center.y)
+                            rotate(degrees = Math.toDegrees(ptrRad).toFloat() + 90f, pivot = Offset.Zero)
+                        }) {
+                            val boltLen = trackRadius * 0.95f
+                            val numSegments = 7
+                            val segLen = boltLen / numSegments
+                            val boltPath = Path().apply {
+                                moveTo(0f, 0f)
+                                for (s in 1..numSegments) {
+                                    val zigX = if (s < numSegments) {
+                                        sin(cumTime * 25f + s * 7f).toFloat() * radius * 0.04f * (1f + speed * 0.005f)
+                                    } else 0f
+                                    lineTo(zigX, -(segLen * s))
+                                }
+                            }
+                            // Glow
+                            drawPath(path = boltPath, color = reactiveColor.copy(alpha = 0.2f), style = Stroke(width = radius * 0.06f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                            // Bolt principal
+                            drawPath(path = boltPath, color = reactiveColor, style = Stroke(width = radius * 0.02f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                            // Núcleo blanco
+                            drawPath(path = boltPath, color = Color.White, style = Stroke(width = radius * 0.008f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                            // Chispa en la punta
+                            val sparkPulse = abs(sin(cumTime * 20f))
+                            drawCircle(color = Color.White, radius = radius * 0.02f * (0.5f + sparkPulse * 0.5f), center = Offset(0f, -boltLen))
+                            drawCircle(color = reactiveColor.copy(alpha = 0.4f * sparkPulse), radius = radius * 0.06f, center = Offset(0f, -boltLen))
                         }
                     } else { // MINIMAL / ARROW
                         val ptrX = (center.x + trackRadius * cos(ptrRad)).toFloat()

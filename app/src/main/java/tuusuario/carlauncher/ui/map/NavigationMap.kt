@@ -138,6 +138,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var autoCenterJob by remember { mutableStateOf<Job?>(null) }
     
     var currentMapRotation by remember { mutableStateOf(0f) }
+    var lastKnownBearing by remember { mutableStateOf(0f) }
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
     var showFavorites by remember { mutableStateOf(false) }
@@ -243,6 +244,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 var targetBearing = carMarker?.rotation ?: 0f
                 if (loc.hasBearing() && loc.speed > 1.0f) {
                     targetBearing = loc.bearing
+                    lastKnownBearing = targetBearing
                 }
 
                 NavigationState.currentLocation.value = loc
@@ -425,7 +427,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     isFollowingLocation = true
                                     NavigationState.currentLocation.value?.let {
                                         controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        if (it.hasBearing()) mapOrientation = 360f - it.bearing
+                                        // Usar último bearing conocido para orientar el mapa
+                                        mapOrientation = 360f - lastKnownBearing
+                                        currentMapRotation = 360f - lastKnownBearing
                                     }
                                 }
                             }
@@ -445,7 +449,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     isFollowingLocation = true
                                     NavigationState.currentLocation.value?.let {
                                         controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        if (it.hasBearing()) mapOrientation = 360f - it.bearing
+                                        mapOrientation = 360f - lastKnownBearing
+                                        currentMapRotation = 360f - lastKnownBearing
                                     }
                                     autoCenterJob = null
                                 }
@@ -460,7 +465,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 isFollowingLocation = true
                                 NavigationState.currentLocation.value?.let {
                                     controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                    if (it.hasBearing()) mapOrientation = 360f - it.bearing
+                                    mapOrientation = 360f - lastKnownBearing
+                                    currentMapRotation = 360f - lastKnownBearing
                                 }
                             }
                             return false
@@ -571,24 +577,54 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     val query = URLEncoder.encode(searchQuery, "UTF-8")
                                     val loc = NavigationState.currentLocation.value
                                     
+                                    // Usar Photon API — mejores resultados que Nominatim para comercios/POIs
                                     val urlStr = buildString {
-                                        append("https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=10&addressdetails=1")
+                                        append("https://photon.komoot.io/api/?q=$query&limit=15")
                                         if (loc != null) {
-                                            append("&lat=${loc.latitude}&lon=${loc.longitude}") 
+                                            append("&lat=${loc.latitude}&lon=${loc.longitude}")
                                         }
                                     }
                                     
                                     val result = withContext(Dispatchers.IO) {
                                         val conn = URL(urlStr).openConnection() as HttpURLConnection
                                         conn.setRequestProperty("User-Agent", "CarLauncher")
+                                        conn.connectTimeout = 5000
                                         conn.inputStream.bufferedReader().readText()
                                     }
-                                    val jsonArray = JSONArray(result)
+                                    
+                                    // Photon devuelve GeoJSON: { features: [{ geometry: {coordinates: [lon,lat]}, properties: {name, street, city, country, ...} }] }
+                                    val json = JSONObject(result)
+                                    val features = json.getJSONArray("features")
                                     val list = mutableListOf<PlaceResult>()
-                                    for (i in 0 until jsonArray.length()) {
-                                        val obj = jsonArray.getJSONObject(i)
-                                        val lat = obj.getDouble("lat")
-                                        val lon = obj.getDouble("lon")
+                                    
+                                    for (i in 0 until features.length()) {
+                                        val feature = features.getJSONObject(i)
+                                        val geometry = feature.getJSONObject("geometry")
+                                        val coords = geometry.getJSONArray("coordinates")
+                                        val lon = coords.getDouble(0)
+                                        val lat = coords.getDouble(1)
+                                        
+                                        val props = feature.getJSONObject("properties")
+                                        val name = props.optString("name", "")
+                                        val street = props.optString("street", "")
+                                        val city = props.optString("city", props.optString("county", ""))
+                                        val state = props.optString("state", "")
+                                        val osmType = props.optString("osm_value", "")
+                                        
+                                        // Construir nombre legible
+                                        val displayName = when {
+                                            name.isNotEmpty() -> name
+                                            street.isNotEmpty() -> street
+                                            else -> "Lugar"
+                                        }
+                                        
+                                        // Construir dirección
+                                        val addressParts = listOfNotNull(
+                                            street.takeIf { it.isNotEmpty() && it != displayName },
+                                            city.takeIf { it.isNotEmpty() },
+                                            state.takeIf { it.isNotEmpty() }
+                                        )
+                                        val address = addressParts.joinToString(", ")
                                         
                                         var dist = 0.0
                                         loc?.let {
@@ -596,16 +632,23 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                             android.location.Location.distanceBetween(it.latitude, it.longitude, lat, lon, res)
                                             dist = res[0] / 1000.0
                                         }
-
-                                        val displayName = obj.getString("display_name")
-                                        val parts = displayName.split(",", limit = 2)
-                                        val placeName = parts.getOrNull(0)?.trim() ?: "Lugar"
-                                        val placeAddress = parts.getOrNull(1)?.trim() ?: ""
-                                        list.add(PlaceResult(placeName, placeAddress, lat, lon, "Place", dist))
+                                        
+                                        // Detectar tipo de ícono según OSM type
+                                        val iconType = when {
+                                            osmType.contains("fuel", true) || osmType.contains("gas", true) -> "LocalGasStation"
+                                            osmType.contains("shop", true) || osmType.contains("store", true) || osmType.contains("supermarket", true) -> "Store"
+                                            osmType.contains("office", true) -> "Work"
+                                            osmType.contains("residential", true) || osmType.contains("house", true) -> "Home"
+                                            else -> "Place"
+                                        }
+                                        
+                                        if (displayName != "Lugar" || address.isNotEmpty()) {
+                                            list.add(PlaceResult(displayName, address, lat, lon, iconType, dist))
+                                        }
                                     }
-                                    searchResults = list.sortedBy { it.distanceKm }.take(5)
+                                    searchResults = list.sortedBy { it.distanceKm }.take(8)
                                     if(list.isEmpty()) Toast.makeText(context, "No se encontraron resultados", Toast.LENGTH_SHORT).show()
-                                } catch (e: Exception) { Toast.makeText(context, "Error al buscar", Toast.LENGTH_SHORT).show() }
+                                } catch (e: Exception) { Toast.makeText(context, "Error al buscar: ${e.message}", Toast.LENGTH_SHORT).show() }
                                 isSearching = false
                             }
                         }
@@ -692,7 +735,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         autoCenterJob?.cancel()
                         NavigationState.currentLocation.value?.let { 
                             mapView.controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                            if (it.hasBearing()) mapView.mapOrientation = 360f - it.bearing
+                            mapView.mapOrientation = 360f - lastKnownBearing
+                            currentMapRotation = 360f - lastKnownBearing
                         }
                     },
                     icon = { Icon(Icons.Default.MyLocation, "Centrar") },

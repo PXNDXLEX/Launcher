@@ -112,7 +112,13 @@ class MusicNotificationService : NotificationListenerService() {
                     GlobalState.popupMessage.value = text
                     GlobalState.showPopup.value = true
                     
-                    // ARREGLO INYECTADO: Auto-ocultar notificación después de 2.5 segundos
+                    // Cancelar la notificación del sistema para que NO aparezca duplicada
+                    // Solo se mostrará en la UI propia de la app
+                    try {
+                        cancelNotification(sbn.key)
+                    } catch (_: Exception) {}
+                    
+                    // Auto-ocultar notificación después de 2.5 segundos
                     CoroutineScope(Dispatchers.Main).launch {
                         delay(2500)
                         GlobalState.showPopup.value = false
