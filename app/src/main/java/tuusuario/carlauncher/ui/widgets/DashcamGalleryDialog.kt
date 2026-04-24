@@ -112,6 +112,22 @@ fun DashcamGalleryScreen() {
         }
     }
 
+    fun useFallbackLocation(ref: VideoRefInfo) {
+        val lat = ref.startLat
+        val lon = ref.startLon
+        if (lat != null && lon != null) {
+            // Mostrar la coordenada de inicio como punto único en el mapa
+            com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value =
+                listOf(com.tuusuario.carlauncher.services.RoutePoint(lat, lon, ref.startTime))
+        } else {
+            android.widget.Toast.makeText(
+                context,
+                "Sin coordenada GPS para este video",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     LaunchedEffect(Unit) { reloadVideos() }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -261,14 +277,13 @@ fun DashcamGalleryScreen() {
                                     }
                                     withContext(Dispatchers.Main) {
                                         if (route != null) {
-                                            // Obtener todos los puntos del día y filtrar los del rango del video
+                                            // Filtrar puntos del historial en el rango horario del video
                                             val allPoints = RouteTracker.getAllPoints(route)
-                                            // El video dura máx. 4 minutos; tomar puntos desde startTime hasta +4min
                                             val startH = ref.startTime.substring(0, 2).toIntOrNull() ?: 0
                                             val startM = ref.startTime.substring(3, 5).toIntOrNull() ?: 0
                                             val startS = ref.startTime.substring(6, 8).toIntOrNull() ?: 0
                                             val startTotalSec = startH * 3600 + startM * 60 + startS
-                                            val endTotalSec = startTotalSec + (4 * 60) // 4 min max
+                                            val endTotalSec = startTotalSec + (4 * 60)
 
                                             val videoPoints = allPoints.filter { pt ->
                                                 try {
@@ -283,18 +298,12 @@ fun DashcamGalleryScreen() {
                                             if (videoPoints.isNotEmpty()) {
                                                 com.tuusuario.carlauncher.ui.NavigationState.selectedDashcamRoute.value = videoPoints
                                             } else {
-                                                android.widget.Toast.makeText(
-                                                    context,
-                                                    "No se encontraron puntos GPS en ese rango horario",
-                                                    android.widget.Toast.LENGTH_SHORT
-                                                ).show()
+                                                // No hay puntos en el historial para ese rango — usar coordenada de inicio del .ref.json
+                                                useFallbackLocation(ref)
                                             }
                                         } else {
-                                            android.widget.Toast.makeText(
-                                                context,
-                                                "No hay ruta guardada para el ${ref.date}",
-                                                android.widget.Toast.LENGTH_SHORT
-                                            ).show()
+                                            // No hay ruta guardada para ese día — usar coordenada de inicio del .ref.json
+                                            useFallbackLocation(ref)
                                         }
                                     }
                                 } catch (e: Exception) {

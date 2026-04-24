@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
@@ -92,12 +93,23 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
     var audioGranted by rememberSaveable {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
+    // Android 13+ requiere READ_MEDIA_VIDEO para leer videos del almacenamiento externo
+    var mediaGranted by rememberSaveable {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
+            else true // Android ≤ 12: cubierto por READ_EXTERNAL_STORAGE
+        )
+    }
 
     val checkPermissions = {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         cameraGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         audioGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        mediaGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
+        else true
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -117,7 +129,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { checkPermissions() }
 
-    if (!locationGranted || !notificationsGranted || !cameraGranted || !audioGranted) {
+    if (!locationGranted || !notificationsGranted || !cameraGranted || !audioGranted || !mediaGranted) {
         Column(
             modifier = Modifier.fillMaxSize().padding(32.dp),
             verticalArrangement = Arrangement.Center,
@@ -125,15 +137,19 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         ) {
             Text("Configuración de Launcher", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(24.dp))
-            if (!locationGranted || !cameraGranted || !audioGranted) {
-                Text("1. Necesitamos acceso al GPS (Mapa/Velocímetro) y a la Cámara/Micrófono (Dashcam).", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+            if (!locationGranted || !cameraGranted || !audioGranted || !mediaGranted) {
+                Text("1. Necesitamos acceso al GPS, Cámara/Micrófono y Archivos de Video (Dashcam).", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { 
-                    permissionLauncher.launch(arrayOf(
+                Button(onClick = {
+                    val perms = mutableListOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.CAMERA,
                         Manifest.permission.RECORD_AUDIO
-                    )) 
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        perms.add(Manifest.permission.READ_MEDIA_VIDEO)
+                    }
+                    permissionLauncher.launch(perms.toTypedArray())
                 }) { Text("Permitir Accesos") }
             } else if (!notificationsGranted) {
                 Text("2. Todo Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
