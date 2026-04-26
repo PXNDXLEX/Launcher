@@ -327,9 +327,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         
                         icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        isFlat = false
+                        isFlat = true
                         position = newGeo
-                        rotation = 0f // SIEMPRE mirando arriba
+                        rotation = targetBearing
                     }
                     mapView.overlays.add(carMarker)
                     
@@ -370,7 +370,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
                             
                             carMarker!!.position = currentPos
-                            carMarker!!.rotation = 0f // NUNCA rota el ícono
+                            carMarker!!.rotation = targetBearing
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
@@ -607,7 +607,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                             isFlat = true
                             position = initialGeo
-                            rotation = 0f
+                            rotation = if (loc.hasBearing()) loc.bearing else 0f
                         }
                         view.overlays.add(carMarker)
                         
