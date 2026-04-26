@@ -178,26 +178,19 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
             }
         }
     } else {
-        // Detectar primera apertura y datos previos
+        // Detectar primera apertura (en esta instalación) y datos previos
+        val prefs = context.getSharedPreferences("CarLauncherPrefs", android.content.Context.MODE_PRIVATE)
         var showMigrationDialog by rememberSaveable { mutableStateOf(false) }
         var migrationVideoCount by rememberSaveable { mutableStateOf(0) }
         var migrationRouteDays by rememberSaveable { mutableStateOf(0) }
 
         LaunchedEffect(Unit) {
-            val baseDir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "CarLauncher"
-            )
-            val stateFile = File(baseDir, ".app_state.json")
-
-            val isFirstLaunch = if (stateFile.exists()) {
-                try {
-                    val json = JSONObject(stateFile.readText())
-                    !json.optBoolean("welcomeShown", false)
-                } catch (_: Exception) { true }
-            } else { true }
-
+            val isFirstLaunch = !prefs.getBoolean("welcomeShown", false)
             if (isFirstLaunch) {
+                val baseDir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                    "CarLauncher"
+                )
                 // Contar datos existentes
                 val videosDir = File(baseDir, "Videos")
                 val rutasDir = File(baseDir, "Rutas")
@@ -209,8 +202,8 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                     migrationRouteDays = routeDays
                     showMigrationDialog = true
                 } else {
-                    // Marcar como visto aunque no haya datos
-                    markWelcomeShown(baseDir)
+                    // Marcar como visto si no hay datos
+                    prefs.edit().putBoolean("welcomeShown", true).apply()
                 }
             }
         }
@@ -221,11 +214,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                 routeDays = migrationRouteDays,
                 onKeep = {
                     showMigrationDialog = false
-                    val baseDir = File(
-                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                        "CarLauncher"
-                    )
-                    markWelcomeShown(baseDir)
+                    prefs.edit().putBoolean("welcomeShown", true).apply()
                 },
                 onWipeAll = {
                     showMigrationDialog = false
@@ -233,29 +222,17 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
                         "CarLauncher"
                     )
-                    // Borrar todo el contenido pero mantener el directorio base
+                    // Borrar todo el contenido
                     baseDir.listFiles()?.forEach { child ->
-                        if (child.name != ".app_state.json") child.deleteRecursively()
+                        child.deleteRecursively()
                     }
-                    markWelcomeShown(baseDir)
+                    prefs.edit().putBoolean("welcomeShown", true).apply()
                 }
             )
         }
 
         DashboardScreen(onToggleTheme, isDarkMode)
     }
-}
-
-private fun markWelcomeShown(baseDir: File) {
-    try {
-        if (!baseDir.exists()) baseDir.mkdirs()
-        val stateFile = File(baseDir, ".app_state.json")
-        val json = if (stateFile.exists()) {
-            try { JSONObject(stateFile.readText()) } catch (_: Exception) { JSONObject() }
-        } else { JSONObject() }
-        json.put("welcomeShown", true)
-        stateFile.writeText(json.toString(2))
-    } catch (_: Exception) {}
 }
 
 @Composable
