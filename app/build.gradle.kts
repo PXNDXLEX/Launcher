@@ -7,12 +7,32 @@ android {
     namespace = "com.tuusuario.carlauncher"
     compileSdk = 34
 
+    signingConfigs {
+        create("shared") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.tuusuario.carlauncher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = (System.currentTimeMillis() / 1000).toInt()
+        versionName = "1.0.${(System.currentTimeMillis() / 1000).toInt()}"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("shared")
+        }
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("shared")
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
 
     buildFeatures { compose = true }
