@@ -532,21 +532,19 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                         SettingsRow(Icons.Default.BatteryAlert, "Optimización de Batería de Android", "Música en segundo plano",
                             onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) })
                         
-                        if (com.tuusuario.carlauncher.services.DashcamManager.hasWideAngleLens.value) {
-                            SettingsDivider()
-                            SettingsRow(Icons.Default.Camera, "Lente de Dashcam", AppSettings.dashcamLensMode.value,
-                                isExpanded = expandedSection == "dashcam_lens",
-                                onClick = { expandedSection = if (expandedSection == "dashcam_lens") "" else "dashcam_lens" }
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("NORMAL", "PANORAMIC").forEach { mode ->
-                                        FilterChip(
-                                            selected = AppSettings.dashcamLensMode.value == mode,
-                                            onClick = { AppSettings.setDashcamLensMode(mode) },
-                                            label = { Text(if (mode == "PANORAMIC") "Panorámico (0.5x)" else "Normal (1.0x)") },
-                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)
-                                        )
-                                    }
+                        SettingsDivider()
+                        SettingsRow(Icons.Default.Camera, "Lente de Dashcam", AppSettings.dashcamLensMode.value,
+                            isExpanded = expandedSection == "dashcam_lens",
+                            onClick = { expandedSection = if (expandedSection == "dashcam_lens") "" else "dashcam_lens" }
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("NORMAL", "PANORAMIC").forEach { mode ->
+                                    FilterChip(
+                                        selected = AppSettings.dashcamLensMode.value == mode,
+                                        onClick = { AppSettings.setDashcamLensMode(mode) },
+                                        label = { Text(if (mode == "PANORAMIC") "Panorámico (0.5x)" else "Normal (1.0x)") },
+                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)
+                                    )
                                 }
                             }
                         }

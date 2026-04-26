@@ -20,6 +20,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.camera.core.Preview as CameraPreview
 import com.tuusuario.carlauncher.ui.AppSettings
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import android.hardware.camera2.CameraCharacteristics
 
 object DashcamManager {
     private var videoCapture: VideoCapture<Recorder>? = null
@@ -67,6 +69,45 @@ object DashcamManager {
         val dir = File(getVideosDir(), "Metadata")
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun getBestCameraSelector(provider: ProcessCameraProvider): CameraSelector {
+        if (AppSettings.dashcamLensMode.value != "PANORAMIC") {
+            return CameraSelector.DEFAULT_BACK_CAMERA
+        }
+
+        var shortestFocalLength = Float.MAX_VALUE
+        var bestCameraInfo: androidx.camera.core.CameraInfo? = null
+
+        for (cameraInfo in provider.availableCameraInfos) {
+            try {
+                val cam2Info = Camera2CameraInfo.from(cameraInfo)
+                val facing = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
+                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    val focalLengths = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                    if (focalLengths != null && focalLengths.isNotEmpty()) {
+                        val minFocal = focalLengths.minOrNull() ?: Float.MAX_VALUE
+                        if (minFocal < shortestFocalLength) {
+                            shortestFocalLength = minFocal
+                            bestCameraInfo = cameraInfo
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore errors reading physical characteristics
+            }
+        }
+
+        return if (bestCameraInfo != null) {
+            Log.i("Dashcam", "Using PANORAMIC lens with focal length: $shortestFocalLength")
+            CameraSelector.Builder()
+                .addCameraFilter { mutableListOf(bestCameraInfo) }
+                .build()
+        } else {
+            Log.i("Dashcam", "No ultrawide found, falling back to DEFAULT_BACK_CAMERA")
+            CameraSelector.DEFAULT_BACK_CAMERA
+        }
     }
 
     /**
@@ -138,9 +179,12 @@ object DashcamManager {
 
                 // Desvincula todo primero para asegurar estado limpio
                 provider.unbindAll()
+                
+                val selector = getBestCameraSelector(provider)
+                
                 val camera = provider.bindToLifecycle(
                     lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    selector,
                     videoCapture,
                     preview
                 )
