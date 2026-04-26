@@ -20,6 +20,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.camera.core.Preview as CameraPreview
 import com.tuusuario.carlauncher.ui.AppSettings
+import com.tuusuario.carlauncher.ui.NavigationState
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import android.hardware.camera2.CameraCharacteristics
 
