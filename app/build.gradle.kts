@@ -57,4 +57,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:${media3_version}")
     implementation("androidx.media3:media3-ui:${media3_version}")
 
+    // VectorDrawableCompat para renderizar SVGs/AVDs tintados en el mapa
+    implementation("androidx.vectordrawable:vectordrawable:1.1.0")
+
 }

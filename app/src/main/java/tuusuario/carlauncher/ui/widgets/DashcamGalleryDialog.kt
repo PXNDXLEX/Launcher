@@ -72,6 +72,7 @@ fun DashcamGalleryScreen() {
                     refs[videoId] = VideoRefInfo(
                         date = json.optString("date", ""),
                         startTime = json.optString("startTime", ""),
+                        endTime = json.optString("endTime", "").ifEmpty { null },
                         startLat = if (json.has("startLat")) json.getDouble("startLat") else null,
                         startLon = if (json.has("startLon")) json.getDouble("startLon") else null
                     )
@@ -277,13 +278,22 @@ fun DashcamGalleryScreen() {
                                     }
                                     withContext(Dispatchers.Main) {
                                         if (route != null) {
-                                            // Filtrar puntos del historial en el rango horario del video
+                                            // Filtrar puntos del historial en el rango horario EXACTO del video
                                             val allPoints = RouteTracker.getAllPoints(route)
                                             val startH = ref.startTime.substring(0, 2).toIntOrNull() ?: 0
                                             val startM = ref.startTime.substring(3, 5).toIntOrNull() ?: 0
                                             val startS = ref.startTime.substring(6, 8).toIntOrNull() ?: 0
                                             val startTotalSec = startH * 3600 + startM * 60 + startS
-                                            val endTotalSec = startTotalSec + (4 * 60)
+
+                                            // Usar endTime real si existe; si no (video antiguo), fallback a +4min
+                                            val endTotalSec = if (ref.endTime != null) {
+                                                val eH = ref.endTime.substring(0, 2).toIntOrNull() ?: 0
+                                                val eM = ref.endTime.substring(3, 5).toIntOrNull() ?: 0
+                                                val eS = ref.endTime.substring(6, 8).toIntOrNull() ?: 0
+                                                eH * 3600 + eM * 60 + eS
+                                            } else {
+                                                startTotalSec + (4 * 60) // fallback para videos antiguos
+                                            }
 
                                             val videoPoints = allPoints.filter { pt ->
                                                 try {
@@ -370,6 +380,7 @@ fun DashcamGalleryScreen() {
 data class VideoRefInfo(
     val date: String,       // yyyy-MM-dd
     val startTime: String,  // HH:mm:ss
+    val endTime: String?,   // HH:mm:ss (null para videos grabados antes de esta versión)
     val startLat: Double?,
     val startLon: Double?
 ) {

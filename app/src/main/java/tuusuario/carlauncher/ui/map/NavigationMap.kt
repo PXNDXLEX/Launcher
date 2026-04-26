@@ -40,7 +40,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat
 import com.google.android.gms.location.*
+import com.tuusuario.carlauncher.R
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
 import com.tuusuario.carlauncher.ui.RouteStep
@@ -103,7 +105,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = LocalFocusManager.current
     val vehicleType = AppSettings.vehicleType.value
-    val uiColor = AppSettings.uiColor.value 
+    val uiColor = AppSettings.uiColor.value
+    val mapIconColor = AppSettings.mapIconColor.value  // Color independiente del icono en el mapa
     val favManager = remember { FavoritesManager(context) }
 
     val coroutineScope = rememberCoroutineScope()
@@ -139,7 +142,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var isSearching by remember { mutableStateOf(false) }
 
     val customIconPath = AppSettings.customVehicleIconPath.value
-    LaunchedEffect(vehicleType, customIconPath, uiColor) {
+    LaunchedEffect(vehicleType, customIconPath, mapIconColor) {
         carMarker?.let { marker ->
             val iconBitmap = if (vehicleType == "CUSTOM" && customIconPath.isNotEmpty()) {
                 try {
@@ -148,14 +151,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                         android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
                     } else {
-                        drawVehicleBitmap("SEDAN", uiColor)
+                        drawVehicleBitmap(context, "SEDAN", mapIconColor)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    drawVehicleBitmap("SEDAN", uiColor)
+                    drawVehicleBitmap(context, "SEDAN", mapIconColor)
                 }
             } else {
-                drawVehicleBitmap(vehicleType, uiColor)
+                drawVehicleBitmap(context, vehicleType, mapIconColor)
             }
             marker.icon = android.graphics.drawable.BitmapDrawable(context.resources, iconBitmap)
             mapView.invalidate()
@@ -318,13 +321,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 if (file.exists()) {
                                     val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                     android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                } else { drawVehicleBitmap("SEDAN", uiColor) }
-                            } catch (e: Exception) { drawVehicleBitmap("SEDAN", uiColor) }
-                        } else { drawVehicleBitmap(vehicleType, uiColor) }
+                                } else { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
+                            } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
+                        } else { drawVehicleBitmap(context, vehicleType, mapIconColor) }
                         
                         icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        isFlat = true
+                        isFlat = false
                         position = newGeo
                         rotation = 0f // SIEMPRE mirando arriba
                     }
@@ -596,9 +599,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     if (file.exists()) {
                                         val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                         android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                    } else { drawVehicleBitmap("SEDAN", uiColor) }
-                                } catch (e: Exception) { drawVehicleBitmap("SEDAN", uiColor) }
-                            } else { drawVehicleBitmap(vehicleType, uiColor) }
+                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor) }
+                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor) }
+                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor) }
                             
                             icon = android.graphics.drawable.BitmapDrawable(view.context.resources, iconBitmap)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -1066,8 +1069,36 @@ suspend fun searchPlaces(query: String): List<PlaceResult> = withContext(Dispatc
     } catch (e: Exception) { emptyList() }
 }
 
-private fun drawVehicleBitmap(type: String, color: Int): Bitmap {
-    val b = Bitmap.createBitmap(120, 120, Bitmap.Config.ARGB_8888)
+/**
+ * Renders a vehicle bitmap for use as a map marker.
+ * For SEDAN and HATCHBACK types, uses the Vector Drawable XML resources (ic_sedan.xml / ic_hatchback.xml)
+ * tinted with [color]. Other types fall back to Canvas-drawn primitives.
+ * [color] should come from AppSettings.mapIconColor — independent of the UI accent color.
+ */
+internal fun drawVehicleBitmap(context: Context, type: String, color: Int): Bitmap {
+    val size = 120
+
+    // Try to render from Vector Drawable for SEDAN and HATCHBACK
+    val drawableResId = when (type) {
+        "SEDAN"     -> R.drawable.ic_sedan
+        "HATCHBACK" -> R.drawable.ic_hatchback
+        else        -> null
+    }
+
+    if (drawableResId != null) {
+        val vd = VectorDrawableCompat.create(context.resources, drawableResId, null)
+        if (vd != null) {
+            vd.setTint(color)
+            val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(b)
+            vd.setBounds(0, 0, size, size)
+            vd.draw(canvas)
+            return b
+        }
+    }
+
+    // Fallback: Canvas-drawn primitives for SPORT, TRUCK, and any unknown type
+    val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(b)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
     p.color = color
@@ -1084,7 +1115,7 @@ private fun drawVehicleBitmap(type: String, color: Int): Bitmap {
             canvas.drawPath(path, p)
         }
         "TRUCK" -> canvas.drawRect(30f, 20f, 90f, 100f, p)
-        else -> { 
+        else -> {
             val path = Path()
             path.moveTo(60f, 15f)
             path.lineTo(25f, 105f)

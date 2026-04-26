@@ -11,6 +11,7 @@ object AppSettings {
     val speedoColor = mutableStateOf(Color.parseColor("#007AFF"))
     val vehicleType = mutableStateOf("SEDAN") // Universal vehicle type
     val uiColor = mutableStateOf(Color.parseColor("#007AFF"))
+    val mapIconColor = mutableStateOf(Color.parseColor("#007AFF")) // Color independiente para el icono en el mapa
     val isDarkMode = mutableStateOf(true)
     val isMapDarkMode = mutableStateOf(true)
     
@@ -37,6 +38,7 @@ object AppSettings {
         speedoColor.value = prefs?.getInt("speedoColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
         uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
+        mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
         isMapDarkMode.value = prefs?.getBoolean("isMapDarkMode", true) ?: true
         customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
@@ -69,6 +71,11 @@ object AppSettings {
     fun setUiColor(color: Int) {
         uiColor.value = color
         prefs?.edit()?.putInt("uiColor", color)?.apply()
+    }
+
+    fun setMapIconColor(color: Int) {
+        mapIconColor.value = color
+        prefs?.edit()?.putInt("mapIconColor", color)?.apply()
     }
 
     fun setDarkMode(isDark: Boolean) {

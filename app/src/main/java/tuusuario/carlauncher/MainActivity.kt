@@ -31,6 +31,25 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.tuusuario.carlauncher.ui.DashboardScreen
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.services.MusicNotificationService
+import android.os.Environment
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import java.io.File
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -158,6 +177,152 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
             }
         }
     } else {
+        // Detectar primera apertura y datos previos
+        var showMigrationDialog by rememberSaveable { mutableStateOf(false) }
+        var migrationVideoCount by rememberSaveable { mutableStateOf(0) }
+        var migrationRouteDays by rememberSaveable { mutableStateOf(0) }
+
+        LaunchedEffect(Unit) {
+            val baseDir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                "CarLauncher"
+            )
+            val stateFile = File(baseDir, ".app_state.json")
+
+            val isFirstLaunch = if (stateFile.exists()) {
+                try {
+                    val json = JSONObject(stateFile.readText())
+                    !json.optBoolean("welcomeShown", false)
+                } catch (_: Exception) { true }
+            } else { true }
+
+            if (isFirstLaunch) {
+                // Contar datos existentes
+                val videosDir = File(baseDir, "Videos")
+                val rutasDir = File(baseDir, "Rutas")
+                val videoCount = videosDir.listFiles { f -> f.extension == "mp4" }?.size ?: 0
+                val routeDays = rutasDir.listFiles { f -> f.name.startsWith("ruta_") && f.name.endsWith(".json") }?.size ?: 0
+
+                if (videoCount > 0 || routeDays > 0) {
+                    migrationVideoCount = videoCount
+                    migrationRouteDays = routeDays
+                    showMigrationDialog = true
+                } else {
+                    // Marcar como visto aunque no haya datos
+                    markWelcomeShown(baseDir)
+                }
+            }
+        }
+
+        if (showMigrationDialog) {
+            DataMigrationDialog(
+                videoCount = migrationVideoCount,
+                routeDays = migrationRouteDays,
+                onKeep = {
+                    showMigrationDialog = false
+                    val baseDir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                        "CarLauncher"
+                    )
+                    markWelcomeShown(baseDir)
+                },
+                onWipeAll = {
+                    showMigrationDialog = false
+                    val baseDir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                        "CarLauncher"
+                    )
+                    // Borrar todo el contenido pero mantener el directorio base
+                    baseDir.listFiles()?.forEach { child ->
+                        if (child.name != ".app_state.json") child.deleteRecursively()
+                    }
+                    markWelcomeShown(baseDir)
+                }
+            )
+        }
+
         DashboardScreen(onToggleTheme, isDarkMode)
+    }
+}
+
+private fun markWelcomeShown(baseDir: File) {
+    try {
+        if (!baseDir.exists()) baseDir.mkdirs()
+        val stateFile = File(baseDir, ".app_state.json")
+        val json = if (stateFile.exists()) {
+            try { JSONObject(stateFile.readText()) } catch (_: Exception) { JSONObject() }
+        } else { JSONObject() }
+        json.put("welcomeShown", true)
+        stateFile.writeText(json.toString(2))
+    } catch (_: Exception) {}
+}
+
+@Composable
+fun DataMigrationDialog(
+    videoCount: Int,
+    routeDays: Int,
+    onKeep: () -> Unit,
+    onWipeAll: () -> Unit
+) {
+    var confirmWipe by remember { mutableStateOf(false) }
+
+    if (!confirmWipe) {
+        AlertDialog(
+            onDismissRequest = { onKeep() }, // Cerrar = conservar
+            icon = { Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp)) },
+            title = { Text("¡Datos anteriores encontrados!", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        "Se encontraron datos compatibles de una instalación anterior:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (videoCount > 0) {
+                        Text("🎥  $videoCount video${if (videoCount != 1) "s" else ""} de Dashcam", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (routeDays > 0) {
+                        Text("🗺️  $routeDays día${if (routeDays != 1) "s" else ""} de historial de rutas", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "¿Qué deseas hacer con estos datos?",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = onKeep) {
+                    Text("✅ Conservar todo")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { confirmWipe = true },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("🗑️ Borrar todo y empezar de cero")
+                }
+            }
+        )
+    } else {
+        // Segunda confirmación antes de borrar
+        AlertDialog(
+            onDismissRequest = { confirmWipe = false },
+            title = { Text("¿Estás seguro?", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = { Text("Esta acción borrará permanentemente todos los videos y rutas guardadas. No se puede deshacer.") },
+            confirmButton = {
+                Button(
+                    onClick = onWipeAll,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Sí, borrar todo") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmWipe = false }) { Text("Cancelar") }
+            }
+        )
     }
 }

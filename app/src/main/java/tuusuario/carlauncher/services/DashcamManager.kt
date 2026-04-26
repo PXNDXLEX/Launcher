@@ -69,10 +69,9 @@ object DashcamManager {
 
     /**
      * Escribe un archivo .ref.json ligero vinculando el video con la ruta del historial.
-     * Solo guarda la fecha, hora de inicio y coordenada inicial. Los puntos completos de
-     * la ruta se leen de RouteTracker cuando el usuario pulsa "Ver Ruta".
+     * Guarda la fecha, hora de inicio, hora de fin (si se proporciona) y coordenada inicial.
      */
-    private fun writeRefJson(videoId: String) {
+    private fun writeRefJson(videoId: String, endTime: String? = null) {
         try {
             val date = "${videoId.substring(0, 4)}-${videoId.substring(4, 6)}-${videoId.substring(6, 8)}"
             val startTime = "${videoId.substring(9, 11)}:${videoId.substring(11, 13)}:${videoId.substring(13, 15)}"
@@ -81,6 +80,10 @@ object DashcamManager {
             json.put("videoId", videoId)
             json.put("date", date)
             json.put("startTime", startTime)
+
+            if (endTime != null) {
+                json.put("endTime", endTime)
+            }
 
             val lat = lastKnownLat
             val lon = lastKnownLon
@@ -92,7 +95,7 @@ object DashcamManager {
 
             val file = File(getMetadataDir(), "VID_${videoId}.ref.json")
             file.writeText(json.toString(2))
-            Log.i("Dashcam", "Ref JSON: date=$date time=$startTime lat=$lat lon=$lon")
+            Log.i("Dashcam", "Ref JSON: date=$date time=$startTime endTime=$endTime lat=$lat lon=$lon")
         } catch (e: Exception) {
             Log.e("Dashcam", "Error escribiendo ref.json", e)
         }
@@ -169,6 +172,14 @@ object DashcamManager {
                             }
                             is VideoRecordEvent.Finalize -> {
                                 Log.i("Dashcam", "Grabación finalizada")
+
+                                // Guardar hora de fin real en el .ref.json
+                                val vid = currentVideoId
+                                if (vid != null) {
+                                    val endTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                                    writeRefJson(vid, endTime)
+                                }
+
                                 isRecording.value = false
                                 currentVideoId = null
                                 activePreview.value = null

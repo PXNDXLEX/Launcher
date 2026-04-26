@@ -372,6 +372,11 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                 }
                             }
                         }
+                        SettingsDivider()
+                        SettingsRow(Icons.Default.LocationOn, "Color del Icono en Mapa", "Color independiente al de la interfaz",
+                            isExpanded = expandedSection == "map_icon_color",
+                            onClick = { expandedSection = if (expandedSection == "map_icon_color") "" else "map_icon_color" }
+                        ) { ColorPicker(AppSettings.mapIconColor.value) { AppSettings.setMapIconColor(it) } }
                     }
 
                     // ── VELOCÍMETRO ──
