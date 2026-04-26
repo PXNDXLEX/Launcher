@@ -73,26 +73,13 @@ object DashcamManager {
 
     @SuppressLint("UnsafeOptInUsageError")
     private fun getSelectedCameraSelector(provider: ProcessCameraProvider): CameraSelector {
-        val backCameras = mutableListOf<androidx.camera.core.CameraInfo>()
-        for (cameraInfo in provider.availableCameraInfos) {
-            try {
-                val cam2Info = Camera2CameraInfo.from(cameraInfo)
-                val facing = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
-                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                    backCameras.add(cameraInfo)
-                }
-            } catch (e: Exception) {
-                // Fallback si falla Camera2 API
-            }
-        }
-        
-        // Fallback genérico si la lista está vacía
-        if (backCameras.isEmpty()) {
+        val cameras = provider.availableCameraInfos
+        if (cameras.isEmpty()) {
             return CameraSelector.DEFAULT_BACK_CAMERA
         }
 
-        val safeIndex = AppSettings.dashcamCameraIndex.value % backCameras.size
-        val selectedInfo = backCameras[safeIndex]
+        val safeIndex = AppSettings.dashcamCameraIndex.value % cameras.size
+        val selectedInfo = cameras[safeIndex]
         
         return CameraSelector.Builder()
             .addCameraFilter { mutableListOf(selectedInfo) }
@@ -103,21 +90,21 @@ object DashcamManager {
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
             val provider = providerFuture.get()
-            var backCameraCount = 0
-            for (cameraInfo in provider.availableCameraInfos) {
-                try {
-                    val cam2Info = Camera2CameraInfo.from(cameraInfo)
-                    val facing = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
-                    if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                        backCameraCount++
-                    }
-                } catch (e: Exception) {}
-            }
+            val cameras = provider.availableCameraInfos
+            val cameraCount = cameras.size
             
-            if (backCameraCount > 1) {
-                val newIndex = (AppSettings.dashcamCameraIndex.value + 1) % backCameraCount
+            if (cameraCount > 1) {
+                val newIndex = (AppSettings.dashcamCameraIndex.value + 1) % cameraCount
                 AppSettings.setDashcamCameraIndex(newIndex)
-                android.widget.Toast.makeText(context, "Cámara ${newIndex + 1} de $backCameraCount seleccionada", android.widget.Toast.LENGTH_SHORT).show()
+                
+                val camInfo = cameras[newIndex]
+                val facingStr = when(camInfo.lensFacing) {
+                    CameraSelector.LENS_FACING_BACK -> "Trasera"
+                    CameraSelector.LENS_FACING_FRONT -> "Frontal"
+                    else -> "Externa/Desconocida"
+                }
+                
+                android.widget.Toast.makeText(context, "Cámara ${newIndex + 1} de $cameraCount ($facingStr) seleccionada", android.widget.Toast.LENGTH_SHORT).show()
                 
                 if (isRecording.value) {
                     stopRecording()
@@ -131,7 +118,7 @@ object DashcamManager {
                     startRecording(context, lifecycleOwner)
                 }
             } else {
-                android.widget.Toast.makeText(context, "Solo hay 1 cámara trasera disponible", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, "Solo se detectó 1 cámara en el sistema", android.widget.Toast.LENGTH_SHORT).show()
             }
         }, ContextCompat.getMainExecutor(context))
     }

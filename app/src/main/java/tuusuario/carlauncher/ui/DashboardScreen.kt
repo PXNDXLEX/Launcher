@@ -208,7 +208,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 shadowElevation = 6.dp,
                 modifier = Modifier
                     .size(56.dp)
-                    .pointerInput(Unit) {
+                    .pointerInput(isRec) {
                         detectTapGestures(
                             onTap = {
                                 if (isRec) {
