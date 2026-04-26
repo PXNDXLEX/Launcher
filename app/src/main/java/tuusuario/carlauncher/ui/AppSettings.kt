@@ -15,7 +15,7 @@ object AppSettings {
     val isDarkMode = mutableStateOf(true)
     val isMapDarkMode = mutableStateOf(true)
     val batterySaverMode = mutableStateOf(false)
-    val dashcamLensMode = mutableStateOf("NORMAL")
+    val dashcamCameraIndex = mutableStateOf(0)
     
     // Custom Speedometer settings
     val customSpeedoShape = mutableStateOf("ARC")
@@ -44,7 +44,7 @@ object AppSettings {
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
         isMapDarkMode.value = prefs?.getBoolean("isMapDarkMode", true) ?: true
         batterySaverMode.value = prefs?.getBoolean("batterySaverMode", false) ?: false
-        dashcamLensMode.value = prefs?.getString("dashcamLensMode", "NORMAL") ?: "NORMAL"
+        dashcamCameraIndex.value = prefs?.getInt("dashcamCameraIndex", 0) ?: 0
         customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
         customSpeedoNeedle.value = prefs?.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
         customSpeedoThickness.value = prefs?.getFloat("customSpeedoThickness", 0.08f) ?: 0.08f
@@ -97,9 +97,9 @@ object AppSettings {
         prefs?.edit()?.putBoolean("batterySaverMode", enabled)?.apply()
     }
 
-    fun setDashcamLensMode(mode: String) {
-        dashcamLensMode.value = mode
-        prefs?.edit()?.putString("dashcamLensMode", mode)?.apply()
+    fun setDashcamCameraIndex(index: Int) {
+        dashcamCameraIndex.value = index
+        prefs?.edit()?.putInt("dashcamCameraIndex", index)?.apply()
     }
 
     fun setCustomSpeedoShape(shape: String) {

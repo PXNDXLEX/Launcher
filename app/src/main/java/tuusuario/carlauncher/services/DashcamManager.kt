@@ -72,42 +72,68 @@ object DashcamManager {
     }
 
     @SuppressLint("UnsafeOptInUsageError")
-    private fun getBestCameraSelector(provider: ProcessCameraProvider): CameraSelector {
-        if (AppSettings.dashcamLensMode.value != "PANORAMIC") {
-            return CameraSelector.DEFAULT_BACK_CAMERA
-        }
-
-        var shortestFocalLength = Float.MAX_VALUE
-        var bestCameraInfo: androidx.camera.core.CameraInfo? = null
-
+    private fun getSelectedCameraSelector(provider: ProcessCameraProvider): CameraSelector {
+        val backCameras = mutableListOf<androidx.camera.core.CameraInfo>()
         for (cameraInfo in provider.availableCameraInfos) {
             try {
                 val cam2Info = Camera2CameraInfo.from(cameraInfo)
                 val facing = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
                 if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                    val focalLengths = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                    if (focalLengths != null && focalLengths.isNotEmpty()) {
-                        val minFocal = focalLengths.minOrNull() ?: Float.MAX_VALUE
-                        if (minFocal < shortestFocalLength) {
-                            shortestFocalLength = minFocal
-                            bestCameraInfo = cameraInfo
-                        }
-                    }
+                    backCameras.add(cameraInfo)
                 }
             } catch (e: Exception) {
-                // Ignore errors reading physical characteristics
+                // Fallback si falla Camera2 API
             }
         }
-
-        return if (bestCameraInfo != null) {
-            Log.i("Dashcam", "Using PANORAMIC lens with focal length: $shortestFocalLength")
-            CameraSelector.Builder()
-                .addCameraFilter { mutableListOf(bestCameraInfo) }
-                .build()
-        } else {
-            Log.i("Dashcam", "No ultrawide found, falling back to DEFAULT_BACK_CAMERA")
-            CameraSelector.DEFAULT_BACK_CAMERA
+        
+        // Fallback genérico si la lista está vacía
+        if (backCameras.isEmpty()) {
+            return CameraSelector.DEFAULT_BACK_CAMERA
         }
+
+        val safeIndex = AppSettings.dashcamCameraIndex.value % backCameras.size
+        val selectedInfo = backCameras[safeIndex]
+        
+        return CameraSelector.Builder()
+            .addCameraFilter { mutableListOf(selectedInfo) }
+            .build()
+    }
+    
+    fun cycleCamera(context: Context, lifecycleOwner: LifecycleOwner) {
+        val providerFuture = ProcessCameraProvider.getInstance(context)
+        providerFuture.addListener({
+            val provider = providerFuture.get()
+            var backCameraCount = 0
+            for (cameraInfo in provider.availableCameraInfos) {
+                try {
+                    val cam2Info = Camera2CameraInfo.from(cameraInfo)
+                    val facing = cam2Info.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
+                    if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                        backCameraCount++
+                    }
+                } catch (e: Exception) {}
+            }
+            
+            if (backCameraCount > 1) {
+                val newIndex = (AppSettings.dashcamCameraIndex.value + 1) % backCameraCount
+                AppSettings.setDashcamCameraIndex(newIndex)
+                android.widget.Toast.makeText(context, "Cámara ${newIndex + 1} de $backCameraCount seleccionada", android.widget.Toast.LENGTH_SHORT).show()
+                
+                if (isRecording.value) {
+                    stopRecording()
+                    // Start new recording after a brief delay to allow unbind
+                    managerScope.launch {
+                        delay(1000)
+                        startRecording(context, lifecycleOwner)
+                    }
+                } else {
+                    // Si no estaba grabando, arrancamos una prueba
+                    startRecording(context, lifecycleOwner)
+                }
+            } else {
+                android.widget.Toast.makeText(context, "Solo hay 1 cámara trasera disponible", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     /**
@@ -180,7 +206,7 @@ object DashcamManager {
                 // Desvincula todo primero para asegurar estado limpio
                 provider.unbindAll()
                 
-                val selector = getBestCameraSelector(provider)
+                val selector = getSelectedCameraSelector(provider)
                 
                 val camera = provider.bindToLifecycle(
                     lifecycleOwner,
@@ -192,11 +218,7 @@ object DashcamManager {
                 // Wide Angle Lens Detection and Setup
                 val minZoom = camera.cameraInfo.zoomState.value?.minZoomRatio ?: 1.0f
                 hasWideAngleLens.value = minZoom < 1.0f
-                if (hasWideAngleLens.value && AppSettings.dashcamLensMode.value == "PANORAMIC") {
-                    camera.cameraControl.setZoomRatio(minZoom)
-                } else {
-                    camera.cameraControl.setZoomRatio(1.0f)
-                }
+                camera.cameraControl.setZoomRatio(minZoom)
 
                 val videoId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val videoFile = File(getVideosDir(), "VID_${videoId}.mp4")

@@ -13,9 +13,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -199,18 +201,31 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 .padding(start = if (isLandscape) 96.dp else 0.dp, top = 16.dp, end = 16.dp),
             contentAlignment = Alignment.TopEnd
         ) {
-            FloatingActionButton(
-                onClick = {
-                    if (isRec) {
-                        com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
-                    } else {
-                        com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
+            Surface(
+                shape = CircleShape,
+                color = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isRec) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant,
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .size(56.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = {
+                                if (isRec) {
+                                    com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
+                                } else {
+                                    com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
+                                }
+                            },
+                            onLongPress = {
+                                com.tuusuario.carlauncher.services.DashcamManager.cycleCamera(context, lifecycleOwner)
+                            }
+                        )
                     }
-                },
-                containerColor = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (isRec) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
             ) {
-                Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
+                }
             }
         }
 
@@ -532,22 +547,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                         SettingsRow(Icons.Default.BatteryAlert, "Optimización de Batería de Android", "Música en segundo plano",
                             onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) })
                         
-                        SettingsDivider()
-                        SettingsRow(Icons.Default.Camera, "Lente de Dashcam", AppSettings.dashcamLensMode.value,
-                            isExpanded = expandedSection == "dashcam_lens",
-                            onClick = { expandedSection = if (expandedSection == "dashcam_lens") "" else "dashcam_lens" }
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("NORMAL", "PANORAMIC").forEach { mode ->
-                                    FilterChip(
-                                        selected = AppSettings.dashcamLensMode.value == mode,
-                                        onClick = { AppSettings.setDashcamLensMode(mode) },
-                                        label = { Text(if (mode == "PANORAMIC") "Panorámico (0.5x)" else "Normal (1.0x)") },
-                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)
-                                    )
-                                }
-                            }
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
