@@ -50,7 +50,7 @@ object DashcamManager {
     private val videoPoints = mutableListOf<VideoPoint>()
     private var recordingStartTime: Long = 0
 
-    data class VideoPoint(val elapsedMillis: Long, val timestamp: String, val speed: Double)
+    data class VideoPoint(val elapsedMillis: Long, val timestamp: String, val speed: Float)
 
     fun updateLastKnownLocation(lat: Double, lon: Double) {
         lastKnownLat = lat
