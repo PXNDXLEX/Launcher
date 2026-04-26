@@ -19,6 +19,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.camera.core.Preview as CameraPreview
+import com.tuusuario.carlauncher.ui.AppSettings
 
 object DashcamManager {
     private var videoCapture: VideoCapture<Recorder>? = null
@@ -33,6 +34,7 @@ object DashcamManager {
     var isRecording = mutableStateOf(false)
     var currentVideoId: String? = null
     var activePreview = mutableStateOf<CameraPreview?>(null)
+    var hasWideAngleLens = mutableStateOf(false)
 
     // Última coordenada GPS conocida (actualizada por DashcamRouteTracker en cada fix)
     var lastKnownLat: Double? = null
@@ -136,12 +138,21 @@ object DashcamManager {
 
                 // Desvincula todo primero para asegurar estado limpio
                 provider.unbindAll()
-                provider.bindToLifecycle(
+                val camera = provider.bindToLifecycle(
                     lifecycleOwner,
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     videoCapture,
                     preview
                 )
+
+                // Wide Angle Lens Detection and Setup
+                val minZoom = camera.cameraInfo.zoomState.value?.minZoomRatio ?: 1.0f
+                hasWideAngleLens.value = minZoom < 1.0f
+                if (hasWideAngleLens.value && AppSettings.dashcamLensMode.value == "PANORAMIC") {
+                    camera.cameraControl.setZoomRatio(minZoom)
+                } else {
+                    camera.cameraControl.setZoomRatio(1.0f)
+                }
 
                 val videoId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val videoFile = File(getVideosDir(), "VID_${videoId}.mp4")

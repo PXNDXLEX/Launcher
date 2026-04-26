@@ -284,10 +284,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(500)
+        val isBatterySaver = AppSettings.batterySaverMode.value
+        val interval = if (isBatterySaver) 3000L else 1000L
+        val minInterval = if (isBatterySaver) 2000L else 500L
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
+            .setMinUpdateIntervalMillis(minInterval)
             .setMinUpdateDistanceMeters(1f)
-            .setMaxUpdateDelayMillis(2000)
+            .setMaxUpdateDelayMillis(if (isBatterySaver) 4000L else 2000L)
             .build()
 
         val locationCallback = object : LocationCallback() {

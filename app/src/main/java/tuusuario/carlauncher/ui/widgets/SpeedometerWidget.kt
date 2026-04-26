@@ -63,8 +63,11 @@ fun SpeedometerWidget() {
 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(500)
+        val isBatterySaver = AppSettings.batterySaverMode.value
+        val interval = if (isBatterySaver) 3000L else 1000L
+        val minInterval = if (isBatterySaver) 2000L else 500L
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
+            .setMinUpdateIntervalMillis(minInterval)
             .build()
 
         val locationCallback = object : LocationCallback() {
