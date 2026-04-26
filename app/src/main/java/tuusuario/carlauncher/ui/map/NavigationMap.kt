@@ -1103,12 +1103,13 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     try {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val urlStr = buildString {
-            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=40")
+            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=50")
             if (currentLoc != null) {
                 val lat = currentLoc.latitude
                 val lon = currentLoc.longitude
-                // Viewbox de ~300km alrededor (aprox 3 grados) y restrictivo (bounded=1)
-                append("&viewbox=${lon - 3.0},${lat + 3.0},${lon + 3.0},${lat - 3.0}&bounded=1")
+                // Viewbox de ~300km alrededor y restrictivo (bounded=1)
+                // Agregamos lat/lon para dar prioridad a lo que esté REALMENTE cerca (biasing)
+                append("&viewbox=${lon - 3.0},${lat + 3.0},${lon + 3.0},${lat - 3.0}&bounded=1&lat=$lat&lon=$lon")
             }
         }
         val url = URL(urlStr)
