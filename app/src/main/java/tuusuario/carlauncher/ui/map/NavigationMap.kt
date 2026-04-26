@@ -783,7 +783,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         if (searchQuery.isNotEmpty()) {
                                             isSearching = true
                                             coroutineScope.launch {
-                                                searchResults = searchPlaces(searchQuery)
+                                                searchResults = searchPlaces(searchQuery, NavigationState.currentLocation.value)
                                                 isSearching = false
                                             }
                                         }
@@ -1018,13 +1018,40 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        if (showArrivalAlert) {
-            AlertDialog(
-                onDismissRequest = { showArrivalAlert = false },
-                title = { Text("¡Has llegado!", fontWeight = FontWeight.Bold) },
-                text = { Text("Has alcanzado tu destino satisfactoriamente.") },
-                confirmButton = { Button(onClick = { showArrivalAlert = false }) { Text("OK") } }
-            )
+        AnimatedVisibility(
+            visible = showArrivalAlert,
+            enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = 500f)) + fadeIn(),
+            exit = scaleOut() + fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            LaunchedEffect(showArrivalAlert) {
+                if (showArrivalAlert) {
+                    delay(4000)
+                    showArrivalAlert = false
+                }
+            }
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)),
+                elevation = CardDefaults.cardElevation(16.dp),
+                modifier = Modifier.padding(32.dp).fillMaxWidth(0.8f)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp).fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(72.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("¡Has Llegado!", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Has alcanzado tu destino.", style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onPrimaryContainer))
+                }
+            }
         }
 
         if (showSaveFavoriteDialog) {
@@ -1071,10 +1098,19 @@ private fun getManeuverIcon(modifier: String, type: String): androidx.compose.ui
     }
 }
 
-suspend fun searchPlaces(query: String): List<PlaceResult> = withContext(Dispatchers.IO) {
+suspend fun searchPlaces(query: String, currentLoc: android.location.Location?): List<PlaceResult> = withContext(Dispatchers.IO) {
     try {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=5")
+        val urlStr = buildString {
+            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=15")
+            if (currentLoc != null) {
+                val lat = currentLoc.latitude
+                val lon = currentLoc.longitude
+                // Viewbox de ~100km alrededor (aprox 1 grado)
+                append("&viewbox=${lon - 1.0},${lat + 1.0},${lon + 1.0},${lat - 1.0}")
+            }
+        }
+        val url = URL(urlStr)
         val conn = url.openConnection() as HttpURLConnection
         conn.setRequestProperty("User-Agent", "CarLauncherApp")
         val response = conn.inputStream.bufferedReader().readText()
@@ -1084,6 +1120,16 @@ suspend fun searchPlaces(query: String): List<PlaceResult> = withContext(Dispatc
             val obj = array.getJSONObject(i)
             list.add(PlaceResult(obj.getString("display_name").split(",")[0], obj.getString("display_name"), obj.getDouble("lat"), obj.getDouble("lon")))
         }
+        
+        // Ordenar por distancia si tenemos ubicación
+        if (currentLoc != null) {
+            list.sortBy {
+                val dist = FloatArray(1)
+                android.location.Location.distanceBetween(currentLoc.latitude, currentLoc.longitude, it.lat, it.lon, dist)
+                dist[0]
+            }
+        }
+        
         list
     } catch (e: Exception) { emptyList() }
 }
