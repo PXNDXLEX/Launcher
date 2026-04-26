@@ -47,19 +47,34 @@ object RouteTracker {
      * Uses external public Documents storage so data persists across app reinstalls.
      */
     fun init(context: Context) {
-        val base = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            "CarLauncher/Rutas"
-        )
-        if (!base.exists()) base.mkdirs()
-        routesDir = base
+        try {
+            val base = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                "CarLauncher/Rutas"
+            )
+            if (!base.exists()) base.mkdirs()
+            
+            // Si no podemos escribir en documentos públicos (Android 11+ sin permisos), usamos almacenamiento externo de la app
+            routesDir = if (base.exists() && base.canWrite()) {
+                base
+            } else {
+                val fallback = File(context.getExternalFilesDir(null), "Rutas")
+                if (!fallback.exists()) fallback.mkdirs()
+                fallback
+            }
 
-        val trash = File(base, "Papelera")
-        if (!trash.exists()) trash.mkdirs()
-        trashDir = trash
+            val trash = File(routesDir, "Papelera")
+            if (!trash.exists()) trash.mkdirs()
+            trashDir = trash
 
-        // Migrate files from old internal storage if they exist
-        migrateFromInternalStorage(context)
+            // Migrate files from old internal storage if they exist
+            migrateFromInternalStorage(context)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Ultimo recurso: almacenamiento interno privado
+            routesDir = File(context.filesDir, "Rutas").apply { if (!exists()) mkdirs() }
+            trashDir = File(routesDir, "Papelera").apply { if (!exists()) mkdirs() }
+        }
     }
 
     private fun getRoutesDir(): File = routesDir ?: throw IllegalStateException("RouteTracker not initialized. Call init(context) first.")
@@ -213,7 +228,9 @@ object RouteTracker {
 
             val dir = if (route.isDeleted) getTrashDir() else getRoutesDir()
             val file = File(dir, "ruta_${route.date}.json")
-            file.writeText(json.toString(2))
+            
+            // OPTIMIZACIÓN: No usar indentación para ahorrar espacio y tiempo de CPU
+            file.writeText(json.toString())
 
             // If moved to trash, delete the original; and vice versa
             if (route.isDeleted) {

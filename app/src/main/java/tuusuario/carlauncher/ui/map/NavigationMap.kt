@@ -293,7 +293,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
-                if (loc.hasAccuracy() && loc.accuracy > 40f) return
+                if (loc.hasAccuracy() && loc.accuracy > 100f) return
 
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
@@ -327,9 +327,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         
                         icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        isFlat = true
+                        isFlat = false // Volvemos a false para controlar nosotros la rotación
                         position = newGeo
-                        rotation = targetBearing
+                        
+                        // Calculamos el ángulo real en pantalla
+                        val initialMapRot = if (!isStationary) 360f - targetBearing else currentMapRotation
+                        rotation = (targetBearing + initialMapRot) % 360f 
                     }
                     mapView.overlays.add(carMarker)
                     
@@ -362,12 +365,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (deltaMapRot > 180f) deltaMapRot -= 360f
                     if (deltaMapRot < -180f) deltaMapRot += 360f
 
-                    // Cálculo de la rotación suave para el ícono
-                    var startMarkerRot = carMarker!!.rotation % 360f
-                    if (startMarkerRot < 0) startMarkerRot += 360f
-                    var deltaMarkerRot = targetBearing - startMarkerRot
-                    if (deltaMarkerRot > 180f) deltaMarkerRot -= 360f
-                    if (deltaMarkerRot < -180f) deltaMarkerRot += 360f
+                    // 🔥 LA SOLUCIÓN: Interpolar la rotación exacta en la pantalla
+                    var startScreenRot = carMarker!!.rotation % 360f
+                    if (startScreenRot < 0) startScreenRot += 360f
+                    var targetScreenRot = (targetBearing + targetMapRot) % 360f
+                    var deltaScreenRot = targetScreenRot - startScreenRot
+                    if (deltaScreenRot > 180f) deltaScreenRot -= 360f
+                    if (deltaScreenRot < -180f) deltaScreenRot += 360f
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
                         duration = 500 
@@ -377,7 +381,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
                             
                             carMarker!!.position = currentPos
-                            carMarker!!.rotation = startMarkerRot + (deltaMarkerRot * fraction)
+                            
+                            // El auto siempre apuntará bien, ¡incluso si mueves el mapa con el dedo!
+                            carMarker!!.rotation = startScreenRot + (deltaScreenRot * fraction)
                             
                             if (isFollowingLocation) {
                                 mapView.controller.setCenter(currentPos)
@@ -612,9 +618,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             
                             icon = android.graphics.drawable.BitmapDrawable(view.context.resources, iconBitmap)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            isFlat = true
+                            isFlat = false
                             position = initialGeo
-                            rotation = if (loc.hasBearing()) loc.bearing else 0f
+                            
+                            val b = if (loc.hasBearing()) loc.bearing else 0f
+                            val mapRot = if (loc.hasBearing() && loc.speed * 3.6f > 3f) 360f - b else currentMapRotation
+                            rotation = (b + mapRot) % 360f
                         }
                         view.overlays.add(carMarker)
                         
