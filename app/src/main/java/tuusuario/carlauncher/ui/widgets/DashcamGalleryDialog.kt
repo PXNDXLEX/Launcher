@@ -2,6 +2,7 @@ package com.tuusuario.carlauncher.ui.widgets
 
 import android.content.Intent
 import android.net.Uri
+import android.util.TypedValue
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -39,6 +40,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.C
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 // ── Pantalla completa (para tab en dashboard) ──
 @Composable
@@ -55,6 +65,9 @@ fun DashcamGalleryScreen() {
     var selectionMode by remember { mutableStateOf(false) }
     var selectedVideos by remember { mutableStateOf(setOf<String>()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    // ── Estado del reproductor ──
+    var playingVideo by remember { mutableStateOf<File?>(null) }
 
     fun reloadVideos() {
         val dir = DashcamManager.getVideosDir()
@@ -243,22 +256,7 @@ fun DashcamGalleryScreen() {
                                 if (isSelected) selectedVideos = selectedVideos - video.absolutePath
                                 else selectedVideos = selectedVideos + video.absolutePath
                             } else {
-                                try {
-                                    val uri = FileProvider.getUriForFile(
-                                        context, "${context.packageName}.provider", video
-                                    )
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(uri, "video/mp4")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Error al abrir video: ${e.message}",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
+                                playingVideo = video
                             }
                         },
                         onLongClick = {
@@ -373,6 +371,88 @@ fun DashcamGalleryScreen() {
                 }
             }
         )
+    }
+
+    // ── Reproductor de Video ──
+    if (playingVideo != null) {
+        InternalVideoPlayer(
+            videoFile = playingVideo!!,
+            onDismiss = { playingVideo = null }
+        )
+    }
+}
+
+@Composable
+fun InternalVideoPlayer(videoFile: File, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    
+    // Buscar archivo de subtítulos asociado
+    val srtFile = File(videoFile.parent, videoFile.nameWithoutExtension + ".srt")
+    
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            val videoUri = Uri.fromFile(videoFile)
+            
+            val mediaItemBuilder = MediaItem.Builder().setUri(videoUri)
+            
+            if (srtFile.exists()) {
+                val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(srtFile))
+                    .setMimeType(MimeTypes.APPLICATION_SUBRIP)
+                    .setLanguage("es")
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                    .build()
+                mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfig))
+            }
+            
+            setMediaItem(mediaItemBuilder.build())
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) exoPlayer.pause()
+            else if (event == Lifecycle.Event.ON_RESUME) exoPlayer.play()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            AndroidView(
+                factory = {
+                    PlayerView(it).apply {
+                        player = exoPlayer
+                        useController = true
+                        // Estilo de subtítulos premium
+                        subtitleView?.apply {
+                            setFixedTextSize(TypedValue.COMPLEX_UNIT_DIP, 24f)
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+            
+            // Botón cerrar elegante
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(Icons.Default.Close, null, tint = Color.White)
+            }
+        }
     }
 }
 

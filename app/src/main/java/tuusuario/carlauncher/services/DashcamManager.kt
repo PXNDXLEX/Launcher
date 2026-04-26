@@ -22,15 +22,6 @@ import androidx.camera.core.Preview as CameraPreview
 import com.tuusuario.carlauncher.ui.AppSettings
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import android.hardware.camera2.CameraCharacteristics
-import androidx.camera.core.CameraEffect
-import androidx.camera.effects.OverlayEffect
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
-import com.tuusuario.carlauncher.ui.NavigationState
-import androidx.camera.core.UseCaseGroup
-import android.os.Handler
-import android.os.Looper
 
 object DashcamManager {
     private var videoCapture: VideoCapture<Recorder>? = null
@@ -53,6 +44,12 @@ object DashcamManager {
 
     // Indica si el .ref.json del video en curso ya tiene coordenada guardada
     private var refHasLocation: Boolean = false
+
+    // Puntos para generar el archivo de subtítulos (.srt)
+    private val videoPoints = mutableListOf<VideoPoint>()
+    private var recordingStartTime: Long = 0
+
+    data class VideoPoint(val elapsedMillis: Long, val timestamp: String, val speed: Double)
 
     fun updateLastKnownLocation(lat: Double, lon: Double) {
         lastKnownLat = lat
@@ -199,52 +196,22 @@ object DashcamManager {
                 val preview = CameraPreview.Builder().build()
                 activePreview.value = preview
 
-                // --- CONFIGURACIÓN DE MARCA DE AGUA ---
-                val paint = Paint().apply {
-                    color = Color.WHITE
-                    textSize = 34f
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    setShadowLayer(3f, 2f, 2f, Color.BLACK)
-                }
-                val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-
-                val watermarkEffect = OverlayEffect(
-                    CameraEffect.VIDEO_CAPTURE,
-                    10, // Prioridad de la capa
-                    Handler(Looper.getMainLooper())
-                ) { frameInfo ->
-                    val canvas = frameInfo.canvas
-                    val width = canvas.width
-                    val height = canvas.height
-                    
-                    val dateStr = sdf.format(Date())
-                    val speedStr = String.format("%.0f km/h", NavigationState.currentSpeedKmH.value)
-                    val fullText = "$dateStr | $speedStr"
-                    
-                    // Dibujar en la esquina inferior derecha
-                    val textWidth = paint.measureText(fullText)
-                    canvas.drawText(fullText, width - textWidth - 20f, height - 30f, paint)
-                    
-                    // Opcional: Nombre de la app en la otra esquina
-                    canvas.drawText("CAR LAUNCHER DASHCAM", 20f, height - 30f, paint)
-                }
-
                 // Desvincula todo primero para asegurar estado limpio
+                val videoId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                currentVideoId = videoId
+                refHasLocation = false
+                videoPoints.clear()
+                recordingStartTime = System.currentTimeMillis()
+
                 provider.unbindAll()
                 
                 val selector = getSelectedCameraSelector(provider)
                 
-                // Usamos UseCaseGroup para aplicar el efecto
-                val useCaseGroup = UseCaseGroup.Builder()
-                    .addUseCase(preview)
-                    .addUseCase(videoCapture!!)
-                    .addEffect(watermarkEffect)
-                    .build()
-
                 val camera = provider.bindToLifecycle(
                     lifecycleOwner,
                     selector,
-                    useCaseGroup
+                    videoCapture,
+                    preview
                 )
 
                 // Wide Angle Lens Detection and Setup
@@ -252,17 +219,29 @@ object DashcamManager {
                 hasWideAngleLens.value = minZoom < 1.0f
                 camera.cameraControl.setZoomRatio(minZoom)
 
-                val videoId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val videoFile = File(getVideosDir(), "VID_${videoId}.mp4")
                 val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
                 recording = videoCapture!!.output
                     .prepareRecording(context, outputOptions)
                     .withAudioEnabled()
-                    .start(ContextCompat.getMainExecutor(context)) { recordEvent ->
-                        when (recordEvent) {
+                    .start(ContextCompat.getMainExecutor(context)) { event ->
+                        when (event) {
                             is VideoRecordEvent.Start -> {
                                 isRecording.value = true
+                                isStopping.set(false)
+                                Log.i("Dashcam", "Grabación iniciada")
+
+                                // Iniciar recolección periódica de puntos para el watermark (SRT)
+                                managerScope.launch {
+                                    while (isRecording.value) {
+                                        val elapsed = System.currentTimeMillis() - recordingStartTime
+                                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                                        videoPoints.add(VideoPoint(elapsed, timeStr, NavigationState.currentSpeedKmH.value))
+                                        delay(1000)
+                                    }
+                                }
+                                
                                 currentVideoId = videoId
                                 refHasLocation = false // Reset para intentar obtener coords
 
@@ -282,13 +261,22 @@ object DashcamManager {
                             is VideoRecordEvent.Finalize -> {
                                 Log.i("Dashcam", "Grabación finalizada")
 
+                                // Guardar punto final para subtítulos
+                                if (isRecording.value) {
+                                    val elapsed = System.currentTimeMillis() - recordingStartTime
+                                    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                                    videoPoints.add(VideoPoint(elapsed, timeStr, NavigationState.currentSpeedKmH.value))
+                                }
+
                                 // Guardar hora de fin real en el .ref.json
                                 val vid = currentVideoId
                                 if (vid != null) {
                                     val endTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
                                     writeRefJson(vid, endTime)
+                                    generateSrtFile(vid, videoPoints)
                                 }
 
+                                videoPoints.clear()
                                 isRecording.value = false
                                 currentVideoId = null
                                 activePreview.value = null
@@ -347,5 +335,35 @@ object DashcamManager {
         videoCapture = null
         managerScope.cancel()
         managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    }
+    private fun generateSrtFile(videoId: String?, points: List<VideoPoint>) {
+        if (videoId == null || points.isEmpty()) return
+        
+        val srtFile = File(getVideosDir(), "VID_$videoId.srt")
+        try {
+            val writer = srtFile.bufferedWriter()
+            points.forEachIndexed { index, point ->
+                val nextPoint = points.getOrNull(index + 1)
+                val startTime = formatSrtTime(point.elapsedMillis)
+                val endTime = if (nextPoint != null) formatSrtTime(nextPoint.elapsedMillis) else formatSrtTime(point.elapsedMillis + 1000)
+                
+                writer.write("${index + 1}\n")
+                writer.write("$startTime --> $endTime\n")
+                writer.write("${point.timestamp} | ${String.format("%.0f", point.speed)} km/h\n\n")
+            }
+            writer.close()
+            Log.d("DashcamManager", "SRT generated: ${srtFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e("DashcamManager", "Error generating SRT: ${e.message}")
+        }
+    }
+
+    private fun formatSrtTime(millis: Long): String {
+        val totalSeconds = millis / 1000
+        val h = totalSeconds / 3600
+        val m = (totalSeconds % 3600) / 60
+        val s = totalSeconds % 60
+        val ms = millis % 1000
+        return String.format("%02d:%02d:%02d,%03d", h, m, s, ms)
     }
 }
