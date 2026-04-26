@@ -121,6 +121,11 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
             else true // Android ≤ 12: cubierto por READ_EXTERNAL_STORAGE
         )
     }
+    var manageStorageGranted by rememberSaveable {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) android.os.Environment.isExternalStorageManager() else true
+        )
+    }
 
     val checkPermissions = {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -130,6 +135,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         mediaGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
         else true
+        manageStorageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) android.os.Environment.isExternalStorageManager() else true
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -149,7 +155,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { checkPermissions() }
 
-    if (!locationGranted || !notificationsGranted || !cameraGranted || !audioGranted || !mediaGranted) {
+    if (!locationGranted || !notificationsGranted || !cameraGranted || !audioGranted || !mediaGranted || !manageStorageGranted) {
         Column(
             modifier = Modifier.fillMaxSize().padding(32.dp),
             verticalArrangement = Arrangement.Center,
@@ -171,8 +177,17 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                     }
                     permissionLauncher.launch(perms.toTypedArray())
                 }) { Text("Permitir Accesos") }
+            } else if (!manageStorageGranted) {
+                Text("2. Da permiso de acceso a Todos los Archivos para recuperar tus rutas antiguas de instalaciones previas.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { 
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
+                        context.startActivity(intent)
+                    }
+                }) { Text("Conceder Acceso Total") }
             } else if (!notificationsGranted) {
-                Text("2. Todo Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                Text("3. Todo Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Abrir Ajustes") }
             }
