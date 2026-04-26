@@ -239,7 +239,7 @@ object RouteTracker {
         return try {
             val json = JSONObject(targetFile.readText())
             val route = DailyRoute(
-                date = json.getString("date"),
+                date = json.optString("date", dateStr),
                 isDeleted = json.optBoolean("isDeleted", false),
                 deletedAt = json.optString("deletedAt", null).takeIf { it != "null" && !it.isNullOrEmpty() }
             )
@@ -249,16 +249,16 @@ object RouteTracker {
                 for (s in 0 until segArray.length()) {
                     val segObj = segArray.getJSONObject(s)
                     val segment = RouteSegment(
-                        startTime = segObj.getString("startTime"),
-                        endTime = segObj.getString("endTime")
+                        startTime = segObj.optString("startTime", "00:00"),
+                        endTime = segObj.optString("endTime", "00:00")
                     )
-                    val ptsArray = segObj.getJSONArray("points")
+                    val ptsArray = segObj.optJSONArray("points") ?: org.json.JSONArray()
                     for (i in 0 until ptsArray.length()) {
                         val ptObj = ptsArray.getJSONObject(i)
                         segment.points.add(RoutePoint(
-                            lat = ptObj.getDouble("lat"),
-                            lon = ptObj.getDouble("lon"),
-                            timestamp = ptObj.getString("timestamp"),
+                            lat = ptObj.optDouble("lat", 0.0),
+                            lon = ptObj.optDouble("lon", 0.0),
+                            timestamp = ptObj.optString("timestamp", "00:00:00"),
                             note = ptObj.optString("note", null).takeIf { it != "null" && !it.isNullOrEmpty() }
                         ))
                     }
@@ -266,21 +266,23 @@ object RouteTracker {
                 }
             } else if (json.has("points")) {
                 // Legacy format compatibility: convert flat points to a single segment
-                val ptsArray = json.getJSONArray("points")
+                val ptsArray = json.optJSONArray("points") ?: org.json.JSONArray()
                 if (ptsArray.length() > 0) {
                     val points = mutableListOf<RoutePoint>()
                     for (i in 0 until ptsArray.length()) {
                         val ptObj = ptsArray.getJSONObject(i)
                         points.add(RoutePoint(
-                            lat = ptObj.getDouble("lat"),
-                            lon = ptObj.getDouble("lon"),
-                            timestamp = ptObj.getString("timestamp"),
+                            lat = ptObj.optDouble("lat", 0.0),
+                            lon = ptObj.optDouble("lon", 0.0),
+                            timestamp = ptObj.optString("timestamp", "00:00:00"),
                             note = ptObj.optString("note", null).takeIf { it != "null" && !it.isNullOrEmpty() }
                         ))
                     }
+                    val firstTs = points.first().timestamp
+                    val lastTs = points.last().timestamp
                     val seg = RouteSegment(
-                        startTime = points.first().timestamp.substring(0, 5),
-                        endTime = points.last().timestamp.substring(0, 5),
+                        startTime = if (firstTs.length >= 5) firstTs.substring(0, 5) else "00:00",
+                        endTime = if (lastTs.length >= 5) lastTs.substring(0, 5) else "00:00",
                         points = points
                     )
                     route.segments.add(seg)
