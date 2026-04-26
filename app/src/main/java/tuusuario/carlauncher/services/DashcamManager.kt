@@ -22,6 +22,15 @@ import androidx.camera.core.Preview as CameraPreview
 import com.tuusuario.carlauncher.ui.AppSettings
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import android.hardware.camera2.CameraCharacteristics
+import androidx.camera.core.CameraEffect
+import androidx.camera.effects.OverlayEffect
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import com.tuusuario.carlauncher.ui.NavigationState
+import androidx.camera.core.UseCaseGroup
+import android.os.Handler
+import android.os.Looper
 
 object DashcamManager {
     private var videoCapture: VideoCapture<Recorder>? = null
@@ -190,16 +199,52 @@ object DashcamManager {
                 val preview = CameraPreview.Builder().build()
                 activePreview.value = preview
 
+                // --- CONFIGURACIÓN DE MARCA DE AGUA ---
+                val paint = Paint().apply {
+                    color = Color.WHITE
+                    textSize = 34f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    setShadowLayer(3f, 2f, 2f, Color.BLACK)
+                }
+                val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+
+                val watermarkEffect = OverlayEffect(
+                    CameraEffect.VIDEO_CAPTURE,
+                    10, // Prioridad de la capa
+                    Handler(Looper.getMainLooper())
+                ) { frameInfo ->
+                    val canvas = frameInfo.canvas
+                    val width = canvas.width
+                    val height = canvas.height
+                    
+                    val dateStr = sdf.format(Date())
+                    val speedStr = String.format("%.0f km/h", NavigationState.currentSpeedKmH.value)
+                    val fullText = "$dateStr | $speedStr"
+                    
+                    // Dibujar en la esquina inferior derecha
+                    val textWidth = paint.measureText(fullText)
+                    canvas.drawText(fullText, width - textWidth - 20f, height - 30f, paint)
+                    
+                    // Opcional: Nombre de la app en la otra esquina
+                    canvas.drawText("CAR LAUNCHER DASHCAM", 20f, height - 30f, paint)
+                }
+
                 // Desvincula todo primero para asegurar estado limpio
                 provider.unbindAll()
                 
                 val selector = getSelectedCameraSelector(provider)
                 
+                // Usamos UseCaseGroup para aplicar el efecto
+                val useCaseGroup = UseCaseGroup.Builder()
+                    .addUseCase(preview)
+                    .addUseCase(videoCapture!!)
+                    .addEffect(watermarkEffect)
+                    .build()
+
                 val camera = provider.bindToLifecycle(
                     lifecycleOwner,
                     selector,
-                    videoCapture,
-                    preview
+                    useCaseGroup
                 )
 
                 // Wide Angle Lens Detection and Setup

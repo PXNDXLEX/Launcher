@@ -71,6 +71,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:${camerax_version}")
     implementation("androidx.camera:camera-video:${camerax_version}")
     implementation("androidx.camera:camera-view:${camerax_version}")
+    implementation("androidx.camera:camera-effects:${camerax_version}")
 
     // ExoPlayer (Media3) para previsualizar los videos en la galería
     val media3_version = "1.2.1"
