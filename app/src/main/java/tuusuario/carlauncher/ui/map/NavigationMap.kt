@@ -1107,8 +1107,8 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
             if (currentLoc != null) {
                 val lat = currentLoc.latitude
                 val lon = currentLoc.longitude
-                // Viewbox de ~100km alrededor (aprox 1 grado)
-                append("&viewbox=${lon - 1.0},${lat + 1.0},${lon + 1.0},${lat - 1.0}")
+                // Viewbox de ~300km alrededor (aprox 3 grados) y restrictivo (bounded=1)
+                append("&viewbox=${lon - 3.0},${lat + 3.0},${lon + 3.0},${lat - 3.0}&bounded=1")
             }
         }
         val url = URL(urlStr)
