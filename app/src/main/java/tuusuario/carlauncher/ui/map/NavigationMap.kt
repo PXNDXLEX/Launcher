@@ -1103,7 +1103,7 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     try {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val urlStr = buildString {
-            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=15")
+            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=40")
             if (currentLoc != null) {
                 val lat = currentLoc.latitude
                 val lon = currentLoc.longitude

@@ -274,7 +274,7 @@ object DashcamManager {
                                 if (vid != null) {
                                     val endTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
                                     writeRefJson(vid, endTime)
-                                    generateSrtFile(vid, videoPoints)
+                                    generateVttFile(vid, videoPoints)
                                 }
 
                                 videoPoints.clear()
@@ -337,34 +337,37 @@ object DashcamManager {
         managerScope.cancel()
         managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     }
-    private fun generateSrtFile(videoId: String?, points: List<VideoPoint>) {
+    private fun generateVttFile(videoId: String?, points: List<VideoPoint>) {
         if (videoId == null || points.isEmpty()) return
         
-        val srtFile = File(getVideosDir(), "VID_$videoId.srt")
+        val vttFile = File(getVideosDir(), "VID_$videoId.vtt")
         try {
-            val writer = srtFile.bufferedWriter()
+            val writer = vttFile.bufferedWriter()
+            writer.write("WEBVTT\n\n")
             points.forEachIndexed { index, point ->
                 val nextPoint = points.getOrNull(index + 1)
-                val startTime = formatSrtTime(point.elapsedMillis)
-                val endTime = if (nextPoint != null) formatSrtTime(nextPoint.elapsedMillis) else formatSrtTime(point.elapsedMillis + 1000)
+                val startTime = formatVttTime(point.elapsedMillis)
+                val endTime = if (nextPoint != null) formatVttTime(nextPoint.elapsedMillis) else formatVttTime(point.elapsedMillis + 1000)
                 
+                // align:right pone el texto a la derecha
+                // line:90% lo pone cerca del borde inferior
                 writer.write("${index + 1}\n")
-                writer.write("$startTime --> $endTime\n")
+                writer.write("$startTime --> $endTime align:right line:90%\n")
                 writer.write("${point.timestamp} | ${String.format("%.0f", point.speed)} km/h\n\n")
             }
             writer.close()
-            Log.d("DashcamManager", "SRT generated: ${srtFile.absolutePath}")
+            Log.d("DashcamManager", "VTT generated: ${vttFile.absolutePath}")
         } catch (e: Exception) {
-            Log.e("DashcamManager", "Error generating SRT: ${e.message}")
+            Log.e("DashcamManager", "Error generating VTT: ${e.message}")
         }
     }
 
-    private fun formatSrtTime(millis: Long): String {
+    private fun formatVttTime(millis: Long): String {
         val totalSeconds = millis / 1000
         val h = totalSeconds / 3600
         val m = (totalSeconds % 3600) / 60
         val s = totalSeconds % 60
         val ms = millis % 1000
-        return String.format("%02d:%02d:%02d,%03d", h, m, s, ms)
+        return String.format("%02d:%02d:%02d.%03d", h, m, s, ms)
     }
 }

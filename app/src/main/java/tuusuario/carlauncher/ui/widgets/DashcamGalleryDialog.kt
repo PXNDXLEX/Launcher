@@ -387,7 +387,8 @@ fun InternalVideoPlayer(videoFile: File, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     
-    // Buscar archivo de subtítulos asociado
+    // Buscar archivo de subtítulos asociado (VTT o SRT)
+    val vttFile = File(videoFile.parent, videoFile.nameWithoutExtension + ".vtt")
     val srtFile = File(videoFile.parent, videoFile.nameWithoutExtension + ".srt")
     
     val exoPlayer = remember {
@@ -396,9 +397,12 @@ fun InternalVideoPlayer(videoFile: File, onDismiss: () -> Unit) {
             
             val mediaItemBuilder = MediaItem.Builder().setUri(videoUri)
             
-            if (srtFile.exists()) {
-                val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(srtFile))
-                    .setMimeType(MimeTypes.APPLICATION_SUBRIP)
+            val subFile = if (vttFile.exists()) vttFile else if (srtFile.exists()) srtFile else null
+
+            if (subFile != null) {
+                val mimeType = if (subFile.extension == "vtt") MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP
+                val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subFile))
+                    .setMimeType(mimeType)
                     .setLanguage("es")
                     .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build()
@@ -433,9 +437,19 @@ fun InternalVideoPlayer(videoFile: File, onDismiss: () -> Unit) {
                     PlayerView(it).apply {
                         player = exoPlayer
                         useController = true
-                        // Estilo de subtítulos premium
+                        // Estilo de subtítulos premium con franja negra
                         subtitleView?.apply {
-                            setFixedTextSize(TypedValue.COMPLEX_UNIT_DIP, 24f)
+                            setFixedTextSize(TypedValue.COMPLEX_UNIT_DIP, 22f)
+                            setStyle(
+                                androidx.media3.ui.CaptionStyleCompat(
+                                    android.graphics.Color.WHITE,
+                                    android.graphics.Color.TRANSPARENT,
+                                    android.graphics.Color.argb(170, 0, 0, 0), // Ventana (franja negra)
+                                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE,
+                                    android.graphics.Color.BLACK,
+                                    null
+                                )
+                            )
                         }
                     }
                 },
