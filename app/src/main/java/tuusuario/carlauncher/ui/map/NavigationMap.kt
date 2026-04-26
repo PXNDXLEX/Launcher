@@ -293,7 +293,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
-                if (loc.hasAccuracy() && loc.accuracy > 100f) return
+                if (loc.hasAccuracy() && loc.accuracy > 40f) return
 
                 val newGeo = GeoPoint(loc.latitude, loc.longitude)
                 
