@@ -116,7 +116,14 @@ object NavigationState {
 // Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
 object CustomMapSource {
     fun create(isSatellite: Boolean = false): org.osmdroid.tileprovider.tilesource.ITileSource {
-        if (isSatellite) return org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT
+        if (isSatellite) {
+            // Usamos ArcGIS World Imagery: mucho más rápido y confiable que USGS
+            return org.osmdroid.tileprovider.tilesource.XYTileSource(
+                "Satellite", 0, 18, 256, ".jpg", arrayOf(
+                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
+                ), "Tiles © Esri — Source: Esri, USGS, and the GIS Community"
+            )
+        }
         return org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
     }
 }

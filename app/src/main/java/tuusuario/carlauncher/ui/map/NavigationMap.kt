@@ -595,7 +595,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                     // Configurar fuente de tiles según estilo
                     if (currentStyle == "SATELLITE") {
-                        setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT)
+                        setTileSource(CustomMapSource.create(true))
                     } else {
                         setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
                     }
@@ -605,9 +605,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             },
             update = { view ->
                 // Actualizar TileSource si cambió a/desde Satélite
-                if (currentStyle == "SATELLITE" && view.tileProvider.tileSource.name() != "USGS Topo Satellite") {
-                    view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT)
-                } else if (currentStyle != "SATELLITE" && view.tileProvider.tileSource.name() == "USGS Topo Satellite") {
+                if (currentStyle == "SATELLITE" && view.tileProvider.tileSource.name() != "Satellite") {
+                    view.setTileSource(CustomMapSource.create(true))
+                } else if (currentStyle != "SATELLITE" && view.tileProvider.tileSource.name() == "Satellite") {
                     view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
                 }
 
@@ -626,10 +626,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
                     }
                     "NEON" -> {
+                        // Estética Cyberpunk: Fondo azul profundo, calles cian/neón brillante
                         val neonMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                            -1.0f, 0.0f, 0.0f, 0.0f, 50f,   // Invert + Red bias (Calles naranjas/oscuras)
-                            0.0f, -1.0f, 0.0f, 0.0f, 150f,  // Invert + Green bias (Cyan/Blue feel)
-                            0.0f, 0.0f, -1.0f, 0.0f, 255f,  // Invert + Blue bias
+                            -0.8f, 0.0f, 0.0f, 0.0f, 40f,   // Invertimos suavemente y damos tinte cian
+                            0.0f, -0.8f, 0.0f, 0.0f, 160f,  // Incrementamos el verde para el cian
+                            0.0f, 0.0f, -0.8f, 0.0f, 255f,  // Azul al máximo para el brillo
                             0.0f, 0.0f, 0.0f, 1.0f, 0.0f
                         ))
                         view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(neonMatrix))
