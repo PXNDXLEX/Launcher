@@ -113,35 +113,40 @@ object NavigationState {
     }
 }
 
-// Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
 // Bypass para descargas offline y fuentes personalizadas
 object CustomMapSource {
     fun create(type: String): org.osmdroid.tileprovider.tilesource.ITileSource {
         return when (type) {
             "SATELLITE" -> {
-                // Google Satellite (lyrs=s) - El más confiable a todos los niveles de zoom
+                // ArcGIS World Imagery (Esri) - Indexación Z/Y/X corregida
                 object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
-                    "Satellite", 0, 20, 256, "", arrayOf(
-                        "https://mt0.google.com/vt/lyrs=s&x=",
-                        "https://mt1.google.com/vt/lyrs=s&x=",
-                        "https://mt2.google.com/vt/lyrs=s&x=",
-                        "https://mt3.google.com/vt/lyrs=s&x="
-                    )
+                    "Satellite", 1, 19, 256, "", arrayOf("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
                 ) {
                     override fun getTileURLString(pTile: Long): String {
-                        return baseUrl + org.osmdroid.util.MapTileIndex.getX(pTile) + 
-                               "&y=" + org.osmdroid.util.MapTileIndex.getY(pTile) + 
-                               "&z=" + org.osmdroid.util.MapTileIndex.getZoom(pTile)
+                        return baseUrl + org.osmdroid.util.MapTileIndex.getZoom(pTile) + "/" + 
+                               org.osmdroid.util.MapTileIndex.getY(pTile) + "/" + 
+                               org.osmdroid.util.MapTileIndex.getX(pTile)
                     }
+                }.apply {
+                    // Permitir descargas masivas (evita errores en CacheManager)
+                    tileSourcePolicy = org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
+                        2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
+                        org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
+                    )
                 }
             }
             "NEON" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
-                "Neon", 0, 20, 256, ".png", arrayOf(
+                "Neon", 1, 19, 256, ".png", arrayOf(
                     "https://a.basemaps.cartocdn.com/dark_all/",
                     "https://b.basemaps.cartocdn.com/dark_all/",
                     "https://c.basemaps.cartocdn.com/dark_all/"
                 ), "© CartoDB, © OpenStreetMap contributors"
-            )
+            ).apply {
+                tileSourcePolicy = org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
+                    2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
+                    org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
+                )
+            }
             else -> org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
         }
     }
@@ -963,7 +968,7 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                         val style = AppSettings.mapStyle.value
                         dummyMap.setTileSource(CustomMapSource.create(style))
                         val cm = CacheManager(dummyMap)
-                        val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } 
+                        val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 18) } 
                         estimatedSize = "${(tiles * 18L) / 1024L} MB" 
                     }
                 } else {
@@ -991,7 +996,7 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                     dummyMap.setTileSource(CustomMapSource.create(style))
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
-                    cm.downloadAreaAsync(context, downloadBox!!, 10, 16)
+                    cm.downloadAreaAsync(context, downloadBox!!, 10, 18)
                     showConfirmDialog = false
                 }) { Text("Iniciar Descarga") }
             },
