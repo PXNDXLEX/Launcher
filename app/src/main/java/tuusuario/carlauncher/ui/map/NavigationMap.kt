@@ -605,9 +605,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             },
             update = { view ->
                 // Actualizar TileSource si cambió a/desde Satélite
-                if (currentStyle == "SATELLITE" && view.tileProvider.tileSource.name != "USGS Topo Satellite") {
+                if (currentStyle == "SATELLITE" && view.tileProvider.tileSource.name() != "USGS Topo Satellite") {
                     view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT)
-                } else if (currentStyle != "SATELLITE" && view.tileProvider.tileSource.name == "USGS Topo Satellite") {
+                } else if (currentStyle != "SATELLITE" && view.tileProvider.tileSource.name() == "USGS Topo Satellite") {
                     view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
                 }
 
