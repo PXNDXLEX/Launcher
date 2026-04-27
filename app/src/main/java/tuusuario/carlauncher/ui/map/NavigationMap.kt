@@ -1114,7 +1114,9 @@ private fun getManeuverIcon(modifier: String, type: String): androidx.compose.ui
 
 suspend fun searchPlaces(query: String, currentLoc: android.location.Location?): List<PlaceResult> = withContext(Dispatchers.IO) {
     try {
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        // Limpiamos la consulta: quitamos puntos (C.C. -> CC) y espacios extra para mejorar coincidencia
+        val cleanedQuery = query.replace(".", "").trim().replace("\\s+".toRegex(), " ")
+        val encodedQuery = URLEncoder.encode(cleanedQuery, "UTF-8")
         val urlStr = buildString {
             append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=500")
             if (currentLoc != null) {

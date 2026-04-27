@@ -34,7 +34,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -154,7 +162,12 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isLandscape) {
-            Row(modifier = Modifier.fillMaxSize()) {
+            // ── BARRA DE ESTADO (Batería, Señal) ──
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            SystemStatusRow()
+        }
+
+        Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(modifier = Modifier.width(80.dp).fillMaxHeight(), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = activeUiColor)
@@ -1201,3 +1214,80 @@ fun DashcamPreviewOverlay() {
     }
 }
 
+@Composable
+fun SystemStatusRow() {
+    val context = LocalContext.current
+    var batteryLevel by remember { mutableStateOf(100) }
+    var isCharging by remember { mutableStateOf(false) }
+    var signalStatus by remember { mutableStateOf("...") }
+    var signalIcon by remember { mutableStateOf(Icons.Default.SignalCellularAlt) }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
+                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                    if (level != -1 && scale != -1) {
+                        batteryLevel = (level * 100 / scale.toFloat()).toInt()
+                    }
+                    
+                    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                                 status == BatteryManager.BATTERY_STATUS_FULL
+                }
+            }
+        }
+        context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        onDispose { try { context.unregisterReceiver(receiver) } catch(_: Exception) {} }
+    }
+
+    LaunchedEffect(Unit) {
+        while(true) {
+            try {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val activeNetwork = cm.activeNetwork
+                val caps = cm.getNetworkCapabilities(activeNetwork)
+                
+                if (caps == null) {
+                    signalStatus = "Sin señal"
+                    signalIcon = Icons.Default.SignalCellularConnectedNoInternet0Bar
+                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    signalStatus = "WIFI"
+                    signalIcon = Icons.Default.Wifi
+                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                    // Detección simplificada de generación (4G/5G)
+                    signalStatus = "Red Móvil"
+                    signalIcon = Icons.Default.SignalCellular4Bar
+                }
+            } catch (_: Exception) {}
+            delay(10000)
+        }
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+    ) {
+        // Señal
+        Icon(signalIcon, null, modifier = Modifier.size(14.dp), tint = Color.White.copy(alpha = 0.9f))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(signalStatus, fontSize = 10.sp, color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Medium)
+        
+        Spacer(modifier = Modifier.width(16.dp))
+
+        // Batería
+        Icon(
+            if (isCharging) Icons.Default.BatteryChargingFull else if (batteryLevel < 20) Icons.Default.BatteryAlert else Icons.Default.BatteryFull, 
+            null, 
+            modifier = Modifier.size(14.dp),
+            tint = if (batteryLevel < 20 && !isCharging) Color(0xFFFF5252) else Color.White.copy(alpha = 0.9f)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("$batteryLevel%", fontSize = 10.sp, color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Bold)
+    }
+}
