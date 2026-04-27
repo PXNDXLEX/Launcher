@@ -160,16 +160,15 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isLandscape) {
-            // ── BARRA DE ESTADO (Batería, Señal) ──
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-            SystemStatusRow()
-        }
-
         Row(modifier = Modifier.fillMaxSize()) {
                 NavigationRail(modifier = Modifier.width(80.dp).fillMaxHeight(), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = activeUiColor)
                     Text(currentDate, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    
+                    // Indicadores de sistema (Batería, Señal)
+                    SystemStatusRow()
+
                     Spacer(modifier = Modifier.weight(1f))
                     
                     IconButton(onClick = { currentScreen = "DASHBOARD" }) { Icon(Icons.Default.Dashboard, "Dashboard", tint = if (currentScreen == "DASHBOARD") activeUiColor else MaterialTheme.colorScheme.onSurface) }
@@ -1267,25 +1266,27 @@ fun SystemStatusRow() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
         modifier = Modifier
-            .padding(top = 4.dp)
-            .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .padding(top = 12.dp)
+            .background(Color.Black.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
     ) {
-        // Señal
-        Icon(signalIcon, null, modifier = Modifier.size(14.dp), tint = Color.White.copy(alpha = 0.9f))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(signalStatus, fontSize = 10.sp, color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Medium)
-        
-        Spacer(modifier = Modifier.width(16.dp))
-
         // Batería
-        Icon(
-            if (isCharging) Icons.Default.BatteryChargingFull else if (batteryLevel < 20) Icons.Default.BatteryAlert else Icons.Default.BatteryFull, 
-            null, 
-            modifier = Modifier.size(14.dp),
-            tint = if (batteryLevel < 20 && !isCharging) Color(0xFFFF5252) else Color.White.copy(alpha = 0.9f)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("$batteryLevel%", fontSize = 10.sp, color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Bold)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                if (isCharging) Icons.Default.BatteryChargingFull else if (batteryLevel < 20) Icons.Default.BatteryAlert else Icons.Default.BatteryFull, 
+                null, 
+                modifier = Modifier.size(16.dp),
+                tint = if (batteryLevel < 20 && !isCharging) Color(0xFFFF5252) else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text("$batteryLevel%", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+        }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Señal
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(signalIcon, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(signalStatus, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+        }
     }
 }
