@@ -115,16 +115,22 @@ object NavigationState {
 
 // Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
 object CustomMapSource {
-    fun create(isSatellite: Boolean = false): org.osmdroid.tileprovider.tilesource.ITileSource {
-        if (isSatellite) {
-            // Usamos ArcGIS World Imagery: mucho más rápido y confiable que USGS
-            return org.osmdroid.tileprovider.tilesource.XYTileSource(
-                "Satellite", 0, 18, 256, ".jpg", arrayOf(
+    fun create(type: String): org.osmdroid.tileprovider.tilesource.ITileSource {
+        return when (type) {
+            "SATELLITE" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
+                "Satellite", 0, 18, 256, "", arrayOf(
                     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
                 ), "Tiles © Esri — Source: Esri, USGS, and the GIS Community"
             )
+            "NEON" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
+                "Neon", 0, 19, 256, ".png", arrayOf(
+                    "https://a.basemaps.cartocdn.com/dark_all/",
+                    "https://b.basemaps.cartocdn.com/dark_all/",
+                    "https://c.basemaps.cartocdn.com/dark_all/"
+                ), "© CartoDB, © OpenStreetMap contributors"
+            )
+            else -> org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
         }
-        return org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
     }
 }
 
@@ -941,8 +947,8 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                     estimatedSize = "Calculando peso exacto..."
                     coroutineScope.launch {
                         val dummyMap = MapView(context)
-                        val isSatellite = AppSettings.mapStyle.value == "SATELLITE"
-                        dummyMap.setTileSource(CustomMapSource.create(isSatellite))
+                        val style = AppSettings.mapStyle.value
+                        dummyMap.setTileSource(CustomMapSource.create(style))
                         val cm = CacheManager(dummyMap)
                         val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } 
                         estimatedSize = "${(tiles * 18L) / 1024L} MB" 
@@ -968,8 +974,8 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
             confirmButton = {
                 Button(onClick = {
                     val dummyMap = MapView(context)
-                    val isSatellite = AppSettings.mapStyle.value == "SATELLITE"
-                    dummyMap.setTileSource(CustomMapSource.create(isSatellite))
+                    val style = AppSettings.mapStyle.value
+                    dummyMap.setTileSource(CustomMapSource.create(style))
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
                     cm.downloadAreaAsync(context, downloadBox!!, 10, 16)

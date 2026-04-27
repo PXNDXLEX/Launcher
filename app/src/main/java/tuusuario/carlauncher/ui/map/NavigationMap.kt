@@ -595,21 +595,22 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                     }
                     // Configurar fuente de tiles según estilo
-                    if (currentStyle == "SATELLITE") {
-                        setTileSource(CustomMapSource.create(true))
-                    } else {
-                        setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
-                    }
+                    setTileSource(CustomMapSource.create(currentStyle))
 
                     overlays.add(MapEventsOverlay(mReceive))
                 }
             },
             update = { view ->
-                // Actualizar TileSource si cambió a/desde Satélite
-                if (currentStyle == "SATELLITE" && view.tileProvider.tileSource.name() != "Satellite") {
-                    view.setTileSource(CustomMapSource.create(true))
-                } else if (currentStyle != "SATELLITE" && view.tileProvider.tileSource.name() == "Satellite") {
-                    view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+                // Actualizar TileSource si cambió de estilo
+                val currentTileName = view.tileProvider.tileSource.name()
+                val expectedTileName = when(currentStyle) {
+                    "SATELLITE" -> "Satellite"
+                    "NEON" -> "Neon"
+                    else -> "mapnik"
+                }
+                
+                if (currentTileName.lowercase() != expectedTileName.lowercase()) {
+                    view.setTileSource(CustomMapSource.create(currentStyle))
                 }
 
                 // Aplicar Filtros de Color
@@ -625,16 +626,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         destinationMatrix.setSaturation(0.2f)
                         inverseMatrix.postConcat(destinationMatrix)
                         view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
-                    }
-                    "NEON" -> {
-                        // Estética Cyberpunk: Fondo azul profundo, calles cian/neón brillante
-                        val neonMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                            -0.8f, 0.0f, 0.0f, 0.0f, 40f,   // Invertimos suavemente y damos tinte cian
-                            0.0f, -0.8f, 0.0f, 0.0f, 160f,  // Incrementamos el verde para el cian
-                            0.0f, 0.0f, -0.8f, 0.0f, 255f,  // Azul al máximo para el brillo
-                            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
-                        ))
-                        view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(neonMatrix))
                     }
                     else -> {
                         view.overlayManager.tilesOverlay.setColorFilter(null)
