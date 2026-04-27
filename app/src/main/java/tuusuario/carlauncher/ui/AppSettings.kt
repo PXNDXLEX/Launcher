@@ -14,6 +14,7 @@ object AppSettings {
     val mapIconColor = mutableStateOf(Color.parseColor("#007AFF")) // Color independiente para el icono en el mapa
     val isDarkMode = mutableStateOf(true)
     val isMapDarkMode = mutableStateOf(true)
+    val mapStyle = mutableStateOf("DARK") // LIGHT, DARK, NEON, SATELLITE
     val batterySaverMode = mutableStateOf(false)
     val dashcamCameraIndex = mutableStateOf(0)
     
@@ -43,6 +44,7 @@ object AppSettings {
         mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
         isMapDarkMode.value = prefs?.getBoolean("isMapDarkMode", true) ?: true
+        mapStyle.value = prefs?.getString("mapStyle", "DARK") ?: "DARK"
         batterySaverMode.value = prefs?.getBoolean("batterySaverMode", false) ?: false
         dashcamCameraIndex.value = prefs?.getInt("dashcamCameraIndex", 0) ?: 0
         customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
@@ -90,6 +92,11 @@ object AppSettings {
     fun setMapDarkMode(isDark: Boolean) {
         isMapDarkMode.value = isDark
         prefs?.edit()?.putBoolean("isMapDarkMode", isDark)?.apply()
+    }
+
+    fun setMapStyle(style: String) {
+        mapStyle.value = style
+        prefs?.edit()?.putString("mapStyle", style)?.apply()
     }
 
     fun setBatterySaverMode(enabled: Boolean) {

@@ -115,14 +115,9 @@ object NavigationState {
 
 // Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
 object CustomMapSource {
-    fun create(): XYTileSource {
-        return object : XYTileSource(
-            "Mapnik_Bypass", 0, 19, 256, ".png", arrayOf(
-                "https://a.tile.openstreetmap.org/",
-                "https://b.tile.openstreetmap.org/",
-                "https://c.tile.openstreetmap.org/"
-            ), "© OpenStreetMap contributors"
-        ) {}
+    fun create(isSatellite: Boolean = false): org.osmdroid.tileprovider.tilesource.ITileSource {
+        if (isSatellite) return org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT
+        return org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
     }
 }
 
@@ -410,6 +405,32 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             isExpanded = expandedSection == "map_icon_color",
                             onClick = { expandedSection = if (expandedSection == "map_icon_color") "" else "map_icon_color" }
                         ) { ColorPicker(AppSettings.mapIconColor.value) { AppSettings.setMapIconColor(it) } }
+                    }
+
+                    // ── NAVEGACIÓN ──
+                    SettingsGroupCard("Navegación") {
+                        SettingsRow(
+                            icon = Icons.Default.Map,
+                            title = "Estilo de Mapa",
+                            subtitle = when(AppSettings.mapStyle.value) {
+                                "DARK" -> "Modo Noche"
+                                "NEON" -> "Neon Electric"
+                                "SATELLITE" -> "Vista Satelital"
+                                else -> "Modo Día"
+                            },
+                            isExpanded = expandedSection == "map_style",
+                            onClick = { expandedSection = if (expandedSection == "map_style") "" else "map_style" }
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                                listOf("LIGHT" to "Día", "DARK" to "Noche", "NEON" to "Neon", "SATELLITE" to "Sat.").forEach { (style, label) ->
+                                    FilterChip(
+                                        selected = AppSettings.mapStyle.value == style,
+                                        onClick = { AppSettings.setMapStyle(style) },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // ── VELOCÍMETRO ──
@@ -913,7 +934,8 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
                     estimatedSize = "Calculando peso exacto..."
                     coroutineScope.launch {
                         val dummyMap = MapView(context)
-                        dummyMap.setTileSource(CustomMapSource.create()) // BYPASS ACTIVO
+                        val isSatellite = AppSettings.mapStyle.value == "SATELLITE"
+                        dummyMap.setTileSource(CustomMapSource.create(isSatellite))
                         val cm = CacheManager(dummyMap)
                         val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 16) } 
                         estimatedSize = "${(tiles * 18L) / 1024L} MB" 
@@ -939,7 +961,8 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
             confirmButton = {
                 Button(onClick = {
                     val dummyMap = MapView(context)
-                    dummyMap.setTileSource(CustomMapSource.create()) // BYPASS ACTIVO
+                    val isSatellite = AppSettings.mapStyle.value == "SATELLITE"
+                    dummyMap.setTileSource(CustomMapSource.create(isSatellite))
                     val cm = CacheManager(dummyMap)
                     Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
                     cm.downloadAreaAsync(context, downloadBox!!, 10, 16)

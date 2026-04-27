@@ -130,6 +130,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     
     var showArrivalAlert by remember { mutableStateOf(false) }
     var isCalculatingRoute by remember { mutableStateOf(false) }
+    var showStyleSelector by remember { mutableStateOf(false) }
+    
+    val currentStyle = AppSettings.mapStyle.value
+    val routeColor = when (currentStyle) {
+        "NEON" -> android.graphics.Color.parseColor("#FF9100") // Naranja Neón
+        else -> android.graphics.Color.parseColor("#00B0FF")   // Azul Premium
+    }
 
     var carMarker by remember { mutableStateOf<Marker?>(null) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
@@ -225,7 +232,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val polyline = Polyline(mapView).apply {
                             id = "ROUTE_MAIN"
                             setPoints(currentRoutePoints.toList())
-                            outlinePaint.color = android.graphics.Color.parseColor("#00B0FF")
+                            outlinePaint.color = routeColor
                             outlinePaint.strokeWidth = 24f
                             outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
                             outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
@@ -586,23 +593,57 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             return true
                         }
                     }
+                    // Configurar fuente de tiles según estilo
+                    if (currentStyle == "SATELLITE") {
+                        setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT)
+                    } else {
+                        setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+                    }
+
                     overlays.add(MapEventsOverlay(mReceive))
                 }
             },
             update = { view ->
-                if (isMapDarkMode) {
-                    val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                        -1.0f, 0.0f, 0.0f, 0.0f, 255f,
-                        0.0f, -1.0f, 0.0f, 0.0f, 255f,
-                        0.0f, 0.0f, -1.0f, 0.0f, 255f,
-                        0.0f, 0.0f, 0.0f, 1.0f, 0.0f
-                    ))
-                    val destinationMatrix = android.graphics.ColorMatrix()
-                    destinationMatrix.setSaturation(0.2f)
-                    inverseMatrix.postConcat(destinationMatrix)
-                    view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
-                } else {
-                    view.overlayManager.tilesOverlay.setColorFilter(null)
+                // Actualizar TileSource si cambió a/desde Satélite
+                if (currentStyle == "SATELLITE" && view.tileProvider.tileSource.name != "USGS Topo Satellite") {
+                    view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT)
+                } else if (currentStyle != "SATELLITE" && view.tileProvider.tileSource.name == "USGS Topo Satellite") {
+                    view.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+                }
+
+                // Aplicar Filtros de Color
+                when (currentStyle) {
+                    "DARK" -> {
+                        val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                            -1.0f, 0.0f, 0.0f, 0.0f, 255f,
+                            0.0f, -1.0f, 0.0f, 0.0f, 255f,
+                            0.0f, 0.0f, -1.0f, 0.0f, 255f,
+                            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
+                        ))
+                        val destinationMatrix = android.graphics.ColorMatrix()
+                        destinationMatrix.setSaturation(0.2f)
+                        inverseMatrix.postConcat(destinationMatrix)
+                        view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
+                    }
+                    "NEON" -> {
+                        val neonMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                            -1.0f, 0.0f, 0.0f, 0.0f, 50f,   // Invert + Red bias (Calles naranjas/oscuras)
+                            0.0f, -1.0f, 0.0f, 0.0f, 150f,  // Invert + Green bias (Cyan/Blue feel)
+                            0.0f, 0.0f, -1.0f, 0.0f, 255f,  // Invert + Blue bias
+                            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
+                        ))
+                        view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(neonMatrix))
+                    }
+                    else -> {
+                        view.overlayManager.tilesOverlay.setColorFilter(null)
+                    }
+                }
+
+                // Actualizar color de la polilínea si existe
+                view.overlays.forEach {
+                    if (it is Polyline && it.id == "ROUTE_MAIN") {
+                        it.outlinePaint.color = routeColor
+                    }
                 }
 
                 // ── INICIALIZACIÓN RÁPIDA DEL CURSOR ──
@@ -928,6 +969,53 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     Icon(Icons.Default.Explore, "Norte", modifier = Modifier.size(20.dp))
                 }
             }
+            // Botón Selector de Estilos
+            Box {
+                FloatingActionButton(
+                    onClick = { showStyleSelector = !showStyleSelector },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = when(currentStyle) {
+                            "SATELLITE" -> Icons.Default.Public
+                            "NEON" -> Icons.Default.Bolt
+                            "DARK" -> Icons.Default.DarkMode
+                            else -> Icons.Default.LightMode
+                        }, 
+                        contentDescription = "Estilo Mapa"
+                    )
+                }
+                
+                DropdownMenu(
+                    expanded = showStyleSelector,
+                    onDismissRequest = { showStyleSelector = false },
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Día") },
+                        leadingIcon = { Icon(Icons.Default.LightMode, null) },
+                        onClick = { AppSettings.setMapStyle("LIGHT"); showStyleSelector = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Noche") },
+                        leadingIcon = { Icon(Icons.Default.DarkMode, null) },
+                        onClick = { AppSettings.setMapStyle("DARK"); showStyleSelector = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Neon Electric") },
+                        leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00B0FF)) },
+                        onClick = { AppSettings.setMapStyle("NEON"); showStyleSelector = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Satélite") },
+                        leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF4CAF50)) },
+                        onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false }
+                    )
+                }
+            }
+
             // Botón Centrar
             AnimatedVisibility(visible = !isFollowingLocation) {
                 FloatingActionButton(
