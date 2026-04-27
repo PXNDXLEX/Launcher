@@ -121,7 +121,7 @@ object CustomMapSource {
             "SATELLITE" -> {
                 // Esri ArcGIS usa Z/Y/X. Sobrescribimos para que OSMDroid lo pida correctamente.
                 object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
-                    "Satellite", 0, 18, 256, "", arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
+                    "Satellite", 0, 20, 256, "", arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
                 ) {
                     override fun getTileURLString(pTile: Long): String {
                         return baseUrl + org.osmdroid.util.MapTileIndex.getZoom(pTile) + "/" + 
@@ -131,7 +131,7 @@ object CustomMapSource {
                 }
             }
             "NEON" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
-                "Neon", 0, 19, 256, ".png", arrayOf(
+                "Neon", 0, 20, 256, ".png", arrayOf(
                     "https://a.basemaps.cartocdn.com/dark_all/",
                     "https://b.basemaps.cartocdn.com/dark_all/",
                     "https://c.basemaps.cartocdn.com/dark_all/"
