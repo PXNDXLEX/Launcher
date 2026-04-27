@@ -1270,27 +1270,32 @@ fun SystemStatusRow() {
         }
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .padding(top = 10.dp)
-            .background(Color.Black.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .background(Color.Black.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         // Batería
-        Icon(
-            if (isCharging) Icons.Default.BatteryChargingFull else if (batteryLevel < 20) Icons.Default.BatteryAlert else Icons.Default.BatteryFull, 
-            null, 
-            modifier = Modifier.size(14.dp),
-            tint = if (batteryLevel < 20 && !isCharging) Color(0xFFFF5252) else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text("$batteryLevel%", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (isCharging) Icons.Default.BatteryChargingFull else if (batteryLevel < 20) Icons.Default.BatteryAlert else Icons.Default.BatteryFull, 
+                null, 
+                modifier = Modifier.size(15.dp),
+                tint = if (batteryLevel < 20 && !isCharging) Color(0xFFFF5252) else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("${batteryLevel}%", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+        }
         
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Señal
-        Icon(signalIcon, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(if (signalStatus == "WIFI") "WIFI" else "LTE", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(signalIcon, null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(if (signalStatus == "WIFI") "WIFI" else "LTE", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+        }
     }
 }

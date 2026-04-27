@@ -225,10 +225,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val polyline = Polyline(mapView).apply {
                             id = "ROUTE_MAIN"
                             setPoints(currentRoutePoints.toList())
-                            outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
-                            outlinePaint.strokeWidth = 20f
-                            outlinePaint.strokeCap = Paint.Cap.ROUND
-                            outlinePaint.strokeJoin = Paint.Join.ROUND
+                            outlinePaint.color = android.graphics.Color.parseColor("#00B0FF")
+                            outlinePaint.strokeWidth = 24f
+                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                            outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                            outlinePaint.isAntiAlias = true
                         }
                         mapView.overlays.add(0, polyline)
                         isFollowingLocation = true 
@@ -378,8 +379,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (deltaScreenRot < -180f) deltaScreenRot += 360f
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                        duration = 500 
-                        interpolator = LinearInterpolator()
+                        duration = 1000 // 1 segundo para coincidir con la tasa de refresco GPS y ser fluido                        interpolator = LinearInterpolator()
                         addUpdateListener { anim ->
                             val fraction = anim.animatedFraction
                             val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
