@@ -848,6 +848,19 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         searchResults = emptyList()
                                         showFavorites = false
                                         focusManager.clearFocus()
+                                    },
+                                    trailingContent = {
+                                        if (place.distanceKm > 0) {
+                                            Text(
+                                                text = if (place.distanceKm < 1) 
+                                                    "${(place.distanceKm * 1000).toInt()} m" 
+                                                else 
+                                                    String.format("%.1f km", place.distanceKm),
+                                                fontSize = 11.sp,
+                                                color = Color(uiColor).copy(alpha = 0.7f),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
                                     }
                                 )
                             }
@@ -1103,12 +1116,11 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     try {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val urlStr = buildString {
-            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=50")
+            append("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=500")
             if (currentLoc != null) {
                 val lat = currentLoc.latitude
                 val lon = currentLoc.longitude
                 // Viewbox de ~300km alrededor y restrictivo (bounded=1)
-                // Agregamos lat/lon para dar prioridad a lo que esté REALMENTE cerca (biasing)
                 append("&viewbox=${lon - 3.0},${lat + 3.0},${lon + 3.0},${lat - 3.0}&bounded=1&lat=$lat&lon=$lon")
             }
         }
@@ -1120,17 +1132,30 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
         val list = mutableListOf<PlaceResult>()
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
-            list.add(PlaceResult(obj.getString("display_name").split(",")[0], obj.getString("display_name"), obj.getDouble("lat"), obj.getDouble("lon")))
-        }
-        
-        // Ordenar por distancia si tenemos ubicación
-        if (currentLoc != null) {
-            list.sortBy {
-                val dist = FloatArray(1)
-                android.location.Location.distanceBetween(currentLoc.latitude, currentLoc.longitude, it.lat, it.lon, dist)
-                dist[0]
+            val lat = obj.getDouble("lat")
+            val lon = obj.getDouble("lon")
+            
+            var distKm = 0.0
+            if (currentLoc != null) {
+                val results = FloatArray(1)
+                android.location.Location.distanceBetween(currentLoc.latitude, currentLoc.longitude, lat, lon, results)
+                distKm = (results[0] / 1000.0).toDouble()
+            }
+
+            // Filtrar localmente a 300km y descartar el resto al instante
+            if (currentLoc == null || distKm <= 300.0) {
+                list.add(PlaceResult(
+                    obj.getString("display_name").split(",")[0], 
+                    obj.getString("display_name"), 
+                    lat, 
+                    lon,
+                    distanceKm = distKm
+                ))
             }
         }
+        
+        // Ordenar por distancia
+        list.sortBy { it.distanceKm }
         
         list
     } catch (e: Exception) { emptyList() }
