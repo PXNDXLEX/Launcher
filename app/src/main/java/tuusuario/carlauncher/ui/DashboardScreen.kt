@@ -127,25 +127,28 @@ object CustomMapSource {
                                org.osmdroid.util.MapTileIndex.getY(pTile) + "/" + 
                                org.osmdroid.util.MapTileIndex.getX(pTile)
                     }
-                }.apply {
-                    // Permitir descargas masivas (evita errores en CacheManager)
-                    tileSourcePolicy = org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
-                        2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
-                        org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
-                    )
+                    
+                    override fun getTileSourcePolicy(): org.osmdroid.tileprovider.tilesource.TileSourcePolicy {
+                        return org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
+                            2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
+                            org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
+                        )
+                    }
                 }
             }
-            "NEON" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
+            "NEON" -> object : org.osmdroid.tileprovider.tilesource.XYTileSource(
                 "Neon", 1, 19, 256, ".png", arrayOf(
                     "https://a.basemaps.cartocdn.com/dark_all/",
                     "https://b.basemaps.cartocdn.com/dark_all/",
                     "https://c.basemaps.cartocdn.com/dark_all/"
                 ), "© CartoDB, © OpenStreetMap contributors"
-            ).apply {
-                tileSourcePolicy = org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
-                    2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
-                    org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
-                )
+            ) {
+                override fun getTileSourcePolicy(): org.osmdroid.tileprovider.tilesource.TileSourcePolicy {
+                    return org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
+                        2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
+                        org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
+                    )
+                }
             }
             else -> org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
         }
