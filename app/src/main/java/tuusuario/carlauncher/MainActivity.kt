@@ -69,7 +69,10 @@ class MainActivity : ComponentActivity() {
             MusicNotificationService.reconnect(this)
         }
 
-        // ¡AQUÍ ESTÁ LA MAGIA! Iniciamos la base de datos permanente antes de arrancar la interfaz
+        // Configuración global de OSMDroid antes de inicializar la UI
+        org.osmdroid.config.Configuration.getInstance().load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
+        org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
+
         AppSettings.init(this)
         
         // Limpiar rutas antiguas de la papelera

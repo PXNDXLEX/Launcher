@@ -114,14 +114,22 @@ object NavigationState {
 }
 
 // Bypass para descargas offline (evita el TileSourcePolicyException de OSM)
+// Bypass para descargas offline y fuentes personalizadas
 object CustomMapSource {
     fun create(type: String): org.osmdroid.tileprovider.tilesource.ITileSource {
         return when (type) {
-            "SATELLITE" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
-                "Satellite", 0, 18, 256, "", arrayOf(
-                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
-                ), "Tiles © Esri — Source: Esri, USGS, and the GIS Community"
-            )
+            "SATELLITE" -> {
+                // Esri ArcGIS usa Z/Y/X. Sobrescribimos para que OSMDroid lo pida correctamente.
+                object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
+                    "Satellite", 0, 18, 256, "", arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
+                ) {
+                    override fun getTileURLString(pTile: Long): String {
+                        return baseUrl + org.osmdroid.util.MapTileIndex.getZoom(pTile) + "/" + 
+                               org.osmdroid.util.MapTileIndex.getY(pTile) + "/" + 
+                               org.osmdroid.util.MapTileIndex.getX(pTile)
+                    }
+                }
+            }
             "NEON" -> org.osmdroid.tileprovider.tilesource.XYTileSource(
                 "Neon", 0, 19, 256, ".png", arrayOf(
                     "https://a.basemaps.cartocdn.com/dark_all/",
