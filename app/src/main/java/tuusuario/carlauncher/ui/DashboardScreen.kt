@@ -119,14 +119,19 @@ object CustomMapSource {
     fun create(type: String): org.osmdroid.tileprovider.tilesource.ITileSource {
         return when (type) {
             "SATELLITE" -> {
-                // Esri ArcGIS usa Z/Y/X. Sobrescribimos para que OSMDroid lo pida correctamente.
+                // Google Satellite (lyrs=s) - El más confiable a todos los niveles de zoom
                 object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
-                    "Satellite", 0, 20, 256, "", arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
+                    "Satellite", 0, 20, 256, "", arrayOf(
+                        "https://mt0.google.com/vt/lyrs=s&x=",
+                        "https://mt1.google.com/vt/lyrs=s&x=",
+                        "https://mt2.google.com/vt/lyrs=s&x=",
+                        "https://mt3.google.com/vt/lyrs=s&x="
+                    )
                 ) {
                     override fun getTileURLString(pTile: Long): String {
-                        return baseUrl + org.osmdroid.util.MapTileIndex.getZoom(pTile) + "/" + 
-                               org.osmdroid.util.MapTileIndex.getY(pTile) + "/" + 
-                               org.osmdroid.util.MapTileIndex.getX(pTile)
+                        return baseUrl + org.osmdroid.util.MapTileIndex.getX(pTile) + 
+                               "&y=" + org.osmdroid.util.MapTileIndex.getY(pTile) + 
+                               "&z=" + org.osmdroid.util.MapTileIndex.getZoom(pTile)
                     }
                 }
             }
