@@ -48,7 +48,6 @@ import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat
 import com.google.android.gms.location.*
 import com.tuusuario.carlauncher.R
 import com.tuusuario.carlauncher.ui.AppSettings
-import com.tuusuario.carlauncher.ui.CustomMapSource
 import com.tuusuario.carlauncher.ui.NavigationState
 import com.tuusuario.carlauncher.ui.RouteStep
 import kotlinx.coroutines.Dispatchers
@@ -670,15 +669,21 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     modifier = Modifier.clickable {
                                         val dest = LatLng(place.lat, place.lon)
                                         selectedDestination = dest
-                                        mapView.overlays.removeAll { it is Marker && it.id == "DEST" }
-                                        val marker = Marker(mapView).apply {
-                                            position = dest
-                                            id = "DEST"
-                                            icon = BitmapDrawable(context.resources, drawCustomPin(uiColor))
-                                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                        
+                                        mapLibreMap?.let { map ->
+                                            destMarker?.let { map.removeMarker(it) }
+                                            
+                                            val iconBitmap = drawCustomPin(uiColor)
+                                            val icon = org.maplibre.android.annotations.IconFactory.getInstance(ctx).fromBitmap(iconBitmap)
+                                            
+                                            destMarker = map.addMarker(org.maplibre.android.annotations.MarkerOptions()
+                                                .position(dest)
+                                                .icon(icon)
+                                                .title("Destino"))
+                                                
+                                            map.animateCamera(CameraUpdateFactory.newLatLng(dest))
                                         }
-                                        mapView.overlays.add(marker)
-                                        mapView.controller.animateTo(dest)
+                                        
                                         searchResults = emptyList()
                                         showFavorites = false
                                         focusManager.clearFocus()
@@ -753,7 +758,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             AnimatedVisibility(visible = currentMapRotation != 0f) {
                 SmallFloatingActionButton(
                     onClick = {
-                        mapView.controller.animateTo(mapView.mapCenter, mapView.zoomLevelDouble, 500, 0f)
+                        mapLibreMap?.animateCamera(CameraUpdateFactory.bearingTo(0.0))
                         currentMapRotation = 0f
                     },
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
@@ -816,8 +821,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         isFollowingLocation = true
                         autoCenterJob?.cancel()
                         NavigationState.currentLocation.value?.let {
-                            mapView.controller.animateTo(LatLng(it.latitude, it.longitude))
-                            mapView.mapOrientation = 360f - lastKnownBearing
+                            mapLibreMap?.animateCamera(CameraUpdateFactory.newLatLng(LatLng(it.latitude, it.longitude)))
                             currentMapRotation = 360f - lastKnownBearing
                         }
                     },
@@ -864,8 +868,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             onClick = {
                                 selectedDestination = null
                                 routeDistanceText = ""
-                                mapView.overlays.removeAll { it is Marker && it.id == "DEST" }
-                                mapView.invalidate()
+                                mapLibreMap?.let { map ->
+                                    destMarker?.let { map.removeMarker(it) }
+                                    destMarker = null
+                                }
                             },
                             modifier = Modifier
                                 .size(44.dp)
@@ -896,8 +902,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             onClick = {
                                 NavigationState.clearActiveRoute()
                                 selectedDestination = null
-                                mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
-                                mapView.invalidate()
+                                mapLibreMap?.let { map ->
+                                    routePolyline?.let { map.removePolyline(it) }
+                                    routePolyline = null
+                                    destMarker?.let { map.removeMarker(it) }
+                                    destMarker = null
+                                }
                             },
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
