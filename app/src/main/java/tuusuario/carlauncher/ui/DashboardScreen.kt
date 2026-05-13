@@ -1048,7 +1048,7 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                     routePoints.forEach { builder.include(it) }
                     map.moveCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
                 } else if (routePoints.size == 1) {
-                    map.moveCamera(CameraUpdateFactory.newLatLng(routePoints.first(), 16.0))
+                    map.moveCamera(CameraUpdateFactory.newLatLngZoom(routePoints.first(), 16.0))
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }

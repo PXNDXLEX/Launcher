@@ -345,10 +345,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val deltaLat = newGeo.latitude - startLat
                     val deltaLon = newGeo.longitude - startLon
                     
-                    val startBearing = carMarker!!.rotation
-                    val deltaBearing = (targetBearing - startBearing).let { 
-                        if (it > 180) it - 360 else if (it < -180) it + 360 else it 
-                    }
+                    val startBearing = lastKnownBearing // Marker doesn't have rotation, use last state
+                    var diff = targetBearing - startBearing
+                    if (diff > 180) diff -= 360
+                    if (diff < -180) diff += 360
+                    val deltaBearing = diff
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
                         duration = 900 
@@ -360,7 +361,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             
                             carMarker?.let {
                                 it.position = currentPos
-                                it.rotation = currentBearing
                                 mapLibreMap?.updateMarker(it)
                                 
                                 if (isFollowingLocation) {
