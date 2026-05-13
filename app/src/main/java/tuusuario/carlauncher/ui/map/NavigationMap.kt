@@ -58,18 +58,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import org.osmdroid.config.Configuration
-import org.osmdroid.events.MapEventsReceiver
-import org.osmdroid.events.MapListener
-import org.osmdroid.events.ScrollEvent
-import org.osmdroid.events.ZoomEvent
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory 
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.MapEventsOverlay
-import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
-import org.osmdroid.views.overlay.Polyline
+import org.json.JSONObject
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.annotations.Marker
+import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.Polyline
+import org.maplibre.android.annotations.PolylineOptions
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -123,7 +123,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave by remember { mutableStateOf("") }
-    var favoriteLocationToSave by remember { mutableStateOf<GeoPoint?>(null) }
+    var favoriteLocationToSave by remember { mutableStateOf<LatLng?>(null) }
     var selectedIconType by remember { mutableStateOf("Star") }
 
     // ELEVATED STATE: Now using NavigationState
@@ -149,7 +149,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         else -> android.graphics.Color.parseColor("#00B0FF")   // Azul Premium
     }
 
+    var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var carMarker by remember { mutableStateOf<Marker?>(null) }
+    var destMarker by remember { mutableStateOf<Marker?>(null) }
+    var routePolyline by remember { mutableStateOf<Polyline?>(null) }
+    var historyPolyline by remember { mutableStateOf<Polyline?>(null) }
+    var dashcamPolyline by remember { mutableStateOf<Polyline?>(null) }
+    
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
     var autoCenterJob by remember { mutableStateOf<Job?>(null) }
     
@@ -170,17 +176,18 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                         android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
                     } else {
-                        drawVehicleBitmap(context, "SEDAN", mapIconColor)
+                        drawVehicleBitmap(context, "SEDAN", mapIconColor, 1.0f)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    drawVehicleBitmap(context, "SEDAN", mapIconColor)
+                    drawVehicleBitmap(context, "SEDAN", mapIconColor, 1.0f)
                 }
             } else {
-                drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f)
+                drawVehicleBitmap(context, vehicleType, mapIconColor, 1.0f)
             }
-            marker.icon = android.graphics.drawable.BitmapDrawable(context.resources, iconBitmap)
-            mapView.invalidate()
+            val icon = org.maplibre.android.annotations.IconFactory.getInstance(context).fromBitmap(iconBitmap)
+            marker.icon = icon
+            mapLibreMap?.updateMarker(marker)
         }
     }
 
@@ -257,22 +264,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
 
                     NavigationState.isRouteActive.value = true
-                    mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
-                    val polyline = Polyline(mapView).apply {
-                        id = "ROUTE_MAIN"
-                        setPoints(currentRoutePoints.toList())
-                        outlinePaint.color = routeColor
-                        outlinePaint.strokeWidth = 24f
-                        outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                        outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
-                        outlinePaint.isAntiAlias = true
-                    }
-                    mapView.overlays.add(0, polyline)
                     isFollowingLocation = true
                     autoCenterJob?.cancel()
-                    // Zoom in para modo navegación (más balanceado)
-                    mapView.controller.setZoom(19.0)
-                    mapView.invalidate()
+                    // La vista de MapLibre reaccionará a isRouteActive y currentRoutePoints
 
                 } catch (e: Exception) {
                     // LÓGICA OFFLINE: Usar caché si existe
@@ -282,23 +276,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                     } else {
                         val errorMessage = e.message ?: "Error desconocido"
-                        val dist = startGeo.distanceToAsDouble(destGeo)
+                        val dist = startGeo.distanceTo(destGeo)
                         routeDistanceText = "Error: ${String.format("%.1f km (Directo)", dist / 1000)}"
-                        currentRoutePoints.clear()
-                        currentRoutePoints.add(startGeo)
                         currentRoutePoints.add(destGeo)
-                        mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
-                        val polyline = Polyline(mapView).apply {
-                            id = "ROUTE_MAIN"
-                            setPoints(currentRoutePoints.toList())
-                            outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
-                            outlinePaint.strokeWidth = 12f
-                            outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
-                        }
-                        mapView.overlays.add(0, polyline)
                         isFollowingLocation = true
                         autoCenterJob?.cancel()
-                        mapView.invalidate()
                         withContext(Dispatchers.Main) {
                             Toast.makeText(context, "Error de red: $errorMessage", Toast.LENGTH_LONG).show()
                         }
@@ -313,8 +295,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
+                Lifecycle.Event.ON_CREATE -> mapView.onCreate(null)
+                Lifecycle.Event.ON_START -> mapView.onStart()
                 Lifecycle.Event.ON_RESUME -> mapView.onResume()
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
                 else -> {}
             }
         }
@@ -338,7 +324,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val loc = result.lastLocation ?: return
                 if (loc.hasAccuracy() && loc.accuracy > 40f) return
 
-                val newGeo = GeoPoint(loc.latitude, loc.longitude)
+                val newGeo = LatLng(loc.latitude, loc.longitude)
                 
                 // RACING MODE: Bearing setup
                 var targetBearing = lastKnownBearing
@@ -354,45 +340,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 NavigationState.currentLocation.value = loc
                 val speedKmH = loc.speed * 3.6f
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = speedKmH
-                val isStationary = speedKmH < 3f 
 
-                if (carMarker == null) {
-                    carMarker = Marker(mapView).apply {
-                        val iconBitmap = if (AppSettings.vehicleType.value == "CUSTOM" && AppSettings.customVehicleIconPath.value.isNotEmpty()) {
-                            try {
-                                val file = java.io.File(AppSettings.customVehicleIconPath.value)
-                                if (file.exists()) {
-                                    val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                                    android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                } else { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f) }
-                            } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f) }
-                        } else { drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f) }
-                        
-                        icon = BitmapDrawable(context.resources, iconBitmap)
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        isFlat = false // Volvemos a false para controlar nosotros la rotación
-                        position = newGeo
-                        
-                        // Calculamos el ángulo real en pantalla
-                        val initialMapRot = if (!isStationary) 360f - targetBearing else currentMapRotation
-                        rotation = (targetBearing + initialMapRot) % 360f 
-                    }
-                    mapView.overlays.add(carMarker)
-                    
-                    if (isFollowingLocation || !hasInitializedPosition) {
-                        mapView.controller.setCenter(newGeo)
-                        mapView.setMapCenterOffset(0, mapView.height / 4)
-                        if (!hasInitializedPosition) {
-                            mapView.controller.setZoom(18.5)
-                            hasInitializedPosition = true
-                        }
-                        if (loc.hasBearing() && !isStationary) {
-                            val newOrientation = 360f - targetBearing
-                            mapView.mapOrientation = newOrientation
-                            currentMapRotation = newOrientation
-                        }
-                    }
-                } else {
+                if (carMarker != null) {
                     animator?.cancel()
                     val startGeo = carMarker!!.position
                     val startLat = startGeo.latitude
@@ -400,43 +349,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val deltaLat = newGeo.latitude - startLat
                     val deltaLon = newGeo.longitude - startLon
 
-                    // RACING MODE: El mapa rota
-                    var startMapRot = currentMapRotation % 360f
-                    if (startMapRot < 0) startMapRot += 360f
-                    val targetMapRot = if (!isStationary) 360f - targetBearing else startMapRot
-                    var deltaMapRot = targetMapRot - startMapRot
-                    if (deltaMapRot > 180f) deltaMapRot -= 360f
-                    if (deltaMapRot < -180f) deltaMapRot += 360f
-
-                    // 🔥 LA SOLUCIÓN: Interpolar la rotación exacta en la pantalla
-                    var startScreenRot = carMarker!!.rotation % 360f
-                    if (startScreenRot < 0) startScreenRot += 360f
-                    var targetScreenRot = (targetBearing + targetMapRot) % 360f
-                    var deltaScreenRot = targetScreenRot - startScreenRot
-                    if (deltaScreenRot > 180f) deltaScreenRot -= 360f
-                    if (deltaScreenRot < -180f) deltaScreenRot += 360f
-
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                        duration = 1000 // 1 segundo para coincidir con la tasa de refresco GPS y ser fluido                        interpolator = LinearInterpolator()
+                        duration = 1000 // 1 segundo interpolación suave
+                        interpolator = LinearInterpolator()
                         addUpdateListener { anim ->
                             val fraction = anim.animatedFraction
-                            val currentPos = GeoPoint(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
+                            val currentPos = LatLng(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
                             
                             carMarker!!.position = currentPos
-                            
-                            // El auto siempre apuntará bien, ¡incluso si mueves el mapa con el dedo!
-                            carMarker!!.rotation = startScreenRot + (deltaScreenRot * fraction)
-                            
-                            if (isFollowingLocation) {
-                                mapView.controller.setCenter(currentPos)
-                                mapView.setMapCenterOffset(0, mapView.height / 4)
-                                var interpMapRot = startMapRot + (deltaMapRot * fraction)
-                                interpMapRot %= 360f
-                                if (interpMapRot < 0) interpMapRot += 360f
-                                mapView.mapOrientation = interpMapRot
-                                currentMapRotation = interpMapRot
-                            }
-                            mapView.invalidate()
+                            mapLibreMap?.updateMarker(carMarker!!)
                         }
                         start()
                     }
@@ -463,8 +384,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         for (i in 0 until closestIndex) {
                             if (currentRoutePoints.isNotEmpty()) currentRoutePoints.removeAt(0)
                         }
-                        val mainPoly = mapView.overlays.find { it is Polyline && it.id == "ROUTE_MAIN" } as? Polyline
-                        mainPoly?.setPoints(currentRoutePoints.toList())
+                        // Polyline update is handled by AndroidView update block
                     }
 
                     // Actualizar steps (eliminar los que ya pasamos)
@@ -483,8 +403,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         if (distToDest < 30f) { 
                             showArrivalAlert = true
                             NavigationState.clearActiveRoute()
-                            mapView.overlays.removeAll { it is Polyline || (it is Marker && it.id == "DEST") }
-                            mapView.invalidate()
                         }
                     }
                 }
@@ -502,361 +420,175 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    if (perspectiveProgress > 0f) {
-                        // Perspectiva 3D: inclinación más agresiva para efecto "horizonte"
-                        rotationX = 45f * perspectiveProgress
-                        cameraDistance = 10f * density
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
-                        
-                        // Escalamos moderadamente para que el mapa cubra todo el fondo 
-                        // compensando el estrechamiento lateral de la perspectiva sin verse enorme.
-                        scaleX = 1f + (0.42f * perspectiveProgress)
-                        scaleY = 1f + (0.42f * perspectiveProgress)
-                        
-                        // Subimos ligeramente el mapa para ocultar el área vacía superior
-                        translationY = -(size.height * 0.15f * perspectiveProgress)
-                        
-                        clip = false
-                    }
-                },
+            modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 mapView.apply {
-                    setTileSource(TileSourceFactory.MAPNIK)
-                    isTilesScaledToDpi = true
-                    
-                    val lastLoc = NavigationState.currentLocation.value
-                    if (lastLoc != null) {
-                        controller.setCenter(GeoPoint(lastLoc.latitude, lastLoc.longitude))
-                        controller.setZoom(18.5)
-                    } else {
-                        controller.setCenter(GeoPoint(10.996, -63.804)) 
-                        controller.setZoom(15.0)
-                    }
-                    
-                    addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-                        val h = bottom - top
-                        if (h > 0) { setMapCenterOffset(0, h / 4) }
-                    }
-
-                    // Rotación manual habilitada: auto-vuelve al bearing GPS tras 6s de inactividad
-                    val rotationGestureOverlay = RotationGestureOverlay(mapView).apply {
-                        isEnabled = true
-                    }
-                    overlays.add(rotationGestureOverlay)
-                    
-                    setOnTouchListener { _, event ->
-                        if (NavigationState.isRouteActive.value) {
-                            // En modo ruta, ignoramos toques para no perder el seguimiento automático,
-                            // pero dejamos que el MapView procese para permitir el Zoom.
-                            return@setOnTouchListener false
-                        }
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                                isFollowingLocation = false
-                                autoCenterJob?.cancel()
-                            }
-                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                                autoCenterJob?.cancel()
-                                autoCenterJob = coroutineScope.launch {
-                                    delay(6000)
-                                    isFollowingLocation = true
-                                    NavigationState.currentLocation.value?.let {
-                                        controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        mapOrientation = 360f - lastKnownBearing
-                                        currentMapRotation = 360f - lastKnownBearing
-                                    }
-                                }
-                            }
-                        }
-                        false 
-                    }
-
-                    addMapListener(object : MapListener {
-                        override fun onScroll(event: ScrollEvent?): Boolean {
-                            if (NavigationState.isRouteActive.value) return false // Bloquear scroll en ruta
-                            if (event != null && (event.x != 0 || event.y != 0)) {
-                                if (isFollowingLocation) {
-                                    isFollowingLocation = false
-                                    autoCenterJob?.cancel()
-                                }
-                                // Resetear auto-recentrado en cada scroll
-                                autoCenterJob?.cancel()
-                                autoCenterJob = coroutineScope.launch {
-                                    delay(6000)
-                                    isFollowingLocation = true
-                                    NavigationState.currentLocation.value?.let {
-                                        controller.animateTo(GeoPoint(it.latitude, it.longitude))
-                                        mapOrientation = 360f - lastKnownBearing
-                                        currentMapRotation = 360f - lastKnownBearing
-                                    }
-                                }
-                            }
-                            return false
-                        }
-                        override fun onZoom(event: ZoomEvent?): Boolean {
-                            autoCenterJob?.cancel()
-                            autoCenterJob = coroutineScope.launch {
-                                delay(6000)
-                                isFollowingLocation = true
-                                NavigationState.currentLocation.value?.let {
-                                    mapOrientation = 360f - lastKnownBearing
-                                    currentMapRotation = 360f - lastKnownBearing
-                                }
-                            }
-                            return false
-                        }
-                    })
-
-                    setMultiTouchControls(true)
-                    setBuiltInZoomControls(false)
-                    setHasTransientState(true)
-
-                    val mReceive = object : MapEventsReceiver {
-                        override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                    getMapAsync { map ->
+                        mapLibreMap = map
+                        map.uiSettings.isAttributionEnabled = false
+                        map.uiSettings.isLogoEnabled = false
+                        map.uiSettings.isCompassEnabled = false
+                        map.setStyle(Style.Builder().fromJson(getRasterStyleJson(currentStyle)))
+                        
+                        map.addOnMapClickListener { point ->
                             focusManager.clearFocus()
                             searchResults = emptyList()
                             showFavorites = false
-                            return false
+                            false
                         }
-                        override fun longPressHelper(p: GeoPoint?): Boolean {
-                            if (NavigationState.isRouteActive.value) return true 
+
+                        map.addOnMapLongClickListener { point ->
+                            if (NavigationState.isRouteActive.value) return@addOnMapLongClickListener true 
                             
-                            if (p != null) {
-                                selectedDestination = p
-                                routeDistanceText = ""
-                                isFollowingLocation = false 
-                                overlays.removeAll { it is Marker && it.id == "DEST" }
-                                
-                                val marker = Marker(mapView).apply {
-                                    position = p
-                                    id = "DEST"
-                                    icon = BitmapDrawable(ctx.resources, drawCustomPin(uiColor))
-                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                    title = "Destino Seleccionado"
-                                    setOnMarkerClickListener { _, _ ->
-                                        favoriteLocationToSave = p
-                                        favoriteNameToSave = "Mi Lugar"
-                                        showSaveFavoriteDialog = true
-                                        true
+                            selectedDestination = point
+                            routeDistanceText = ""
+                            isFollowingLocation = false 
+                            
+                            destMarker?.let { map.removeMarker(it) }
+                            
+                            val iconBitmap = drawCustomPin(uiColor)
+                            val icon = org.maplibre.android.annotations.IconFactory.getInstance(ctx).fromBitmap(iconBitmap)
+                            val markerOptions = MarkerOptions()
+                                .position(point)
+                                .icon(icon)
+                                .title("Destino Seleccionado")
+                            
+                            destMarker = map.addMarker(markerOptions)
+                            true
+                        }
+
+                        // Eventos de cámara para seguimiento automático
+                        map.addOnCameraMoveStartedListener { reason ->
+                            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                if (NavigationState.isRouteActive.value) {
+                                    // En ruta, evitar gestos bloqueándolos no es posible aquí directamente, pero podemos recentrar.
+                                } else {
+                                    isFollowingLocation = false
+                                    autoCenterJob?.cancel()
+                                    autoCenterJob = coroutineScope.launch {
+                                        delay(6000)
+                                        isFollowingLocation = true
                                     }
                                 }
-                                overlays.add(marker)
-                                invalidate()
                             }
-                            return true
                         }
                     }
-                    // Configurar fuente de tiles según estilo
-                    setTileSource(CustomMapSource.create(currentStyle))
-
-                    overlays.add(MapEventsOverlay(mReceive))
                 }
             },
             update = { view ->
-                // Actualizar TileSource si cambió de estilo
-                val currentTileName = view.tileProvider.tileSource.name()
-                val expectedTileName = when(currentStyle) {
-                    "SATELLITE" -> "Satellite"
-                    "NEON" -> "Neon"
-                    else -> "mapnik"
+                val map = mapLibreMap ?: return@AndroidView
+                val expectedStyle = if (currentStyle == "SATELLITE") "SATELLITE" else "MAPNIK"
+                // Para mantenerlo simple, recargar estilo si cambia se omite aquí a menos que sea necesario.
+                
+                // --- RUTA ACTIVA ---
+                if (NavigationState.isRouteActive.value && currentRoutePoints.isNotEmpty()) {
+                    routePolyline?.let { map.removePolyline(it) }
+                    val polylineOptions = PolylineOptions()
+                        .addAll(currentRoutePoints.toList())
+                        .color(routeColor)
+                        .width(6f)
+                    routePolyline = map.addPolyline(polylineOptions)
+                } else if (!NavigationState.isRouteActive.value && routePolyline != null) {
+                    map.removePolyline(routePolyline!!)
+                    routePolyline = null
                 }
                 
-                if (currentTileName.lowercase() != expectedTileName.lowercase()) {
-                    view.setTileSource(CustomMapSource.create(currentStyle))
-                }
-
-                // Aplicar Filtros de Color
-                when (currentStyle) {
-                    "DARK" -> {
-                        val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                            -1.0f, 0.0f, 0.0f, 0.0f, 255f,
-                            0.0f, -1.0f, 0.0f, 0.0f, 255f,
-                            0.0f, 0.0f, -1.0f, 0.0f, 255f,
-                            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
-                        ))
-                        val destinationMatrix = android.graphics.ColorMatrix()
-                        destinationMatrix.setSaturation(0.2f)
-                        inverseMatrix.postConcat(destinationMatrix)
-                        view.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
+                // --- RUTA HISTÓRICA ---
+                val selectedRoute = NavigationState.selectedHistoryRoute.value
+                val selectedSegment = NavigationState.selectedHistorySegment.value
+                if (selectedRoute != null) {
+                    historyPolyline?.let { map.removePolyline(it) }
+                    val pts = if (selectedSegment != null) {
+                        selectedSegment.points.map { LatLng(it.lat, it.lon) }
+                    } else {
+                        selectedRoute.segments.flatMap { s -> s.points.map { LatLng(it.lat, it.lon) } }
                     }
-                    else -> {
-                        view.overlayManager.tilesOverlay.setColorFilter(null)
+                    if (pts.isNotEmpty()) {
+                        historyPolyline = map.addPolyline(PolylineOptions().addAll(pts).color(android.graphics.Color.parseColor("#4CAF50")).width(4f))
+                        isFollowingLocation = false
+                        map.cameraPosition = CameraPosition.Builder().target(pts.first()).zoom(16.0).tilt(0.0).bearing(0.0).build()
                     }
+                } else if (historyPolyline != null) {
+                    map.removePolyline(historyPolyline!!)
+                    historyPolyline = null
                 }
-
-                // Bloquear gestos manuales y forzar seguimiento si hay ruta activa
-                val isRouteActive = NavigationState.isRouteActive.value
-                view.overlays.forEach { overlay ->
-                    if (overlay is org.osmdroid.views.overlay.gestures.RotationGestureOverlay) {
-                        overlay.isEnabled = !isRouteActive
+                
+                // --- DASHCAM RUTA ---
+                val selectedDashcamRoute = NavigationState.selectedDashcamRoute.value
+                if (selectedDashcamRoute != null) {
+                    dashcamPolyline?.let { map.removePolyline(it) }
+                    val pts = selectedDashcamRoute.map { LatLng(it.lat, it.lon) }
+                    if (pts.isNotEmpty()) {
+                        dashcamPolyline = map.addPolyline(PolylineOptions().addAll(pts).color(android.graphics.Color.parseColor("#FF9800")).width(4f))
+                        isFollowingLocation = false
+                        map.cameraPosition = CameraPosition.Builder().target(pts.first()).zoom(17.0).tilt(0.0).bearing(0.0).build()
                     }
+                } else if (dashcamPolyline != null) {
+                    map.removePolyline(dashcamPolyline!!)
+                    dashcamPolyline = null
                 }
-                if (isRouteActive) {
-                    isFollowingLocation = true
-                    // Movemos el offset al fondo (Y positivo) para que el mapa cargue 
-                    // muchísimas más baldosas hacia adelante (hacia el horizonte)
-                    view.setMapCenterOffset(0, (view.height * 0.35f).toInt())
-                } else {
-                    view.setMapCenterOffset(0, view.height / 4)
+                
+                // --- MARCADOR DESTINO ---
+                val activeDest = NavigationState.activeDestination.value
+                if (activeDest != null && destMarker == null) {
+                    val iconBitmap = drawCustomPin(AppSettings.uiColor.value)
+                    val icon = org.maplibre.android.annotations.IconFactory.getInstance(view.context).fromBitmap(iconBitmap)
+                    destMarker = map.addMarker(MarkerOptions().position(activeDest).icon(icon))
                 }
-
-                // Actualizar color de la polilínea si existe
-                view.overlays.forEach {
-                    if (it is Polyline && it.id == "ROUTE_MAIN") {
-                        it.outlinePaint.color = routeColor
-                    }
-                }
-
-                // ── INICIALIZACIÓN RÁPIDA DEL CURSOR ──
-                if (carMarker == null) {
-                    NavigationState.currentLocation.value?.let { loc ->
-                        val initialGeo = GeoPoint(loc.latitude, loc.longitude)
-                        carMarker = Marker(view).apply {
+                
+                // --- SEGUIMIENTO Y CÁMARA 3D NATIVA ---
+                if (isFollowingLocation) {
+                    val loc = NavigationState.currentLocation.value
+                    if (loc != null) {
+                        val pos = LatLng(loc.latitude, loc.longitude)
+                        
+                        // MapLibre tiene soporte nativo de inclinación (tilt)
+                        // En ruta o modo 3D aumentamos el tilt
+                        val isRouteActive = NavigationState.isRouteActive.value
+                        val pitch = if (perspectiveProgress > 0f) 50.0 * perspectiveProgress else 0.0
+                        val b = if (loc.hasBearing()) loc.bearing.toDouble() else 0.0
+                        val mapRot = if (isRouteActive || (loc.hasBearing() && loc.speed * 3.6f > 3f)) b else currentMapRotation.toDouble()
+                        
+                        // Padding para no solapar iconos bajo el auto
+                        val bottomPadding = if (isRouteActive) (view.height * 0.35).toInt() else view.height / 4
+                        map.setPadding(0, 0, 0, bottomPadding)
+                        
+                        val camera = CameraPosition.Builder()
+                            .target(pos)
+                            .zoom(if (isRouteActive) 19.0 else 18.5)
+                            .bearing(mapRot)
+                            .tilt(pitch)
+                            .build()
+                        
+                        // Usamos animateCamera si ya hay posición, sino moveCamera
+                        if (hasInitializedPosition) {
+                            map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 1000)
+                        } else {
+                            map.cameraPosition = camera
+                            hasInitializedPosition = true
+                        }
+                        
+                        // Actualizar o crear Car Marker
+                        if (carMarker == null) {
+                            // Vehículo: dibujamos el bitmap normal, MapLibre se encarga de la perspectiva automáticamente
                             val iconBitmap = if (AppSettings.vehicleType.value == "CUSTOM" && AppSettings.customVehicleIconPath.value.isNotEmpty()) {
                                 try {
                                     val file = java.io.File(AppSettings.customVehicleIconPath.value)
                                     if (file.exists()) {
                                         val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                         android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.4f else 1.0f) }
-                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.4f else 1.0f) }
-                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, if (isRouteActive) 1.4f else 1.0f) }
+                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, 1.0f) }
+                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, 1.0f) }
+                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, 1.0f) }
                             
-                            icon = android.graphics.drawable.BitmapDrawable(view.context.resources, iconBitmap)
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            isFlat = false
-                            position = initialGeo
-                            
-                            val b = if (loc.hasBearing()) loc.bearing else 0f
-                            val mapRot = if (loc.hasBearing() && loc.speed * 3.6f > 3f) 360f - b else currentMapRotation
-                            rotation = (b + mapRot) % 360f
-                        }
-                        view.overlays.add(carMarker)
-                        
-                        if (!hasInitializedPosition) {
-                            view.controller.setCenter(initialGeo)
-                            view.controller.setZoom(18.5)
-                            hasInitializedPosition = true
-                            
-                            // Restaurar rotación si es posible
-                            if (loc.hasBearing() && loc.speed * 3.6f > 3f) {
-                                view.mapOrientation = 360f - loc.bearing
-                                currentMapRotation = 360f - loc.bearing
-                            }
-                        }
-                    }
-                } else if (!view.overlays.contains(carMarker)) {
-                    view.overlays.add(carMarker)
-                }
-
-                // Renderizar la ruta histórica si hay una seleccionada
-                val selectedRoute = NavigationState.selectedHistoryRoute.value
-                val selectedSegment = NavigationState.selectedHistorySegment.value
-                val existingHistoryPolyline = view.overlays.find { it is Polyline && it.id == "ROUTE_HISTORY" }
-                
-                if (selectedRoute != null) {
-                    if (existingHistoryPolyline == null) {
-                        val pts = if (selectedSegment != null) {
-                            selectedSegment.points.map { GeoPoint(it.lat, it.lon) }
+                            val icon = org.maplibre.android.annotations.IconFactory.getInstance(view.context).fromBitmap(iconBitmap)
+                            carMarker = map.addMarker(MarkerOptions().position(pos).icon(icon))
                         } else {
-                            selectedRoute.segments.flatMap { s -> s.points.map { GeoPoint(it.lat, it.lon) } }
-                        }
-                        
-                        if (pts.isNotEmpty()) {
-                            val polyline = Polyline(view).apply {
-                                id = "ROUTE_HISTORY"
-                                setPoints(pts)
-                                outlinePaint.color = android.graphics.Color.parseColor("#4CAF50")
-                                outlinePaint.strokeWidth = 14f
-                                outlinePaint.strokeCap = Paint.Cap.ROUND
-                                outlinePaint.strokeJoin = Paint.Join.ROUND
-                            }
-                            view.overlays.add(polyline)
-                            
-                            isFollowingLocation = false
-                            autoCenterJob?.cancel()
-                            view.controller.animateTo(pts.first())
-                            view.controller.setZoom(16.0)
-                            view.mapOrientation = 0f
-                            currentMapRotation = 0f
+                            carMarker!!.position = pos
+                            map.updateMarker(carMarker!!)
                         }
                     }
-                } else {
-                    if (existingHistoryPolyline != null) {
-                        view.overlays.remove(existingHistoryPolyline)
-                    }
                 }
-
-                // Renderizar ruta Dashcam si hay una seleccionada
-                val selectedDashcamRoute = NavigationState.selectedDashcamRoute.value
-                val existingDashcamPolyline = view.overlays.find { it is Polyline && it.id == "DASHCAM_ROUTE" }
-                
-                if (selectedDashcamRoute != null) {
-                    if (existingDashcamPolyline == null) {
-                        val pts = selectedDashcamRoute.map { GeoPoint(it.lat, it.lon) }
-                        if (pts.isNotEmpty()) {
-                            val polyline = Polyline(view).apply {
-                                id = "DASHCAM_ROUTE"
-                                setPoints(pts)
-                                outlinePaint.color = android.graphics.Color.parseColor("#FF9800")
-                                outlinePaint.strokeWidth = 14f
-                                outlinePaint.strokeCap = Paint.Cap.ROUND
-                                outlinePaint.strokeJoin = Paint.Join.ROUND
-                            }
-                            view.overlays.add(polyline)
-                            
-                            isFollowingLocation = false
-                            autoCenterJob?.cancel()
-                            view.controller.animateTo(pts.first())
-                            view.controller.setZoom(17.0)
-                            view.mapOrientation = 0f
-                            currentMapRotation = 0f
-                        }
-                    }
-                } else {
-                    if (existingDashcamPolyline != null) {
-                        view.overlays.remove(existingDashcamPolyline)
-                    }
-                }
-
-                // ── RESTAURAR RUTA ACTIVA si se perdió (ej: rotación de pantalla) ──
-                val existingMainPolyline = view.overlays.find { it is Polyline && it.id == "ROUTE_MAIN" }
-                if (NavigationState.isRouteActive.value && NavigationState.activeRoutePoints.isNotEmpty()) {
-                    if (existingMainPolyline == null) {
-                        val polyline = Polyline(view).apply {
-                            id = "ROUTE_MAIN"
-                            setPoints(NavigationState.activeRoutePoints.toList())
-                            outlinePaint.color = android.graphics.Color.parseColor("#007AFF")
-                            outlinePaint.strokeWidth = 20f
-                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                            outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
-                        }
-                        view.overlays.add(0, polyline)
-                    }
-                } else if (!NavigationState.isRouteActive.value && existingMainPolyline != null) {
-                    view.overlays.remove(existingMainPolyline)
-                }
-
-                // Restaurar marcador de destino si se perdió
-                val existingDestMarker = view.overlays.find { it is Marker && (it as Marker).id == "DEST" }
-                val activeDest = NavigationState.activeDestination.value
-                if (activeDest != null && existingDestMarker == null) {
-                    val marker = Marker(view).apply {
-                        position = activeDest
-                        id = "DEST"
-                        icon = android.graphics.drawable.BitmapDrawable(
-                            view.context.resources,
-                            drawCustomPin(AppSettings.uiColor.value)
-                        )
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    }
-                    view.overlays.add(marker)
-                }
-
-                view.invalidate()
             }
         )
 
@@ -1394,8 +1126,8 @@ internal fun drawCustomPin(color: Int): Bitmap {
  * Decodifica una polyline con precisión 6 (formato nativo de Valhalla).
  * Similar al algoritmo de Google Maps pero con factor 1e6 en vez de 1e5.
  */
-internal fun decodePolyline6(encoded: String): List<GeoPoint> {
-    val points = mutableListOf<GeoPoint>()
+internal fun decodePolyline6(encoded: String): List<LatLng> {
+    val points = mutableListOf<LatLng>()
     var index = 0
     var lat = 0
     var lng = 0
@@ -1419,7 +1151,7 @@ internal fun decodePolyline6(encoded: String): List<GeoPoint> {
         } while (b >= 0x20)
         val dLng = if ((result and 1) != 0) (result shr 1).inv() else result shr 1
         lng += dLng
-        points.add(GeoPoint(lat.toDouble() / 1e6, lng.toDouble() / 1e6))
+        points.add(LatLng(lat.toDouble() / 1e6, lng.toDouble() / 1e6))
     }
     return points
 }

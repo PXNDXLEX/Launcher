@@ -58,8 +58,9 @@ dependencies {
     // GPS para el velocímetro
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
-    // ¡OPEN STREET MAPS (OSMDroid)! Libre y sin tarjetas de crédito
-    implementation("org.osmdroid:osmdroid-android:6.1.18")
+    // MapLibre GL Native (Reemplaza a OSMDroid para 3D nativo y aceleración hardware)
+    implementation("org.maplibre.gl:android-sdk:11.2.1")
+    implementation("org.maplibre.gl:android-plugin-annotation-v9:3.0.0")
     // Coil for Image & GIF support
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-gif:2.6.0")
