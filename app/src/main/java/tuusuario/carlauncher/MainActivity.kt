@@ -69,9 +69,8 @@ class MainActivity : ComponentActivity() {
             MusicNotificationService.reconnect(this)
         }
 
-        // Configuración global de OSMDroid antes de inicializar la UI
-        org.osmdroid.config.Configuration.getInstance().load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
-        org.osmdroid.config.Configuration.getInstance().userAgentValue = packageName
+        // MapLibre is initialized natively by the SDK
+        org.maplibre.android.MapLibre.getInstance(this)
 
         AppSettings.init(this)
         

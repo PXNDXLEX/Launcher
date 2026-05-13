@@ -54,14 +54,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.osmdroid.tileprovider.cachemanager.CacheManager
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.tileprovider.tilesource.XYTileSource
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.Polyline
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.annotations.PolylineOptions
+import org.maplibre.android.annotations.MarkerOptions
+import com.tuusuario.carlauncher.ui.map.getRasterStyleJson
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.camera.view.PreviewView
 import java.time.LocalDateTime
@@ -93,8 +93,8 @@ object NavigationState {
     val selectedDashcamRoute = mutableStateOf<List<com.tuusuario.carlauncher.services.RoutePoint>?>(null)
     
     // ── ACTIVE NAVIGATION (persists across tab switches) ──
-    val activeDestination = mutableStateOf<org.osmdroid.util.GeoPoint?>(null)
-    val activeRoutePoints = mutableStateListOf<org.osmdroid.util.GeoPoint>()
+    val activeDestination = mutableStateOf<LatLng?>(null)
+    val activeRoutePoints = mutableStateListOf<LatLng>()
     val activeRouteDistance = mutableStateOf("")
     val activeRouteSteps = mutableStateListOf<RouteStep>()
     val cachedRouteJson = mutableStateOf<String?>(null)  // Full OSRM response for offline cache
@@ -113,47 +113,7 @@ object NavigationState {
     }
 }
 
-// Bypass para descargas offline y fuentes personalizadas
-object CustomMapSource {
-    fun create(type: String): org.osmdroid.tileprovider.tilesource.ITileSource {
-        return when (type) {
-            "SATELLITE" -> {
-                // ArcGIS World Imagery (Esri) - Indexación Z/Y/X corregida
-                object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
-                    "Satellite", 1, 19, 256, "", arrayOf("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
-                ) {
-                    override fun getTileURLString(pTile: Long): String {
-                        return baseUrl + org.osmdroid.util.MapTileIndex.getZoom(pTile) + "/" + 
-                               org.osmdroid.util.MapTileIndex.getY(pTile) + "/" + 
-                               org.osmdroid.util.MapTileIndex.getX(pTile)
-                    }
-                    
-                    override fun getTileSourcePolicy(): org.osmdroid.tileprovider.tilesource.TileSourcePolicy {
-                        return org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
-                            2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
-                            org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
-                        )
-                    }
-                }
-            }
-            "NEON" -> object : org.osmdroid.tileprovider.tilesource.XYTileSource(
-                "Neon", 1, 19, 256, ".png", arrayOf(
-                    "https://a.basemaps.cartocdn.com/dark_all/",
-                    "https://b.basemaps.cartocdn.com/dark_all/",
-                    "https://c.basemaps.cartocdn.com/dark_all/"
-                ), "© CartoDB, © OpenStreetMap contributors"
-            ) {
-                override fun getTileSourcePolicy(): org.osmdroid.tileprovider.tilesource.TileSourcePolicy {
-                    return org.osmdroid.tileprovider.tilesource.TileSourcePolicy(
-                        2, org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or
-                        org.osmdroid.tileprovider.tilesource.TileSourcePolicy.FLAG_NO_BULK.inv()
-                    )
-                }
-            }
-            else -> org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK
-        }
-    }
-}
+
 
 @Composable
 fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
@@ -942,69 +902,27 @@ fun ColorPicker(selectedColor: Int, onColorSelected: (Int) -> Unit) {
 
 @Composable
 fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.CoroutineScope) {
-    var showConfirmDialog by remember { mutableStateOf(false) }
-    var estimatedSize by remember { mutableStateOf("Calculando...") }
-    var downloadBox by remember { mutableStateOf<BoundingBox?>(null) }
-
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Default.Map, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.height(16.dp))
         Text("Zonas Seguras (Offline)", fontWeight = FontWeight.Bold, fontSize = 20.sp)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Evita descargar países completos (24GB+). Con esta opción, el sistema detectará tu ubicación GPS actual y descargará un cuadrante a tu alrededor de 20x20 KM, cubriendo todas las carreteras detalladas. Ideal y ligero para rodar en tu zona diaria.", 
+        Text("MapLibre ahora gestiona el caché de los mapas vectoriales y satelitales automáticamente en 3D de manera súper eficiente. Solo navega una vez por tu zona y quedará guardada sin necesidad de descargas manuales pesadas.", 
             fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
             onClick = {
-                val loc = NavigationState.currentLocation.value
-                if (loc != null) {
-                    val lat = loc.latitude
-                    val lon = loc.longitude
-                    downloadBox = BoundingBox(lat + 0.1, lon + 0.1, lat - 0.1, lon - 0.1)
-                    showConfirmDialog = true
-                    
-                    estimatedSize = "Calculando peso exacto..."
-                    coroutineScope.launch {
-                        val dummyMap = MapView(context)
-                        val style = AppSettings.mapStyle.value
-                        dummyMap.setTileSource(CustomMapSource.create(style))
-                        val cm = CacheManager(dummyMap)
-                        val tiles = withContext(Dispatchers.IO) { cm.possibleTilesInArea(downloadBox!!, 10, 18) } 
-                        estimatedSize = "${(tiles * 18L) / 1024L} MB" 
-                    }
-                } else {
-                    Toast.makeText(context, "Buscando satélites GPS. Intenta en 5 segundos...", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(context, "Caché Automático Activado por MapLibre", Toast.LENGTH_SHORT).show()
             },
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
         ) {
             Icon(Icons.Default.CloudDownload, null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Descargar Área Actual (~200 MB)", fontWeight = FontWeight.Bold)
+            Text("Caché Inteligente Activo", fontWeight = FontWeight.Bold)
         }
-    }
-
-    if (showConfirmDialog && downloadBox != null) {
-        AlertDialog(
-            onDismissRequest = { showConfirmDialog = false },
-            title = { Text("Descargar Zona Actual") },
-            text = { Text("Se descargarán todos los mapas de calles y carreteras (Zoom 10 al 16) en un radio de 10KM a la redonda de tu posición.\n\nPeso aproximado: $estimatedSize") },
-            confirmButton = {
-                Button(onClick = {
-                    val dummyMap = MapView(context)
-                    val style = AppSettings.mapStyle.value
-                    dummyMap.setTileSource(CustomMapSource.create(style))
-                    val cm = CacheManager(dummyMap)
-                    Toast.makeText(context, "Iniciando descarga en segundo plano...", Toast.LENGTH_LONG).show()
-                    cm.downloadAreaAsync(context, downloadBox!!, 10, 18)
-                    showConfirmDialog = false
-                }) { Text("Iniciar Descarga") }
-            },
-            dismissButton = { TextButton(onClick = { showConfirmDialog = false }) { Text("Cancelar") } }
-        )
     }
 }
 
@@ -1093,11 +1011,11 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
     val historySegment = NavigationState.selectedHistorySegment.value
     val dashcamRoute = NavigationState.selectedDashcamRoute.value
 
-    val routePoints: List<GeoPoint> = remember(historyRoute, historySegment, dashcamRoute) {
+    val routePoints: List<LatLng> = remember(historyRoute, historySegment, dashcamRoute) {
         when {
-            historySegment != null -> historySegment.points.map { GeoPoint(it.lat, it.lon) }
-            historyRoute != null -> historyRoute.segments.flatMap { seg -> seg.points.map { GeoPoint(it.lat, it.lon) } }
-            dashcamRoute != null -> dashcamRoute.map { GeoPoint(it.lat, it.lon) }
+            historySegment != null -> historySegment.points.map { LatLng(it.lat, it.lon) }
+            historyRoute != null -> historyRoute.segments.flatMap { seg -> seg.points.map { LatLng(it.lat, it.lon) } }
+            dashcamRoute != null -> dashcamRoute.map { LatLng(it.lat, it.lon) }
             else -> emptyList()
         }
     }
@@ -1118,13 +1036,16 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
     }
 
     val mapView = remember { MapView(context) }
+    var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
 
-    LaunchedEffect(routePoints) {
+    LaunchedEffect(mapLibreMap, routePoints) {
+        val map = mapLibreMap ?: return@LaunchedEffect
         if (routePoints.isNotEmpty()) {
-            delay(300)
+            delay(500)
             try {
-                val bbox = org.osmdroid.util.BoundingBox.fromGeoPoints(routePoints)
-                mapView.zoomToBoundingBox(bbox, true, 120)
+                val builder = LatLngBounds.Builder()
+                routePoints.forEach { builder.include(it) }
+                map.moveCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
@@ -1142,51 +1063,30 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
-                        org.osmdroid.config.Configuration.getInstance().userAgentValue = ctx.packageName
                         mapView.apply {
-                            setTileSource(TileSourceFactory.MAPNIK)
-                            setMultiTouchControls(true)
-                            setBuiltInZoomControls(false)
+                            getMapAsync { map ->
+                                mapLibreMap = map
+                                map.setStyle(Style.Builder().fromJson(getRasterStyleJson("LIGHT"))) {
+                                    if (routePoints.isNotEmpty()) {
+                                        val polylineOptions = PolylineOptions()
+                                            .addAll(routePoints)
+                                            .color(routeColor)
+                                            .width(5f)
+                                        map.addPolyline(polylineOptions)
 
-                            if (routePoints.isNotEmpty()) {
-                                val polyline = Polyline(this).apply {
-                                    id = "FLOAT_ROUTE"
-                                    setPoints(routePoints)
-                                    outlinePaint.color = routeColor
-                                    outlinePaint.strokeWidth = 14f
-                                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                    outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                                        val startMarker = MarkerOptions()
+                                            .position(routePoints.first())
+                                            .title("Inicio")
+                                        val endMarker = MarkerOptions()
+                                            .position(routePoints.last())
+                                            .title("Fin")
+                                        
+                                        map.addMarker(startMarker)
+                                        map.addMarker(endMarker)
+                                    }
                                 }
-                                overlays.add(polyline)
-
-                                val startMarker = Marker(this).apply {
-                                    position = routePoints.first()
-                                    icon = android.graphics.drawable.BitmapDrawable(
-                                        ctx.resources,
-                                        com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#4CAF50"))
-                                    )
-                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                    title = "Inicio"
-                                }
-                                val endMarker = Marker(this).apply {
-                                    position = routePoints.last()
-                                    icon = android.graphics.drawable.BitmapDrawable(
-                                        ctx.resources,
-                                        com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#F44336"))
-                                    )
-                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                    title = "Fin"
-                                }
-                                overlays.add(startMarker)
-                                overlays.add(endMarker)
-
-                                controller.setCenter(
-                                    GeoPoint(
-                                        (routePoints.first().latitude + routePoints.last().latitude) / 2,
-                                        (routePoints.first().longitude + routePoints.last().longitude) / 2
-                                    )
-                                )
-                                controller.setZoom(14.0)
+                                map.uiSettings.isAttributionEnabled = false
+                                map.uiSettings.isLogoEnabled = false
                             }
                         }
                     }
