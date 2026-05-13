@@ -163,6 +163,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var searchResults by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
     var showFavorites by remember { mutableStateOf(false) }
     var isSearching by remember { mutableStateOf(false) }
+    var lastAppliedStyle by remember { mutableStateOf("") }
+    var lastAppliedRoutePointsHash by remember { mutableStateOf(0) }
 
     val customIconPath = AppSettings.customVehicleIconPath.value
     LaunchedEffect(vehicleType, customIconPath, mapIconColor) {
@@ -496,20 +498,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             },
             update = { view ->
                 val map = mapLibreMap ?: return@AndroidView
+                
+                // --- ACTUALIZACIÓN DE ESTILO EN TIEMPO REAL ---
+                if (lastAppliedStyle != currentStyle) {
+                    map.setStyle(Style.Builder().fromJson(getRasterStyleJson(currentStyle)))
+                    lastAppliedStyle = currentStyle
+                    // Al cambiar el estilo, MapLibre elimina todas las anotaciones.
+                    // Forzamos la recreación de marcadores y polilíneas.
+                    carMarker = null
+                    destMarker = null
+                    routePolyline = null
+                    historyPolyline = null
+                    dashcamPolyline = null
+                    lastAppliedRoutePointsHash = 0
+                }
+                
                 val expectedStyle = if (currentStyle == "SATELLITE") "SATELLITE" else "MAPNIK"
-                // Para mantenerlo simple, recargar estilo si cambia se omite aquí a menos que sea necesario.
                 
                 // --- RUTA ACTIVA ---
+                val currentPointsHash = currentRoutePoints.hashCode()
                 if (NavigationState.isRouteActive.value && currentRoutePoints.isNotEmpty()) {
-                    routePolyline?.let { map.removePolyline(it) }
-                    val polylineOptions = PolylineOptions()
-                        .addAll(currentRoutePoints.toList())
-                        .color(routeColor)
-                        .width(6f)
-                    routePolyline = map.addPolyline(polylineOptions)
+                    if (lastAppliedRoutePointsHash != currentPointsHash || routePolyline == null) {
+                        routePolyline?.let { map.removePolyline(it) }
+                        val polylineOptions = PolylineOptions()
+                            .addAll(currentRoutePoints.toList())
+                            .color(routeColor)
+                            .width(8f) // Un poco más gruesa para que se vea mejor
+                        routePolyline = map.addPolyline(polylineOptions)
+                        lastAppliedRoutePointsHash = currentPointsHash
+                    }
                 } else if (!NavigationState.isRouteActive.value && routePolyline != null) {
                     map.removePolyline(routePolyline!!)
                     routePolyline = null
+                    lastAppliedRoutePointsHash = 0
                 }
                 
                 // --- RUTA HISTÓRICA ---
