@@ -344,16 +344,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val startLon = startGeo.longitude
                     val deltaLat = newGeo.latitude - startLat
                     val deltaLon = newGeo.longitude - startLon
+                    
+                    val startBearing = carMarker!!.rotation
+                    val deltaBearing = (targetBearing - startBearing).let { 
+                        if (it > 180) it - 360 else if (it < -180) it + 360 else it 
+                    }
 
                     animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                        duration = 1000 // 1 segundo interpolación suave
+                        duration = 900 
                         interpolator = LinearInterpolator()
                         addUpdateListener { anim ->
                             val fraction = anim.animatedFraction
                             val currentPos = LatLng(startLat + (deltaLat * fraction), startLon + (deltaLon * fraction))
+                            val currentBearing = startBearing + (deltaBearing * fraction)
                             
-                            carMarker!!.position = currentPos
-                            mapLibreMap?.updateMarker(carMarker!!)
+                            carMarker?.let {
+                                it.position = currentPos
+                                it.rotation = currentBearing
+                                mapLibreMap?.updateMarker(it)
+                                
+                                if (isFollowingLocation) {
+                                    val isRouteActive = NavigationState.isRouteActive.value
+                                    val pitch = if (perspectiveProgress > 0f) 50.0 * perspectiveProgress else 0.0
+                                    
+                                    val camera = CameraPosition.Builder()
+                                        .target(currentPos)
+                                        .zoom(if (isRouteActive) 19.0 else 18.2)
+                                        .bearing(if (isRouteActive) currentBearing.toDouble() else currentMapRotation.toDouble())
+                                        .tilt(pitch)
+                                        .build()
+                                    
+                                    mapLibreMap?.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
+                                }
+                            }
                         }
                         start()
                     }
@@ -532,57 +555,28 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     destMarker = map.addMarker(MarkerOptions().position(activeDest).icon(icon))
                 }
                 
-                // --- SEGUIMIENTO Y CÁMARA 3D NATIVA ---
-                if (isFollowingLocation) {
-                    val loc = NavigationState.currentLocation.value
-                    if (loc != null) {
-                        val pos = LatLng(loc.latitude, loc.longitude)
+                // --- SEGUIMIENTO Y MARCADOR DE VEHÍCULO ---
+                val loc = NavigationState.currentLocation.value
+                if (loc != null) {
+                    val pos = LatLng(loc.latitude, loc.longitude)
+                    
+                    if (carMarker == null) {
+                        val iconBitmap = if (AppSettings.vehicleType.value == "CUSTOM" && AppSettings.customVehicleIconPath.value.isNotEmpty()) {
+                            try {
+                                val file = java.io.File(AppSettings.customVehicleIconPath.value)
+                                if (file.exists()) {
+                                    val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                                    android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
+                                } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, 1.0f) }
+                            } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, 1.0f) }
+                        } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, 1.0f) }
                         
-                        // MapLibre tiene soporte nativo de inclinación (tilt)
-                        // En ruta o modo 3D aumentamos el tilt
-                        val isRouteActive = NavigationState.isRouteActive.value
-                        val pitch = if (perspectiveProgress > 0f) 50.0 * perspectiveProgress else 0.0
-                        val b = if (loc.hasBearing()) loc.bearing.toDouble() else 0.0
-                        val mapRot = if (isRouteActive || (loc.hasBearing() && loc.speed * 3.6f > 3f)) b else currentMapRotation.toDouble()
+                        val icon = org.maplibre.android.annotations.IconFactory.getInstance(view.context).fromBitmap(iconBitmap)
+                        carMarker = map.addMarker(MarkerOptions().position(pos).icon(icon))
                         
-                        // Padding para no solapar iconos bajo el auto
-                        val bottomPadding = if (isRouteActive) (view.height * 0.35).toInt() else view.height / 4
-                        map.setPadding(0, 0, 0, bottomPadding)
-                        
-                        val camera = CameraPosition.Builder()
-                            .target(pos)
-                            .zoom(if (isRouteActive) 19.0 else 18.5)
-                            .bearing(mapRot)
-                            .tilt(pitch)
-                            .build()
-                        
-                        // Usamos animateCamera si ya hay posición, sino moveCamera
-                        if (hasInitializedPosition) {
-                            map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 1000)
-                        } else {
-                            map.cameraPosition = camera
-                            hasInitializedPosition = true
-                        }
-                        
-                        // Actualizar o crear Car Marker
-                        if (carMarker == null) {
-                            // Vehículo: dibujamos el bitmap normal, MapLibre se encarga de la perspectiva automáticamente
-                            val iconBitmap = if (AppSettings.vehicleType.value == "CUSTOM" && AppSettings.customVehicleIconPath.value.isNotEmpty()) {
-                                try {
-                                    val file = java.io.File(AppSettings.customVehicleIconPath.value)
-                                    if (file.exists()) {
-                                        val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                                        android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, 1.0f) }
-                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, 1.0f) }
-                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, 1.0f) }
-                            
-                            val icon = org.maplibre.android.annotations.IconFactory.getInstance(view.context).fromBitmap(iconBitmap)
-                            carMarker = map.addMarker(MarkerOptions().position(pos).icon(icon))
-                        } else {
-                            carMarker!!.position = pos
-                            map.updateMarker(carMarker!!)
-                        }
+                        // Centrar cámara la primera vez
+                        val camera = CameraPosition.Builder().target(pos).zoom(18.2).build()
+                        map.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
                     }
                 }
             }
@@ -1191,10 +1185,10 @@ fun valhallaTypeToOsrmStyle(type: Int): Pair<String, String> = when (type) {
 
 fun getRasterStyleJson(style: String): String {
     val tileUrl = when (style) {
-        "SATELLITE" -> "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        "DARK" -> "https://a.basemaps.cartocdn.com/dark_all/{z}/{y}/{x}.png"
-        "NEON" -> "https://b.basemaps.cartocdn.com/dark_all/{z}/{y}/{x}.png"
-        else -> "https://tile.openstreetmap.org/{z}/{y}/{x}.png"
+        "SATELLITE" -> "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" // ArcGIS uses Z/Y/X? Actually it varies.
+        "DARK" -> "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+        "NEON" -> "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+        else -> "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     }
     return """
     {
@@ -1208,6 +1202,11 @@ fun getRasterStyleJson(style: String): String {
         }
       },
       "layers": [
+        {
+          "id": "background",
+          "type": "background",
+          "paint": { "background-color": "#AAD3DF" }
+        },
         {
           "id": "simple-tiles",
           "type": "raster",

@@ -1043,9 +1043,13 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
         if (routePoints.isNotEmpty()) {
             delay(500)
             try {
-                val builder = LatLngBounds.Builder()
-                routePoints.forEach { builder.include(it) }
-                map.moveCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
+                if (routePoints.size > 1) {
+                    val builder = LatLngBounds.Builder()
+                    routePoints.forEach { builder.include(it) }
+                    map.moveCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
+                } else if (routePoints.size == 1) {
+                    map.moveCamera(CameraUpdateFactory.newLatLng(routePoints.first(), 16.0))
+                }
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
