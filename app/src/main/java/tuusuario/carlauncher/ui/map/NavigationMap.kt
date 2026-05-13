@@ -177,7 +177,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     drawVehicleBitmap(context, "SEDAN", mapIconColor)
                 }
             } else {
-                drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f)
+                drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f)
             }
             marker.icon = android.graphics.drawable.BitmapDrawable(context.resources, iconBitmap)
             mapView.invalidate()
@@ -270,8 +270,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     mapView.overlays.add(0, polyline)
                     isFollowingLocation = true
                     autoCenterJob?.cancel()
-                    // Zoom in para modo navegación (más cerca)
-                    mapView.controller.setZoom(20.0)
+                    // Zoom in para modo navegación (más balanceado)
+                    mapView.controller.setZoom(19.0)
                     mapView.invalidate()
 
                 } catch (e: Exception) {
@@ -364,9 +364,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 if (file.exists()) {
                                     val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                     android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                } else { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f) }
-                            } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f) }
-                        } else { drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f) }
+                                } else { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f) }
+                            } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f) }
+                        } else { drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.4f else 1.0f) }
                         
                         icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -511,13 +511,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         cameraDistance = 10f * density
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
                         
-                        // Escalamos más agresivamente para que el mapa cubra todo el fondo 
-                        // y compensar el estrechamiento lateral de la perspectiva.
-                        scaleX = 1f + (0.6f * perspectiveProgress)
-                        scaleY = 1f + (0.6f * perspectiveProgress)
+                        // Escalamos moderadamente para que el mapa cubra todo el fondo 
+                        // compensando el estrechamiento lateral de la perspectiva sin verse enorme.
+                        scaleX = 1f + (0.42f * perspectiveProgress)
+                        scaleY = 1f + (0.42f * perspectiveProgress)
                         
-                        // Subimos el mapa para ocultar el área vacía superior
-                        translationY = -(size.height * 0.25f * perspectiveProgress)
+                        // Subimos ligeramente el mapa para ocultar el área vacía superior
+                        translationY = -(size.height * 0.15f * perspectiveProgress)
                         
                         clip = false
                     }
@@ -721,9 +721,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     if (file.exists()) {
                                         val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                         android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.6f else 1.0f) }
-                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.6f else 1.0f) }
-                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, if (isRouteActive) 1.6f else 1.0f) }
+                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.4f else 1.0f) }
+                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.4f else 1.0f) }
+                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, if (isRouteActive) 1.4f else 1.0f) }
                             
                             icon = android.graphics.drawable.BitmapDrawable(view.context.resources, iconBitmap)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -1320,8 +1320,8 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
  * [color] should come from AppSettings.mapIconColor — independent of the UI accent color.
  */
 internal fun drawVehicleBitmap(context: Context, type: String, color: Int, heightScale: Float = 1.0f): Bitmap {
-    val width = 160
-    val height = (160 * heightScale).toInt() 
+    val width = 140
+    val height = (140 * heightScale).toInt() 
     // Altura compensada para que no se vea "aplastado" por la inclinación 3D
 
     // Try to render from Vector Drawable for SEDAN and HATCHBACK
