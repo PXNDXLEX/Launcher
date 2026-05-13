@@ -11,6 +11,8 @@ import android.view.MotionEvent
 import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
@@ -132,7 +134,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var showArrivalAlert by remember { mutableStateOf(false) }
     var isCalculatingRoute by remember { mutableStateOf(false) }
     var showStyleSelector by remember { mutableStateOf(false) }
-    
+
+    // Perspectiva 3D: activa cuando hay ruta activa Y se está siguiendo la ubicación
+    val perspectiveProgress by animateFloatAsState(
+        targetValue = if (NavigationState.isRouteActive.value && isFollowingLocation) 1f else 0f,
+        animationSpec = tween(durationMillis = 700),
+        label = "perspective_3d"
+    )
+
     val currentStyle = AppSettings.mapStyle.value
     val routeColor = when (currentStyle) {
         "NEON" -> android.graphics.Color.parseColor("#FF9100") // Naranja Neón
@@ -176,75 +185,83 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
-    // Función unificada para calcular/recalcular rutas con STEPS (indicadores de giro)
+    // Función unificada para calcular/recalcular rutas con STEPS — motor: Valhalla OSM (gratuito, sin API key)
     val calculateRoute: (GeoPoint, GeoPoint) -> Unit = { startGeo, destGeo ->
         if (!isCalculatingRoute) {
             isCalculatingRoute = true
             coroutineScope.launch {
                 routeDistanceText = "Calculando ruta..."
                 try {
-                    // Añadimos steps=true para obtener las maniobras
-                    val urlStr = "https://router.project-osrm.org/route/v1/driving/${startGeo.longitude},${startGeo.latitude};${destGeo.longitude},${destGeo.latitude}?overview=full&geometries=geojson&steps=true"
+                    val body = """{"locations":[{"lon":${startGeo.longitude},"lat":${startGeo.latitude}},{"lon":${destGeo.longitude},"lat":${destGeo.latitude}}],"costing":"auto","directions_options":{"language":"es-ES"}}"""
                     val result = withContext(Dispatchers.IO) {
-                        val conn = URL(urlStr).openConnection() as HttpURLConnection
-                        conn.connectTimeout = 4000
+                        val conn = URL("https://valhalla.openstreetmap.de/route").openConnection() as HttpURLConnection
+                        conn.requestMethod = "POST"
+                        conn.setRequestProperty("Content-Type", "application/json")
+                        conn.connectTimeout = 8000
+                        conn.readTimeout = 8000
+                        conn.doOutput = true
+                        conn.outputStream.use { it.write(body.toByteArray()) }
                         conn.inputStream.bufferedReader().readText()
                     }
-                    
-                    NavigationState.cachedRouteJson.value = result // Cache for offline use
+
+                    NavigationState.cachedRouteJson.value = result
                     val json = JSONObject(result)
-                    val routes = json.getJSONArray("routes")
-                    if (routes.length() > 0) {
-                        val route = routes.getJSONObject(0)
-                        val distanceMeters = route.getDouble("distance")
-                        routeDistanceText = if (distanceMeters > 1000) String.format("%.1f km restantes", distanceMeters / 1000) else "${distanceMeters.toInt()} m restantes"
+                    val trip = json.getJSONObject("trip")
+                    val summary = trip.getJSONObject("summary")
+                    val distanceKm = summary.getDouble("length") // Valhalla devuelve km directamente
+                    routeDistanceText = if (distanceKm > 1.0)
+                        String.format("%.1f km restantes", distanceKm)
+                    else
+                        "${(distanceKm * 1000).toInt()} m restantes"
 
-                        // Parsear Puntos
-                        val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
+                    val legs = trip.getJSONArray("legs")
+                    if (legs.length() > 0) {
+                        val leg = legs.getJSONObject(0)
+                        // Decodificar polyline de precisión 6 (formato Valhalla)
+                        val decoded = decodePolyline6(leg.getString("shape"))
                         currentRoutePoints.clear()
-                        for (i in 0 until coordinates.length()) {
-                            val pt = coordinates.getJSONArray(i)
-                            currentRoutePoints.add(GeoPoint(pt.getDouble(1), pt.getDouble(0)))
-                        }
-                        
-                        // Parsear Steps (Instrucciones de giro)
-                        activeRouteSteps.clear()
-                        val legs = route.getJSONArray("legs")
-                        if (legs.length() > 0) {
-                            val steps = legs.getJSONObject(0).getJSONArray("steps")
-                            for (i in 0 until steps.length()) {
-                                val step = steps.getJSONObject(i)
-                                val maneuver = step.getJSONObject("maneuver")
-                                val loc = maneuver.getJSONArray("location")
-                                activeRouteSteps.add(RouteStep(
-                                    maneuverType = maneuver.getString("type"),
-                                    modifier = maneuver.optString("modifier", "straight"),
-                                    distance = step.getDouble("distance"),
-                                    streetName = step.optString("name", "Calle"),
-                                    maneuverLat = loc.getDouble(1),
-                                    maneuverLon = loc.getDouble(0)
-                                ))
-                            }
-                        }
+                        currentRoutePoints.addAll(decoded)
 
-                        NavigationState.isRouteActive.value = true
-                        
-                        mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
-                        val polyline = Polyline(mapView).apply {
-                            id = "ROUTE_MAIN"
-                            setPoints(currentRoutePoints.toList())
-                            outlinePaint.color = routeColor
-                            outlinePaint.strokeWidth = 24f
-                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                            outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
-                            outlinePaint.isAntiAlias = true
+                        // Parsear maniobras
+                        activeRouteSteps.clear()
+                        val maneuvers = leg.getJSONArray("maneuvers")
+                        for (i in 0 until maneuvers.length()) {
+                            val m = maneuvers.getJSONObject(i)
+                            val (manType, manMod) = valhallaTypeToOsrmStyle(m.getInt("type"))
+                            val shapeIdx = m.getInt("begin_shape_index")
+                            val stepPoint = if (shapeIdx < decoded.size) decoded[shapeIdx] else startGeo
+                            val names = m.optJSONArray("street_names")
+                            val streetName = if (names != null && names.length() > 0) names.getString(0) else ""
+                            activeRouteSteps.add(RouteStep(
+                                maneuverType = manType,
+                                modifier = manMod,
+                                distance = m.getDouble("length") * 1000.0, // km → m
+                                streetName = streetName,
+                                maneuverLat = stepPoint.latitude,
+                                maneuverLon = stepPoint.longitude
+                            ))
                         }
-                        mapView.overlays.add(0, polyline)
-                        isFollowingLocation = true 
-                        autoCenterJob?.cancel()
-                        mapView.invalidate()
                     }
-                } catch (e: Exception) { 
+
+                    NavigationState.isRouteActive.value = true
+                    mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
+                    val polyline = Polyline(mapView).apply {
+                        id = "ROUTE_MAIN"
+                        setPoints(currentRoutePoints.toList())
+                        outlinePaint.color = routeColor
+                        outlinePaint.strokeWidth = 24f
+                        outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                        outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                        outlinePaint.isAntiAlias = true
+                    }
+                    mapView.overlays.add(0, polyline)
+                    isFollowingLocation = true
+                    autoCenterJob?.cancel()
+                    // Zoom in para modo navegación
+                    mapView.controller.setZoom(19.0)
+                    mapView.invalidate()
+
+                } catch (e: Exception) {
                     // LÓGICA OFFLINE: Usar caché si existe
                     if (NavigationState.cachedRouteJson.value != null) {
                         withContext(Dispatchers.Main) {
@@ -256,7 +273,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         currentRoutePoints.clear()
                         currentRoutePoints.add(startGeo)
                         currentRoutePoints.add(destGeo)
-
                         mapView.overlays.removeAll { it is Polyline && it.id == "ROUTE_MAIN" }
                         val polyline = Polyline(mapView).apply {
                             id = "ROUTE_MAIN"
@@ -266,7 +282,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
                         }
                         mapView.overlays.add(0, polyline)
-                        isFollowingLocation = true 
+                        isFollowingLocation = true
                         autoCenterJob?.cancel()
                         mapView.invalidate()
                         withContext(Dispatchers.Main) {
@@ -472,7 +488,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    if (perspectiveProgress > 0f) {
+                        // Perspectiva 3D simulada: inclinar la vista como Google Maps en navegación
+                        rotationX = 28f * perspectiveProgress
+                        cameraDistance = 10f * density
+                        translationY = -(size.height * 0.09f * perspectiveProgress)
+                    }
+                },
             factory = { ctx ->
                 mapView.apply {
                     setTileSource(TileSourceFactory.MAPNIK)
@@ -1316,4 +1341,64 @@ internal fun drawCustomPin(color: Int): Bitmap {
     p.color = android.graphics.Color.WHITE
     canvas.drawCircle(40f, 30f, 10f, p)
     return b
+}
+
+/**
+ * Decodifica una polyline con precisión 6 (formato nativo de Valhalla).
+ * Similar al algoritmo de Google Maps pero con factor 1e6 en vez de 1e5.
+ */
+internal fun decodePolyline6(encoded: String): List<GeoPoint> {
+    val points = mutableListOf<GeoPoint>()
+    var index = 0
+    var lat = 0
+    var lng = 0
+    while (index < encoded.length) {
+        var b: Int
+        var shift = 0
+        var result = 0
+        do {
+            b = encoded[index++].code - 63
+            result = result or ((b and 0x1f) shl shift)
+            shift += 5
+        } while (b >= 0x20)
+        val dLat = if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+        lat += dLat
+        shift = 0
+        result = 0
+        do {
+            b = encoded[index++].code - 63
+            result = result or ((b and 0x1f) shl shift)
+            shift += 5
+        } while (b >= 0x20)
+        val dLng = if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+        lng += dLng
+        points.add(GeoPoint(lat.toDouble() / 1e6, lng.toDouble() / 1e6))
+    }
+    return points
+}
+
+/**
+ * Convierte el tipo entero de maniobra de Valhalla al par (maneuverType, modifier)
+ * que usa el HUD de giro existente (formato OSRM).
+ * Referencia: https://valhalla.github.io/valhalla/api/turn-by-turn/api-reference/#maneuver-types
+ */
+internal fun valhallaTypeToOsrmStyle(type: Int): Pair<String, String> = when (type) {
+    1, 2, 3   -> "depart"   to "straight"
+    4, 5, 6   -> "arrive"   to "straight"
+    7, 8      -> "continue" to "straight"
+    9         -> "turn"     to "slight right"
+    10        -> "turn"     to "right"
+    11        -> "turn"     to "sharp right"
+    12, 13    -> "turn"     to "uturn"
+    14        -> "turn"     to "sharp left"
+    15        -> "turn"     to "left"
+    16        -> "turn"     to "slight left"
+    17        -> "turn"     to "straight"     // ramp straight
+    18        -> "turn"     to "right"        // ramp right
+    19        -> "turn"     to "left"         // ramp left
+    20        -> "turn"     to "slight right" // exit right
+    21        -> "turn"     to "slight left"  // exit left
+    24        -> "roundabout" to "right"
+    25        -> "exit roundabout" to "straight"
+    else      -> "turn"     to "straight"
 }
