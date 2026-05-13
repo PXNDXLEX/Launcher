@@ -198,6 +198,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val conn = URL("https://valhalla.openstreetmap.de/route").openConnection() as HttpURLConnection
                         conn.requestMethod = "POST"
                         conn.setRequestProperty("Content-Type", "application/json")
+                        conn.setRequestProperty("User-Agent", "CarLauncherApp")
                         conn.connectTimeout = 8000
                         conn.readTimeout = 8000
                         conn.doOutput = true
@@ -269,8 +270,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             Toast.makeText(context, "Sin Internet: Usando ruta en caché", Toast.LENGTH_LONG).show()
                         }
                     } else {
+                        val errorMessage = e.message ?: "Error desconocido"
                         val dist = startGeo.distanceToAsDouble(destGeo)
-                        routeDistanceText = "Offline: ${String.format("%.1f km (Directo)", dist / 1000)}"
+                        routeDistanceText = "Error: ${String.format("%.1f km (Directo)", dist / 1000)}"
                         currentRoutePoints.clear()
                         currentRoutePoints.add(startGeo)
                         currentRoutePoints.add(destGeo)
@@ -287,7 +289,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         autoCenterJob?.cancel()
                         mapView.invalidate()
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Sin Internet: Activando Ruta Directa", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Error de red: $errorMessage", Toast.LENGTH_LONG).show()
                         }
                     }
                 } finally {
