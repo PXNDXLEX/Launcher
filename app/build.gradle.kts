@@ -59,8 +59,8 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
     // MapLibre GL Native (Reemplaza a OSMDroid para 3D nativo y aceleración hardware)
-    implementation("org.maplibre.gl:android-sdk:11.2.1")
-    implementation("org.maplibre.gl:android-plugin-annotation-v9:3.0.0")
+    implementation("org.maplibre.gl:android-sdk:11.5.2")
+    implementation("org.maplibre.gl:android-plugin-annotation-v9:3.0.2")
     // Coil for Image & GIF support
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-gif:2.6.0")
