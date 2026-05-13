@@ -270,8 +270,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     mapView.overlays.add(0, polyline)
                     isFollowingLocation = true
                     autoCenterJob?.cancel()
-                    // Zoom in para modo navegación
-                    mapView.controller.setZoom(19.0)
+                    // Zoom in para modo navegación (más cerca)
+                    mapView.controller.setZoom(20.0)
                     mapView.invalidate()
 
                 } catch (e: Exception) {
@@ -507,9 +507,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 .graphicsLayer {
                     if (perspectiveProgress > 0f) {
                         // Perspectiva 3D: inclinamos desde la base para que el horizonte se aleje
-                        rotationX = 35f * perspectiveProgress
+                        rotationX = 40f * perspectiveProgress
                         cameraDistance = 8f * density
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                        
+                        // Escalamos ligeramente y subimos el mapa para compensar la inclinación
+                        // y evitar el hueco blanco en la parte superior.
+                        scaleX = 1f + (0.3f * perspectiveProgress)
+                        scaleY = 1f + (0.3f * perspectiveProgress)
+                        translationY = -(size.height * 0.15f * perspectiveProgress)
+                        
                         clip = false
                     }
                 },
@@ -687,6 +694,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
                 if (isRouteActive) {
                     isFollowingLocation = true
+                    view.setMapCenterOffset(0, 0) // Centrar auto (más arriba) para no taparlo con el HUD
+                } else {
+                    view.setMapCenterOffset(0, view.height / 4) // Volver al offset normal de "launcher"
                 }
 
                 // Actualizar color de la polilínea si existe
@@ -1306,7 +1316,7 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
  * [color] should come from AppSettings.mapIconColor — independent of the UI accent color.
  */
 internal fun drawVehicleBitmap(context: Context, type: String, color: Int): Bitmap {
-    val size = 120
+    val size = 160 // Aumentamos el tamaño base para mejor visibilidad en 3D
 
     // Try to render from Vector Drawable for SEDAN and HATCHBACK
     val drawableResId = when (type) {
