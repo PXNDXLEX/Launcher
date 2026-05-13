@@ -195,15 +195,26 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 try {
                     val body = """{"locations":[{"lon":${startGeo.longitude},"lat":${startGeo.latitude}},{"lon":${destGeo.longitude},"lat":${destGeo.latitude}}],"costing":"auto","directions_options":{"language":"es-ES"}}"""
                     val result = withContext(Dispatchers.IO) {
-                        val conn = URL("https://valhalla.openstreetmap.de/route").openConnection() as HttpURLConnection
+                        val url = URL("https://valhalla1.openstreetmap.de/route")
+                        val conn = url.openConnection() as HttpURLConnection
                         conn.requestMethod = "POST"
                         conn.setRequestProperty("Content-Type", "application/json")
                         conn.setRequestProperty("User-Agent", "CarLauncherApp")
-                        conn.connectTimeout = 8000
-                        conn.readTimeout = 8000
+                        conn.connectTimeout = 10000
+                        conn.readTimeout = 10000
                         conn.doOutput = true
-                        conn.outputStream.use { it.write(body.toByteArray()) }
-                        conn.inputStream.bufferedReader().readText()
+                        
+                        try {
+                            conn.outputStream.use { it.write(body.toByteArray()) }
+                            val code = conn.responseCode
+                            if (code >= 400) {
+                                val err = conn.errorStream?.bufferedReader()?.readText() ?: "Error $code"
+                                throw Exception(err)
+                            }
+                            conn.inputStream.bufferedReader().readText()
+                        } finally {
+                            conn.disconnect()
+                        }
                     }
 
                     NavigationState.cachedRouteJson.value = result
