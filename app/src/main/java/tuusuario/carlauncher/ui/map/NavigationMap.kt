@@ -177,7 +177,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     drawVehicleBitmap(context, "SEDAN", mapIconColor)
                 }
             } else {
-                drawVehicleBitmap(context, vehicleType, mapIconColor)
+                drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f)
             }
             marker.icon = android.graphics.drawable.BitmapDrawable(context.resources, iconBitmap)
             mapView.invalidate()
@@ -364,9 +364,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 if (file.exists()) {
                                     val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                     android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                } else { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
-                            } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
-                        } else { drawVehicleBitmap(context, vehicleType, mapIconColor) }
+                                } else { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f) }
+                            } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f) }
+                        } else { drawVehicleBitmap(context, vehicleType, mapIconColor, if (NavigationState.isRouteActive.value) 1.6f else 1.0f) }
                         
                         icon = BitmapDrawable(context.resources, iconBitmap)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -506,16 +506,18 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 .fillMaxSize()
                 .graphicsLayer {
                     if (perspectiveProgress > 0f) {
-                        // Perspectiva 3D: inclinamos desde la base para que el horizonte se aleje
-                        rotationX = 40f * perspectiveProgress
-                        cameraDistance = 8f * density
+                        // Perspectiva 3D: inclinación más agresiva para efecto "horizonte"
+                        rotationX = 45f * perspectiveProgress
+                        cameraDistance = 10f * density
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
                         
-                        // Escalamos ligeramente y subimos el mapa para compensar la inclinación
-                        // y evitar el hueco blanco en la parte superior.
-                        scaleX = 1f + (0.3f * perspectiveProgress)
-                        scaleY = 1f + (0.3f * perspectiveProgress)
-                        translationY = -(size.height * 0.15f * perspectiveProgress)
+                        // Escalamos más agresivamente para que el mapa cubra todo el fondo 
+                        // y compensar el estrechamiento lateral de la perspectiva.
+                        scaleX = 1f + (0.6f * perspectiveProgress)
+                        scaleY = 1f + (0.6f * perspectiveProgress)
+                        
+                        // Subimos el mapa para ocultar el área vacía superior
+                        translationY = -(size.height * 0.25f * perspectiveProgress)
                         
                         clip = false
                     }
@@ -694,9 +696,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
                 if (isRouteActive) {
                     isFollowingLocation = true
-                    view.setMapCenterOffset(0, 0) // Centrar auto (más arriba) para no taparlo con el HUD
+                    // Movemos el offset al fondo (Y positivo) para que el mapa cargue 
+                    // muchísimas más baldosas hacia adelante (hacia el horizonte)
+                    view.setMapCenterOffset(0, (view.height * 0.35f).toInt())
                 } else {
-                    view.setMapCenterOffset(0, view.height / 4) // Volver al offset normal de "launcher"
+                    view.setMapCenterOffset(0, view.height / 4)
                 }
 
                 // Actualizar color de la polilínea si existe
@@ -717,9 +721,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     if (file.exists()) {
                                         val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                         android.graphics.Bitmap.createScaledBitmap(bmp, 120, 120, true)
-                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor) }
-                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor) }
-                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor) }
+                                    } else { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.6f else 1.0f) }
+                                } catch (e: Exception) { drawVehicleBitmap(view.context, "SEDAN", mapIconColor, if (isRouteActive) 1.6f else 1.0f) }
+                            } else { drawVehicleBitmap(view.context, vehicleType, mapIconColor, if (isRouteActive) 1.6f else 1.0f) }
                             
                             icon = android.graphics.drawable.BitmapDrawable(view.context.resources, iconBitmap)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -1315,8 +1319,10 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
  * tinted with [color]. Other types fall back to Canvas-drawn primitives.
  * [color] should come from AppSettings.mapIconColor — independent of the UI accent color.
  */
-internal fun drawVehicleBitmap(context: Context, type: String, color: Int): Bitmap {
-    val size = 160 // Aumentamos el tamaño base para mejor visibilidad en 3D
+internal fun drawVehicleBitmap(context: Context, type: String, color: Int, heightScale: Float = 1.0f): Bitmap {
+    val width = 160
+    val height = (160 * heightScale).toInt() 
+    // Altura compensada para que no se vea "aplastado" por la inclinación 3D
 
     // Try to render from Vector Drawable for SEDAN and HATCHBACK
     val drawableResId = when (type) {
@@ -1329,16 +1335,15 @@ internal fun drawVehicleBitmap(context: Context, type: String, color: Int): Bitm
         val vd = VectorDrawableCompat.create(context.resources, drawableResId, null)
         if (vd != null) {
             vd.setTint(color)
-            val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val b = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(b)
-            vd.setBounds(0, 0, size, size)
+            vd.setBounds(0, 0, width, height)
             vd.draw(canvas)
             return b
         }
     }
 
-    // Fallback: Canvas-drawn primitives for SPORT, TRUCK, and any unknown type
-    val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val b = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(b)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
     p.color = color
@@ -1347,20 +1352,20 @@ internal fun drawVehicleBitmap(context: Context, type: String, color: Int): Bitm
     when (type) {
         "SPORT" -> {
             val path = Path()
-            path.moveTo(60f, 10f)
-            path.lineTo(20f, 100f)
-            path.lineTo(60f, 85f)
-            path.lineTo(100f, 100f)
+            path.moveTo(width/2f, 10f)
+            path.lineTo(20f, height.toFloat() - 10f)
+            path.lineTo(width/2f, height.toFloat() - 25f)
+            path.lineTo(width.toFloat() - 20f, height.toFloat() - 10f)
             path.close()
             canvas.drawPath(path, p)
         }
-        "TRUCK" -> canvas.drawRect(30f, 20f, 90f, 100f, p)
+        "TRUCK" -> canvas.drawRect(30f, 20f, width - 30f, height.toFloat() - 10f, p)
         else -> {
             val path = Path()
-            path.moveTo(60f, 15f)
-            path.lineTo(25f, 105f)
-            path.lineTo(60f, 90f)
-            path.lineTo(95f, 105f)
+            path.moveTo(width/2f, 15f)
+            path.lineTo(25f, height.toFloat() - 15f)
+            path.lineTo(width/2f, height.toFloat() - 30f)
+            path.lineTo(width.toFloat() - 25f, height.toFloat() - 15f)
             path.close()
             canvas.drawPath(path, p)
         }
