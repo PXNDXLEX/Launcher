@@ -640,19 +640,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             return true
                         }
                     }
-                    // Actualizar estado de gestos según si hay ruta activa
-                val isRouteActive = NavigationState.isRouteActive.value
-                view.overlays.forEach { 
-                    if (it is RotationGestureOverlay) {
-                        it.isEnabled = !isRouteActive // Bloquear rotación manual en ruta
-                    }
-                }
-                
-                if (isRouteActive) {
-                    isFollowingLocation = true // Forzar seguimiento siempre en ruta
-                }
-
-                // Configurar fuente de tiles según estilo
+                    // Configurar fuente de tiles según estilo
                     setTileSource(CustomMapSource.create(currentStyle))
 
                     overlays.add(MapEventsOverlay(mReceive))
@@ -688,6 +676,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     else -> {
                         view.overlayManager.tilesOverlay.setColorFilter(null)
                     }
+                }
+
+                // Bloquear gestos manuales y forzar seguimiento si hay ruta activa
+                val isRouteActive = NavigationState.isRouteActive.value
+                view.overlays.forEach { overlay ->
+                    if (overlay is org.osmdroid.views.overlay.gestures.RotationGestureOverlay) {
+                        overlay.isEnabled = !isRouteActive
+                    }
+                }
+                if (isRouteActive) {
+                    isFollowingLocation = true
                 }
 
                 // Actualizar color de la polilínea si existe
