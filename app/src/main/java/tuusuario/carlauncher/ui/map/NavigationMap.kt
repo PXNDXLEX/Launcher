@@ -506,10 +506,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 .fillMaxSize()
                 .graphicsLayer {
                     if (perspectiveProgress > 0f) {
-                        // Perspectiva 3D simulada: inclinar la vista como Google Maps en navegación
-                        rotationX = 28f * perspectiveProgress
-                        cameraDistance = 10f * density
-                        translationY = -(size.height * 0.09f * perspectiveProgress)
+                        // Perspectiva 3D: inclinamos desde la base para que el horizonte se aleje
+                        rotationX = 35f * perspectiveProgress
+                        cameraDistance = 8f * density
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                        clip = false
                     }
                 },
             factory = { ctx ->
