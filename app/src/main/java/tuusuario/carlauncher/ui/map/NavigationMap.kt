@@ -539,6 +539,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     overlays.add(rotationGestureOverlay)
                     
                     setOnTouchListener { _, event ->
+                        if (NavigationState.isRouteActive.value) {
+                            // En modo ruta, ignoramos toques para no perder el seguimiento automático,
+                            // pero dejamos que el MapView procese para permitir el Zoom.
+                            return@setOnTouchListener false
+                        }
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                                 isFollowingLocation = false
@@ -562,6 +567,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                     addMapListener(object : MapListener {
                         override fun onScroll(event: ScrollEvent?): Boolean {
+                            if (NavigationState.isRouteActive.value) return false // Bloquear scroll en ruta
                             if (event != null && (event.x != 0 || event.y != 0)) {
                                 if (isFollowingLocation) {
                                     isFollowingLocation = false
@@ -634,7 +640,19 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             return true
                         }
                     }
-                    // Configurar fuente de tiles según estilo
+                    // Actualizar estado de gestos según si hay ruta activa
+                val isRouteActive = NavigationState.isRouteActive.value
+                view.overlays.forEach { 
+                    if (it is RotationGestureOverlay) {
+                        it.isEnabled = !isRouteActive // Bloquear rotación manual en ruta
+                    }
+                }
+                
+                if (isRouteActive) {
+                    isFollowingLocation = true // Forzar seguimiento siempre en ruta
+                }
+
+                // Configurar fuente de tiles según estilo
                     setTileSource(CustomMapSource.create(currentStyle))
 
                     overlays.add(MapEventsOverlay(mReceive))
