@@ -674,7 +674,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                             destMarker?.let { map.removeMarker(it) }
                                             
                                             val iconBitmap = drawCustomPin(uiColor)
-                                            val icon = org.maplibre.android.annotations.IconFactory.getInstance(ctx).fromBitmap(iconBitmap)
+                                            val icon = org.maplibre.android.annotations.IconFactory.getInstance(context).fromBitmap(iconBitmap)
                                             
                                             destMarker = map.addMarker(org.maplibre.android.annotations.MarkerOptions()
                                                 .position(dest)
