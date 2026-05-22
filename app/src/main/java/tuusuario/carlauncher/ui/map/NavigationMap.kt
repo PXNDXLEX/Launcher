@@ -371,18 +371,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             coroutineScope.launch {
                 routeDistanceText = "Calculando ruta..."
                 try {
-                    val body = """{"locations":[{"lon":${startGeo.longitude()},"lat":${startGeo.latitude()}},{"lon":${destGeo.longitude()},"lat":${destGeo.latitude()}}],"costing":"auto","directions_options":{"language":"es-ES"}}"""
+                    val mapboxToken = context.getString(R.string.mapbox_access_token)
+                    val urlStr = "https://api.mapbox.com/directions/v5/mapbox/driving/${startGeo.longitude()},${startGeo.latitude()};${destGeo.longitude()},${destGeo.latitude()}?alternatives=false&geometries=geojson&language=es&overview=full&steps=true&access_token=$mapboxToken"
                     val result = withContext(Dispatchers.IO) {
-                        val url = URL("https://valhalla1.openstreetmap.de/route")
+                        val url = URL(urlStr)
                         val conn = url.openConnection() as HttpURLConnection
-                        conn.requestMethod = "POST"
-                        conn.setRequestProperty("Content-Type", "application/json")
+                        conn.requestMethod = "GET"
                         conn.setRequestProperty("User-Agent", "CarLauncherApp")
                         conn.connectTimeout = 10000
                         conn.readTimeout = 10000
-                        conn.doOutput = true
                         try {
-                            conn.outputStream.use { it.write(body.toByteArray()) }
                             val code = conn.responseCode
                             if (code >= 400) {
                                 val err = conn.errorStream?.bufferedReader()?.readText() ?: "Error $code"
@@ -393,39 +391,48 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
 
                     NavigationState.cachedRouteJson.value = result
-                    val json    = JSONObject(result)
-                    val trip    = json.getJSONObject("trip")
-                    val summary = trip.getJSONObject("summary")
-                    val distKm  = summary.getDouble("length")
-                    routeDistanceText = if (distKm > 1.0)
-                        String.format("%.1f km restantes", distKm)
-                    else
-                        "${(distKm * 1000).toInt()} m restantes"
+                    val json   = JSONObject(result)
+                    val routes = json.getJSONArray("routes")
+                    if (routes.length() > 0) {
+                        val route  = routes.getJSONObject(0)
+                        val distKm = route.getDouble("distance") / 1000.0
+                        routeDistanceText = if (distKm > 1.0)
+                            String.format("%.1f km restantes", distKm)
+                        else
+                            "${(distKm * 1000).toInt()} m restantes"
 
-                    val legs = trip.getJSONArray("legs")
-                    if (legs.length() > 0) {
-                        val leg     = legs.getJSONObject(0)
-                        val decoded = decodePolyline6(leg.getString("shape"))
+                        // Parsear geometría GeoJSON directamente
+                        val geometry = route.getJSONObject("geometry")
+                        val coordinates = geometry.getJSONArray("coordinates")
                         currentRoutePoints.clear()
-                        currentRoutePoints.addAll(decoded)
+                        for (i in 0 until coordinates.length()) {
+                            val coord = coordinates.getJSONArray(i)
+                            currentRoutePoints.add(Point.fromLngLat(coord.getDouble(0), coord.getDouble(1)))
+                        }
 
                         activeRouteSteps.clear()
-                        val maneuvers = leg.getJSONArray("maneuvers")
-                        for (i in 0 until maneuvers.length()) {
-                            val m = maneuvers.getJSONObject(i)
-                            val (manType, manMod) = valhallaTypeToOsrmStyle(m.getInt("type"))
-                            val shapeIdx  = m.getInt("begin_shape_index")
-                            val stepPoint = if (shapeIdx < decoded.size) decoded[shapeIdx] else decoded.first()
-                            val names     = m.optJSONArray("street_names")
-                            val streetName = if (names != null && names.length() > 0) names.getString(0) else ""
-                            activeRouteSteps.add(RouteStep(
-                                maneuverType = manType,
-                                modifier     = manMod,
-                                distance     = m.getDouble("length") * 1000.0,
-                                streetName   = streetName,
-                                maneuverLat  = stepPoint.latitude(),   // Point usa latitude()
-                                maneuverLon  = stepPoint.longitude()   // Point usa longitude()
-                            ))
+                        val legs = route.getJSONArray("legs")
+                        if (legs.length() > 0) {
+                            val leg   = legs.getJSONObject(0)
+                            val steps = leg.getJSONArray("steps")
+                            for (i in 0 until steps.length()) {
+                                val step     = steps.getJSONObject(i)
+                                val maneuver = step.getJSONObject("maneuver")
+                                val locArray = maneuver.getJSONArray("location")
+                                
+                                val manType    = maneuver.optString("type", "turn")
+                                val manMod     = maneuver.optString("modifier", "straight")
+                                val streetName = step.optString("name", "")
+                                
+                                activeRouteSteps.add(RouteStep(
+                                    maneuverType = manType,
+                                    modifier     = manMod,
+                                    distance     = step.getDouble("distance"),
+                                    streetName   = streetName,
+                                    maneuverLat  = locArray.getDouble(1),
+                                    maneuverLon  = locArray.getDouble(0)
+                                ))
+                            }
                         }
                     }
 
@@ -1199,44 +1206,4 @@ fun drawCustomPin(color: Int): Bitmap {
     return b
 }
 
-// ── Decodificador de polyline Valhalla (precisión 6) ─────────────────────────
-// Retorna List<Point> de Mapbox GeoJSON (lng, lat)
-
-fun decodePolyline6(encoded: String): List<Point> {
-    val points = mutableListOf<Point>()
-    var index  = 0; var lat = 0; var lng = 0
-    while (index < encoded.length) {
-        var b: Int; var shift = 0; var result = 0
-        do { b = encoded[index++].code - 63; result = result or ((b and 0x1f) shl shift); shift += 5 } while (b >= 0x20)
-        val dLat = if ((result and 1) != 0) (result shr 1).inv() else result shr 1; lat += dLat
-        shift = 0; result = 0
-        do { b = encoded[index++].code - 63; result = result or ((b and 0x1f) shl shift); shift += 5 } while (b >= 0x20)
-        val dLng = if ((result and 1) != 0) (result shr 1).inv() else result shr 1; lng += dLng
-        // Mapbox Point.fromLngLat(longitude, latitude)
-        points.add(Point.fromLngLat(lng.toDouble() / 1e6, lat.toDouble() / 1e6))
-    }
-    return points
-}
-
-// ── Conversión de tipos de maniobra Valhalla → OSRM ─────────────────────────
-
-fun valhallaTypeToOsrmStyle(type: Int): Pair<String, String> = when (type) {
-    1, 2, 3   -> "depart"           to "straight"
-    4, 5, 6   -> "arrive"           to "straight"
-    7, 8      -> "continue"         to "straight"
-    9         -> "turn"             to "slight right"
-    10        -> "turn"             to "right"
-    11        -> "turn"             to "sharp right"
-    12, 13    -> "turn"             to "uturn"
-    14        -> "turn"             to "sharp left"
-    15        -> "turn"             to "left"
-    16        -> "turn"             to "slight left"
-    17        -> "turn"             to "straight"
-    18        -> "turn"             to "right"
-    19        -> "turn"             to "left"
-    20        -> "turn"             to "slight right"
-    21        -> "turn"             to "slight left"
-    24        -> "roundabout"       to "right"
-    25        -> "exit roundabout"  to "straight"
-    else      -> "turn"             to "straight"
-}
+// (Removidos decodePolyline6 y valhallaTypeToOsrmStyle porque Mapbox Directions API retorna GeoJSON y estilos de maniobra OSRM nativos)
