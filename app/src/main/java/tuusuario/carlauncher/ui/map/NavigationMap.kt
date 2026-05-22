@@ -341,7 +341,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             drawVehicleBitmap(context, AppSettings.vehicleType.value, mapIconColor)
                         }
                     } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
-                    bearingImage = android.graphics.drawable.BitmapDrawable(context.resources, bmp)
+                    bearingImage = com.mapbox.maps.ImageHolder.from(bmp)
                 }
             }
 
@@ -635,7 +635,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
         mapView.location.updateSettings {
             locationPuck = com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck(withBearing = true).apply {
-                bearingImage = android.graphics.drawable.BitmapDrawable(context.resources, bmp)
+                bearingImage = com.mapbox.maps.ImageHolder.from(bmp)
             }
         }
     }
@@ -984,7 +984,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     val dest = selectedDestination!!
                                     calculateRoute(
                                         Point.fromLngLat(loc.longitude, loc.latitude),
-                                        Point.fromLngLat(dest.longitude, dest.latitude)
+                                        Point.fromLngLat(dest.longitude(), dest.latitude())
                                     )
                                 }
                             },
