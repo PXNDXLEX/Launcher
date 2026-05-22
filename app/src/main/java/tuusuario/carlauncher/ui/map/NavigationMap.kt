@@ -510,22 +510,34 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 NavigationState.currentLocation.value = loc
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = loc.speed * 3.6f
 
+                // ── Auto-centrado al iniciar ──────────────────────────────
+                if (!hasInitializedPosition && loc.latitude != 0.0) {
+                    hasInitializedPosition = true
+                    val vp = mapView.viewport
+                    val followState = vp.makeFollowPuckViewportState(
+                        FollowPuckViewportStateOptions.Builder()
+                            .pitch(60.0)
+                            .zoom(18.5)
+                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .build()
+                    )
+                    vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                }
+
                 // Animar el LocationComponent del mapa es automático via el plugin;
                 // aquí actualizamos la cámara si estamos en modo seguimiento sin ruta activa
                 val isRouteActive = NavigationState.isRouteActive.value
                 if (!isRouteActive && isFollowingLocation && hasInitializedPosition) {
                     val vp = mapView.viewport
-                    // Solo actualizar la cámara manualmente si el viewport no está en follow mode
                     if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
-                        mapView.camera.easeTo(
-                            cameraOptions {
-                                center(Point.fromLngLat(loc.longitude, loc.latitude))
-                                zoom(18.2)
-                                bearing(targetBearing.toDouble())
-                                pitch(0.0)
-                            },
-                            MapAnimationOptions.mapAnimationOptions { duration(900) }
+                        val followState = vp.makeFollowPuckViewportState(
+                            FollowPuckViewportStateOptions.Builder()
+                                .pitch(60.0)
+                                .zoom(18.5)
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .build()
                         )
+                        vp.transitionTo(followState, vp.makeDefaultViewportTransition())
                     }
                 }
 
@@ -680,14 +692,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         override fun onMoveEnd(detector: com.mapbox.android.gestures.MoveGestureDetector) {}
                     })
 
-                    // Primera posición
+                    // Primera posición - Se manejará en onLocationResult
                     NavigationState.currentLocation.value?.let { loc ->
-                        mapboxMap.setCamera(cameraOptions {
-                            center(Point.fromLngLat(loc.longitude, loc.latitude))
-                            zoom(18.2)
-                            pitch(0.0)
-                        })
-                        hasInitializedPosition = true
+                        if (!hasInitializedPosition) {
+                            mapboxMap.setCamera(cameraOptions {
+                                center(Point.fromLngLat(loc.longitude, loc.latitude))
+                                zoom(18.5)
+                                pitch(60.0)
+                            })
+                            hasInitializedPosition = true
+                        }
                     }
                 }
             },
@@ -1109,6 +1123,7 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
 // ── Helper para LocationPuck (3D o 2D) ───────────────────────────────────
 fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int, scale: Float = 4f): com.mapbox.maps.plugin.LocationPuck {
     val modelAsset = when (vehicleType) {
+        "FLECHA"    -> "asset://models/Arrow.glb"
         "SEDAN"     -> "asset://models/Sedan.glb"
         "HATCHBACK" -> "asset://models/Hatchback.glb"
         "SPORT"     -> "asset://models/Sports.glb"
