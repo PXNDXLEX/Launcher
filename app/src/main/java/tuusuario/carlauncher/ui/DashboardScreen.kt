@@ -383,7 +383,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
                                     }
-                                    }
                                 }
                                 
                                 Spacer(modifier = Modifier.height(8.dp))
