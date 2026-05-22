@@ -64,8 +64,9 @@ fun SpeedometerWidget() {
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
         val isBatterySaver = AppSettings.batterySaverMode.value
-        val interval = if (isBatterySaver) 3000L else 1000L
-        val minInterval = if (isBatterySaver) 2000L else 500L
+        // 100ms en modo normal para máxima respuesta del velocímetro
+        val interval = if (isBatterySaver) 3000L else 100L
+        val minInterval = if (isBatterySaver) 2000L else 50L
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
             .setMinUpdateIntervalMillis(minInterval)
             .build()
@@ -89,7 +90,7 @@ fun SpeedometerWidget() {
 
     val animatedSpeed by animateFloatAsState(
         targetValue = speed,
-        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
         label = "SpeedAnimation"
     )
 

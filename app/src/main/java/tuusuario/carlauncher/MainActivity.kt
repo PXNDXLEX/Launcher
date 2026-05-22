@@ -69,8 +69,7 @@ class MainActivity : ComponentActivity() {
             MusicNotificationService.reconnect(this)
         }
 
-        // MapLibre is initialized natively by the SDK
-        org.maplibre.android.MapLibre.getInstance(this)
+        // Mapbox SDK v11 se inicializa automáticamente via com.mapbox.token en AndroidManifest
 
         AppSettings.init(this)
         

@@ -58,9 +58,9 @@ dependencies {
     // GPS para el velocímetro
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
-    // MapLibre GL Native (Reemplaza a OSMDroid para 3D nativo y aceleración hardware)
-    implementation("org.maplibre.gl:android-sdk:11.5.2")
-    implementation("org.maplibre.gl:android-plugin-annotation-v9:3.0.2")
+    // Mapbox Maps SDK v11 (reemplaza a MapLibre)
+    implementation("com.mapbox.maps:android:11.9.0")
+
     // Coil for Image & GIF support
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-gif:2.6.0")
@@ -81,4 +81,4 @@ dependencies {
     // VectorDrawableCompat para renderizar SVGs/AVDs tintados en el mapa
     implementation("androidx.vectordrawable:vectordrawable:1.1.0")
 
-}
+}

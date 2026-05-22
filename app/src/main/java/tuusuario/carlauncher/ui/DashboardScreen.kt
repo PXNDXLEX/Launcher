@@ -54,14 +54,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.annotations.PolylineOptions
-import org.maplibre.android.annotations.MarkerOptions
-import com.tuusuario.carlauncher.ui.map.getRasterStyleJson
+import com.mapbox.geojson.Point
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.LineString
+import com.mapbox.maps.MapView
+import com.mapbox.maps.Style
+import com.mapbox.maps.dsl.cameraOptions
+import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.generated.lineLayer
+import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
+import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
+import com.mapbox.maps.extension.style.sources.addSource
+import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
+import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
+import com.mapbox.maps.plugin.animation.MapAnimationOptions
+import com.mapbox.maps.plugin.animation.camera
+import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.camera.view.PreviewView
 import java.time.LocalDateTime
@@ -93,11 +104,12 @@ object NavigationState {
     val selectedDashcamRoute = mutableStateOf<List<com.tuusuario.carlauncher.services.RoutePoint>?>(null)
     
     // ── ACTIVE NAVIGATION (persists across tab switches) ──
-    val activeDestination = mutableStateOf<LatLng?>(null)
-    val activeRoutePoints = mutableStateListOf<LatLng>()
+    // Usamos Point de Mapbox GeoJSON como tipo estándar de coordenada
+    val activeDestination = mutableStateOf<Point?>(null)
+    val activeRoutePoints = mutableStateListOf<Point>()
     val activeRouteDistance = mutableStateOf("")
     val activeRouteSteps = mutableStateListOf<RouteStep>()
-    val cachedRouteJson = mutableStateOf<String?>(null)  // Full OSRM response for offline cache
+    val cachedRouteJson = mutableStateOf<String?>(null)
     val isRouteActive = mutableStateOf(false)
     
     /** Selected segment for history viewing */
@@ -907,14 +919,14 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
         Spacer(modifier = Modifier.height(16.dp))
         Text("Zonas Seguras (Offline)", fontWeight = FontWeight.Bold, fontSize = 20.sp)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("MapLibre ahora gestiona el caché de los mapas vectoriales y satelitales automáticamente en 3D de manera súper eficiente. Solo navega una vez por tu zona y quedará guardada sin necesidad de descargas manuales pesadas.", 
+        Text("Mapbox gestiona el caché de los mapas vectoriales y satelitales automáticamente en 3D de manera súper eficiente. Solo navega una vez por tu zona y quedará guardada sin necesidad de descargas manuales pesadas.", 
             fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
             onClick = {
-                Toast.makeText(context, "Caché Automático Activado por MapLibre", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Caché Automático Activado por Mapbox", Toast.LENGTH_SHORT).show()
             },
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
@@ -1007,54 +1019,35 @@ fun DashboardMediaWidget(showYoutubeInDashboard: Boolean, youtubeContent: @Compo
 @Composable
 fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val historyRoute = NavigationState.selectedHistoryRoute.value
+    val historyRoute   = NavigationState.selectedHistoryRoute.value
     val historySegment = NavigationState.selectedHistorySegment.value
-    val dashcamRoute = NavigationState.selectedDashcamRoute.value
+    val dashcamRoute   = NavigationState.selectedDashcamRoute.value
 
-    val routePoints: List<LatLng> = remember(historyRoute, historySegment, dashcamRoute) {
+    val routePoints: List<Point> = remember(historyRoute, historySegment, dashcamRoute) {
         when {
-            historySegment != null -> historySegment.points.map { LatLng(it.lat, it.lon) }
-            historyRoute != null -> historyRoute.segments.flatMap { seg -> seg.points.map { LatLng(it.lat, it.lon) } }
-            dashcamRoute != null -> dashcamRoute.map { LatLng(it.lat, it.lon) }
+            historySegment != null -> historySegment.points.map { Point.fromLngLat(it.lon, it.lat) }
+            historyRoute   != null -> historyRoute.segments.flatMap { seg -> seg.points.map { Point.fromLngLat(it.lon, it.lat) } }
+            dashcamRoute   != null -> dashcamRoute.map { Point.fromLngLat(it.lon, it.lat) }
             else -> emptyList()
         }
     }
 
-    val routeColor = if (historyRoute != null)
-        android.graphics.Color.parseColor("#4CAF50")
-    else
-        android.graphics.Color.parseColor("#FF9800")
+    val routeColorHex = if (historyRoute != null) "#4CAF50" else "#FF9800"
 
     val routeTitle = when {
-        historySegment != null -> "Segmento ${historySegment.startTime}—${historySegment.endTime} · ${historySegment.points.size} puntos"
-        historyRoute != null -> {
+        historySegment != null -> "Segmento ${historySegment.startTime}\u2014${historySegment.endTime} \u00b7 ${historySegment.points.size} puntos"
+        historyRoute   != null -> {
             val totalPts = historyRoute.segments.sumOf { it.points.size }
-            "Ruta del ${historyRoute.date} · $totalPts puntos"
+            "Ruta del ${historyRoute.date} \u00b7 $totalPts puntos"
         }
-        dashcamRoute != null -> "Ruta de Video · ${dashcamRoute.size} puntos"
+        dashcamRoute != null -> "Ruta de Video \u00b7 ${dashcamRoute.size} puntos"
         else -> ""
     }
 
+    // MapView de Mapbox para el diálogo
     val mapView = remember { MapView(context) }
-    var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
 
-    LaunchedEffect(mapLibreMap, routePoints) {
-        val map = mapLibreMap ?: return@LaunchedEffect
-        if (routePoints.isNotEmpty()) {
-            delay(500)
-            try {
-                if (routePoints.size > 1) {
-                    val builder = LatLngBounds.Builder()
-                    routePoints.forEach { builder.include(it) }
-                    map.moveCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100))
-                } else if (routePoints.size == 1) {
-                    map.moveCamera(CameraUpdateFactory.newLatLngZoom(routePoints.first(), 16.0))
-                }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    Dialog(
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
@@ -1068,29 +1061,49 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
                         mapView.apply {
-                            getMapAsync { map ->
-                                mapLibreMap = map
-                                map.setStyle(Style.Builder().fromJson(getRasterStyleJson("LIGHT"))) {
-                                    if (routePoints.isNotEmpty()) {
-                                        val polylineOptions = PolylineOptions()
-                                            .addAll(routePoints)
-                                            .color(routeColor)
-                                            .width(5f)
-                                        map.addPolyline(polylineOptions)
-
-                                        val startMarker = MarkerOptions()
-                                            .position(routePoints.first())
-                                            .title("Inicio")
-                                        val endMarker = MarkerOptions()
-                                            .position(routePoints.last())
-                                            .title("Fin")
-                                        
-                                        map.addMarker(startMarker)
-                                        map.addMarker(endMarker)
+                            mapboxMap.loadStyle(Style.MAPBOX_STREETS) { style ->
+                                // Fuente de ruta
+                                style.addSource(geoJsonSource("dialog-route-src") {
+                                    if (routePoints.size >= 2) {
+                                        featureCollection(
+                                            FeatureCollection.fromFeature(
+                                                Feature.fromGeometry(LineString.fromLngLats(routePoints))
+                                            )
+                                        )
+                                    } else {
+                                        featureCollection(FeatureCollection.fromFeatures(emptyList()))
                                     }
+                                })
+                                // Capa de ruta
+                                style.addLayer(lineLayer("dialog-route-layer", "dialog-route-src") {
+                                    lineColor(routeColorHex)
+                                    lineWidth(5.0)
+                                    lineCap(LineCap.ROUND)
+                                    lineJoin(LineJoin.ROUND)
+                                })
+
+                                // Marcadores inicio/fin
+                                if (routePoints.isNotEmpty()) {
+                                    val pm = annotations.createPointAnnotationManager()
+                                    val pinBmp = com.tuusuario.carlauncher.ui.map.drawCustomPin(
+                                        android.graphics.Color.parseColor(routeColorHex)
+                                    )
+                                    pm.create(PointAnnotationOptions().withPoint(routePoints.first()).withIconImage(pinBmp))
+                                    if (routePoints.size > 1) {
+                                        pm.create(PointAnnotationOptions().withPoint(routePoints.last()).withIconImage(pinBmp))
+                                    }
+
+                                    // Ajustar cámara a la ruta
+                                    val lngValues = routePoints.map { it.longitude() }
+                                    val latValues = routePoints.map { it.latitude() }
+                                    val centerLng = (lngValues.min() + lngValues.max()) / 2.0
+                                    val centerLat = (latValues.min() + latValues.max()) / 2.0
+                                    mapboxMap.setCamera(cameraOptions {
+                                        center(Point.fromLngLat(centerLng, centerLat))
+                                        zoom(14.0)
+                                        pitch(0.0)
+                                    })
                                 }
-                                map.uiSettings.isAttributionEnabled = false
-                                map.uiSettings.isLogoEnabled = false
                             }
                         }
                     }
