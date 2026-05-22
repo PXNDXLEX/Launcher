@@ -328,21 +328,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 pulsingColor = android.graphics.Color.parseColor(
                     when (style) { "NEON" -> "#FF9100"; else -> "#2979FF" }
                 )
-                locationPuck = com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck(withBearing = true).apply {
-                    // Usamos bitmap custom del vehículo
-                    val bmp = try {
-                        val customPath = AppSettings.customVehicleIconPath.value
-                        if (AppSettings.vehicleType.value == "CUSTOM" && customPath.isNotEmpty()) {
-                            val file = java.io.File(customPath)
-                            if (file.exists()) android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                                .let { android.graphics.Bitmap.createScaledBitmap(it, 120, 120, true) }
-                            else drawVehicleBitmap(context, "SEDAN", mapIconColor)
-                        } else {
-                            drawVehicleBitmap(context, AppSettings.vehicleType.value, mapIconColor)
-                        }
-                    } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
-                    bearingImage = com.mapbox.maps.ImageHolder.from(bmp)
-                }
+                locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor)
             }
 
             // Recrear anotaciones si ya hay destino activo
@@ -628,22 +614,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     // ── Reaccionar a cambios de tipo de vehículo/color del ícono ────────────
     LaunchedEffect(vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor) {
         if (!mapReady) return@LaunchedEffect
-        val bmp = try {
-            val customPath = AppSettings.customVehicleIconPath.value
-            if (vehicleType == "CUSTOM" && customPath.isNotEmpty()) {
-                val file = java.io.File(customPath)
-                if (file.exists()) android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                    .let { android.graphics.Bitmap.createScaledBitmap(it, 120, 120, true) }
-                else drawVehicleBitmap(context, "SEDAN", mapIconColor)
-            } else {
-                drawVehicleBitmap(context, vehicleType, mapIconColor)
-            }
-        } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
-
         mapView.location.updateSettings {
-            locationPuck = com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck(withBearing = true).apply {
-                bearingImage = com.mapbox.maps.ImageHolder.from(bmp)
-            }
+            locationPuck = getVehiclePuck(context, vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor)
         }
     }
 
@@ -1134,8 +1106,45 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     } catch (e: Exception) { emptyList() }
 }
 
-// ── Bitmap del vehículo ───────────────────────────────────────────────────────
+// ── Helper para LocationPuck (3D o 2D) ───────────────────────────────────
+fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int): com.mapbox.maps.plugin.locationcomponent.LocationPuck {
+    val modelAsset = when (vehicleType) {
+        "SEDAN"     -> "asset://models/Sedan.glb"
+        "HATCHBACK" -> "asset://models/Hatchback.glb"
+        "SPORT"     -> "asset://models/Sports.glb"
+        // Si tienes "TAXI" en tus opciones futuras, aquí se mapeará
+        "TAXI"      -> "asset://models/Taxi.glb"
+        else        -> null
+    }
 
+    if (modelAsset != null) {
+        return com.mapbox.maps.plugin.locationcomponent.LocationPuck3D(
+            modelUri = modelAsset,
+            // Escala inicial de 4f. Si el auto se ve muy grande o pequeño, cambiaremos esto.
+            modelScale = listOf(4f, 4f, 4f),
+            // Rotación inicial, a veces los modelos apuntan hacia +Y o +X, si maneja de lado ajustaremos modelRotation
+            modelRotation = listOf(0f, 0f, 0f)
+        )
+    }
+
+    // Fallback a 2D para TRUCK o CUSTOM
+    val bmp = try {
+        if (vehicleType == "CUSTOM" && customPath.isNotEmpty()) {
+            val file = java.io.File(customPath)
+            if (file.exists()) android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                .let { android.graphics.Bitmap.createScaledBitmap(it, 120, 120, true) }
+            else drawVehicleBitmap(context, "SEDAN", mapIconColor)
+        } else {
+            drawVehicleBitmap(context, vehicleType, mapIconColor)
+        }
+    } catch (e: Exception) { drawVehicleBitmap(context, "SEDAN", mapIconColor) }
+
+    return com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck(withBearing = true).apply {
+        bearingImage = com.mapbox.maps.ImageHolder.from(bmp)
+    }
+}
+
+// ── Helpers de dibujo (fallback 2D) ───────────────────────────────────────
 fun drawVehicleBitmap(context: Context, type: String, color: Int, heightScale: Float = 1.0f): Bitmap {
     val width  = 140
     val height = (140 * heightScale).toInt()
