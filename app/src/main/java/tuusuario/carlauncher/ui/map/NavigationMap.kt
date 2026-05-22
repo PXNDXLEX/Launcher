@@ -1107,7 +1107,7 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
 }
 
 // ── Helper para LocationPuck (3D o 2D) ───────────────────────────────────
-fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int): com.mapbox.maps.plugin.locationcomponent.LocationPuck {
+fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int): com.mapbox.maps.plugin.LocationPuck {
     val modelAsset = when (vehicleType) {
         "SEDAN"     -> "asset://models/Sedan.glb"
         "HATCHBACK" -> "asset://models/Hatchback.glb"
@@ -1118,7 +1118,7 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
     }
 
     if (modelAsset != null) {
-        return com.mapbox.maps.plugin.locationcomponent.LocationPuck3D(
+        return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
             // Escala inicial de 4f. Si el auto se ve muy grande o pequeño, cambiaremos esto.
             modelScale = listOf(4f, 4f, 4f),
