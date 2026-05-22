@@ -316,14 +316,10 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
     var expandedSection by remember { mutableStateOf("") }
     var showSpeedoCropper by remember { mutableStateOf(false) }
-    var showVehicleCropper by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
     val speedoBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { pendingCropUri = it; showSpeedoCropper = true }
-    }
-    val vehicleIconPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let { pendingCropUri = it; showVehicleCropper = true }
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -376,7 +372,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                             onClick = { expandedSection = if (expandedSection == "vehicle_type") "" else "vehicle_type" }
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("FLECHA", "SEDAN", "HATCHBACK", "CUSTOM").forEach { option ->
+                                listOf("SEDAN", "HATCHBACK", "SPORT", "TAXI").forEach { option ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                             .background(if (AppSettings.vehicleType.value == option) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
@@ -386,22 +382,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                         RadioButton(selected = AppSettings.vehicleType.value == option, onClick = { AppSettings.setVehicleType(option) }, colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary))
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
-                                    }
-                                }
-                            }
-                        }
-
-                        AnimatedVisibility(visible = AppSettings.vehicleType.value == "CUSTOM") {
-                            Column {
-                                SettingsDivider()
-                                SettingsRow(Icons.Default.AddPhotoAlternate, "Imagen Personalizada",
-                                    if (AppSettings.customVehicleIconPath.value.isNotEmpty()) "Imagen configurada ✓" else "Selecciona una imagen",
-                                    onClick = { vehicleIconPicker.launch("image/*") })
-                                if (AppSettings.customVehicleIconPath.value.isNotEmpty()) {
-                                    Row(modifier = Modifier.padding(start = 56.dp, bottom = 8.dp)) {
-                                        TextButton(onClick = { AppSettings.setCustomVehicleIconPath(""); AppSettings.setVehicleType("SEDAN") }) {
-                                            Text("Quitar imagen", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                                        }
                                     }
                                 }
                             }
@@ -609,14 +589,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
             initialCropShape = com.tuusuario.carlauncher.ui.widgets.CropShape.CIRCLE,
             onCropped = { path -> AppSettings.setCustomSpeedoBgPath(path); AppSettings.setCustomSpeedoBgUri(path); showSpeedoCropper = false; pendingCropUri = null },
             onDismiss = { showSpeedoCropper = false; pendingCropUri = null }
-        )
-    }
-    if (showVehicleCropper && pendingCropUri != null) {
-        com.tuusuario.carlauncher.ui.widgets.ImageCropperDialog(
-            imageUri = pendingCropUri!!, outputFileName = "custom_vehicle.png",
-            initialCropShape = com.tuusuario.carlauncher.ui.widgets.CropShape.CIRCLE,
-            onCropped = { path -> AppSettings.setCustomVehicleIconPath(path); showVehicleCropper = false; pendingCropUri = null },
-            onDismiss = { showVehicleCropper = false; pendingCropUri = null }
         )
     }
 }
