@@ -383,7 +383,17 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
                                     }
+                                    }
                                 }
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Escala del modelo 3D: ${String.format("%.1f", AppSettings.vehicle3DScale.value)}", fontSize = 14.sp)
+                                Slider(
+                                    value = AppSettings.vehicle3DScale.value,
+                                    onValueChange = { AppSettings.setVehicle3DScale(it) },
+                                    valueRange = 0.1f..50f,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                                )
                             }
                         }
                         SettingsDivider()

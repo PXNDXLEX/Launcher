@@ -328,7 +328,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 pulsingColor = android.graphics.Color.parseColor(
                     when (style) { "NEON" -> "#FF9100"; else -> "#2979FF" }
                 )
-                locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor)
+                locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
             }
 
             // Recrear anotaciones si ya hay destino activo
@@ -611,11 +611,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         updateDashcamOnMap()
     }
 
-    // ── Reaccionar a cambios de tipo de vehículo/color del ícono ────────────
-    LaunchedEffect(vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor) {
+    // ── Reaccionar a cambios de tipo de vehículo/escala/color ────────────
+    LaunchedEffect(vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value) {
         if (!mapReady) return@LaunchedEffect
         mapView.location.updateSettings {
-            locationPuck = getVehiclePuck(context, vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor)
+            locationPuck = getVehiclePuck(context, vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
         }
     }
 
@@ -1107,7 +1107,7 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
 }
 
 // ── Helper para LocationPuck (3D o 2D) ───────────────────────────────────
-fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int): com.mapbox.maps.plugin.LocationPuck {
+fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int, scale: Float = 4f): com.mapbox.maps.plugin.LocationPuck {
     val modelAsset = when (vehicleType) {
         "SEDAN"     -> "asset://models/Sedan.glb"
         "HATCHBACK" -> "asset://models/Hatchback.glb"
@@ -1120,8 +1120,8 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
     if (modelAsset != null) {
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
-            // Escala inicial de 4f. Si el auto se ve muy grande o pequeño, cambiaremos esto.
-            modelScale = listOf(4f, 4f, 4f),
+            // Escala vinculada al Slider de la UI
+            modelScale = listOf(scale, scale, scale),
             // Rotación inicial, a veces los modelos apuntan hacia +Y o +X, si maneja de lado ajustaremos modelRotation
             modelRotation = listOf(0f, 0f, 0f)
         )

@@ -10,6 +10,7 @@ object AppSettings {
     val speedoStyle = mutableStateOf("PREMIUM")
     val speedoColor = mutableStateOf(Color.parseColor("#007AFF"))
     val vehicleType = mutableStateOf("SEDAN") // Universal vehicle type
+    val vehicle3DScale = mutableStateOf(4f) // Escala del modelo 3D
     val uiColor = mutableStateOf(Color.parseColor("#007AFF"))
     val mapIconColor = mutableStateOf(Color.parseColor("#007AFF")) // Color independiente para el icono en el mapa
     val isDarkMode = mutableStateOf(true)
@@ -40,6 +41,7 @@ object AppSettings {
         speedoStyle.value = prefs?.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
         speedoColor.value = prefs?.getInt("speedoColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
+        vehicle3DScale.value = prefs?.getFloat("vehicle3DScale", 4f) ?: 4f
         uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
@@ -72,6 +74,11 @@ object AppSettings {
     fun setVehicleType(type: String) {
         vehicleType.value = type
         prefs?.edit()?.putString("vehicleType", type)?.apply()
+    }
+
+    fun setVehicle3DScale(scale: Float) {
+        vehicle3DScale.value = scale
+        prefs?.edit()?.putFloat("vehicle3DScale", scale)?.apply()
     }
 
     fun setUiColor(color: Int) {
