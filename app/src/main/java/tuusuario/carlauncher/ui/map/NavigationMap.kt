@@ -159,6 +159,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var isFollowingLocation by rememberSaveable { mutableStateOf(true) }
     // NO usar rememberSaveable aquí: al rotar queremos forzar re-centrado
     var hasInitializedPosition by remember { mutableStateOf(false) }
+    // Solo se reproduce una vez por sesión (no rememberSaveable)
+    var hasPlayedIntro by remember { mutableStateOf(false) }
 
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave     by remember { mutableStateOf("") }
@@ -198,8 +200,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var autoCenterJob     by remember { mutableStateOf<Job?>(null) }
     // Posición donde se desactivó el seguimiento (para reactivar cada 1m)
     var locationWhenFollowDisabled by remember { mutableStateOf<android.location.Location?>(null) }
-    // Indica si el diálogo de favorito está abierto (pausa el auto-recentrado)
-    var isSavingFavorite by remember { mutableStateOf(false) }
+    // Bloquea el auto-recentrado mientras el usuario está interactuando
+    var isSavingFavorite     by remember { mutableStateOf(false) }
+    var isPlacingDestination by remember { mutableStateOf(false) }
+    // Bearing explícito de GPS — actualizado con cada fix válido
+    var gpsBearing by remember { mutableStateOf(0.0) }
 
     var searchQuery      by remember { mutableStateOf("") }
     var searchResults    by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
@@ -507,11 +512,28 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val loc = result.lastLocation ?: return
                 if (loc.hasAccuracy() && loc.accuracy > 40f) return
 
-                // Bearing
-                var targetBearing = lastKnownBearing
-                if (loc.hasBearing() && loc.speed > 0.8f) {
-                    targetBearing    = loc.bearing
-                    lastKnownBearing = targetBearing
+                // Bearing explícito del GPS — umbral bajo para respuesta ágil
+                if (loc.hasBearing() && loc.speed > 0.3f) {
+                    val newBearing = loc.bearing.toDouble()
+                    // Solo actualizar si el cambio es significativo (>3°) para evitar jitter
+                    if (Math.abs(newBearing - gpsBearing) > 3.0 || gpsBearing == 0.0) {
+                        gpsBearing       = newBearing
+                        lastKnownBearing = loc.bearing
+                        // Si estamos en modo seguimiento, forzar actualización del viewport con el nuevo bearing
+                        if (isFollowingLocation && hasInitializedPosition) {
+                            val vp = mapView.viewport
+                            val followState = vp.makeFollowPuckViewportState(
+                                FollowPuckViewportStateOptions.Builder()
+                                    .pitch(55.0)
+                                    .zoom(18.5)
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(newBearing))
+                                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                    .build()
+                            )
+                            // Transición inmediata para que el giro sea fluido
+                            vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                        }
+                    }
                 }
 
                 // Servicios de rastreo
@@ -521,19 +543,69 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 NavigationState.currentLocation.value = loc
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = loc.speed * 3.6f
 
-                // ── Auto-centrado al iniciar ──────────────────────────────
+                // ── Intro cinematográfica al primer fix GPS ─────────────────
                 if (!hasInitializedPosition && loc.latitude != 0.0) {
                     hasInitializedPosition = true
-                    val vp = mapView.viewport
-                    val followState = vp.makeFollowPuckViewportState(
-                        FollowPuckViewportStateOptions.Builder()
-                            .pitch(55.0)
-                            .zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                            .build()
-                    )
-                    vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                    val carPos    = Point.fromLngLat(loc.longitude, loc.latitude)
+                    val carBearing = gpsBearing
+
+                    if (!hasPlayedIntro) {
+                        hasPlayedIntro = true
+                        coroutineScope.launch {
+                            // Fase 1: Vista frontal del auto (cámara enfrente del coche mirando hacia él)
+                            // bearing = dirección del auto + 180° para estar frente a él
+                            mapView.mapboxMap.setCamera(
+                                cameraOptions {
+                                    center(carPos)
+                                    zoom(19.8)
+                                    pitch(82.0)
+                                    bearing(carBearing + 180.0)
+                                }
+                            )
+                            delay(1800) // Admirar el auto
+
+                            // Fase 2: Volar hacia arriba (vista aérea)
+                            mapView.camera.flyTo(
+                                cameraOptions {
+                                    center(carPos)
+                                    zoom(15.5)
+                                    pitch(0.0)
+                                    bearing(0.0)
+                                },
+                                com.mapbox.maps.plugin.animation.MapAnimationOptions
+                                    .mapAnimationOptions { duration(2200) }
+                            )
+                            delay(2400) // Esperar animación + pausa aérea
+
+                            // Fase 3: Transición a vista 3D de conducción
+                            val vp = mapView.viewport
+                            val followState = vp.makeFollowPuckViewportState(
+                                FollowPuckViewportStateOptions.Builder()
+                                    .pitch(55.0)
+                                    .zoom(18.5)
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                    .build()
+                            )
+                            vp.transitionTo(
+                                followState,
+                                vp.makeDefaultViewportTransition(
+                                    DefaultViewportTransitionOptions.Builder().maxDurationMs(1600).build()
+                                )
+                            )
+                        }
+                    } else {
+                        // Si ya se jugó el intro (rotación de pantalla), centrar directamente
+                        val vp = mapView.viewport
+                        val followState = vp.makeFollowPuckViewportState(
+                            FollowPuckViewportStateOptions.Builder()
+                                .pitch(55.0).zoom(18.5)
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                .build()
+                        )
+                        vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                    }
                 }
 
                 // Animar el LocationComponent del mapa es automático via el plugin;
@@ -541,7 +613,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val isRouteActive = NavigationState.isRouteActive.value
 
                 // ── Reactivar seguimiento automático cada 1 metro ─────────
-                if (!isFollowingLocation && hasInitializedPosition && !isSavingFavorite) {
+                val userInteracting = isSavingFavorite || isPlacingDestination
+                if (!isFollowingLocation && hasInitializedPosition && !userInteracting) {
                     val refLoc = locationWhenFollowDisabled
                     if (refLoc != null && loc.distanceTo(refLoc) >= 1f) {
                         isFollowingLocation = true
@@ -552,7 +625,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(55.0)
                                 .zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -567,7 +640,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(55.0)
                                 .zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -651,20 +724,18 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     // ── Re-centrar al cambiar orientación (portrait ↔ landscape) ────────────
     LaunchedEffect(configuration.orientation) {
-        // Al rotar, el mapa pierde el follow; forzamos re-centrado inmediato
         if (hasInitializedPosition && isFollowingLocation) {
             val vp = mapView.viewport
             val followState = vp.makeFollowPuckViewportState(
                 FollowPuckViewportStateOptions.Builder()
                     .pitch(55.0)
                     .zoom(18.5)
-                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                     .build()
             )
             vp.transitionTo(followState, vp.makeDefaultViewportTransition())
         } else if (!hasInitializedPosition) {
-            // Si aún no ha inicializado, forzar re-inicialización
             NavigationState.currentLocation.value?.let { loc ->
                 if (loc.latitude != 0.0) {
                     hasInitializedPosition = true
@@ -672,7 +743,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
                             .pitch(55.0).zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                             .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                             .build()
                     )
@@ -723,9 +794,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             return@addOnMapLongClickListener true
                         }
 
-                        selectedDestination = destPt
-                        routeDistanceText   = ""
-                        isFollowingLocation = false
+                        selectedDestination  = destPt
+                        routeDistanceText    = ""
+                        isFollowingLocation  = false
+                        isPlacingDestination = true   // pausar auto-recentrado
                         autoCenterJob?.cancel()
 
                         // Anotar destino
@@ -745,9 +817,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
 
                     // Detectar gestos del usuario para desactivar el follow mode.
-                    // Se desactiva al empezar a mover el mapa; se vuelve a activar:
-                    //   a) Automáticamente tras moverse 1 metro (si no está guardando favorito)
-                    //   b) A los 5 segundos de soltar el dedo (si no está guardando favorito)
                     gestures.addOnMoveListener(object : com.mapbox.maps.plugin.gestures.OnMoveListener {
                         override fun onMoveBegin(detector: com.mapbox.android.gestures.MoveGestureDetector) {
                             if (isFollowingLocation) {
@@ -759,16 +828,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                         override fun onMove(detector: com.mapbox.android.gestures.MoveGestureDetector) = false
                         override fun onMoveEnd(detector: com.mapbox.android.gestures.MoveGestureDetector) {
-                            // Iniciar cuenta regresiva de 5s para recentrar
+                            // Iniciar cuenta regresiva de 5s para recentrar (pausar si el usuario está interactuando)
                             autoCenterJob?.cancel()
                             autoCenterJob = coroutineScope.launch {
-                                // Esperar 5 segundos, pero pausar si se abre el diálogo de favoritos
                                 var elapsed = 0
                                 while (elapsed < 5000) {
                                     delay(200)
-                                    if (!isSavingFavorite) elapsed += 200
+                                    val userInteracting = isSavingFavorite || isPlacingDestination
+                                    if (!userInteracting) elapsed += 200
                                 }
-                                if (!isSavingFavorite) {
+                                val userInteracting = isSavingFavorite || isPlacingDestination
+                                if (!userInteracting) {
                                     isFollowingLocation = true
                                     locationWhenFollowDisabled = null
                                     val vp = mapView.viewport
@@ -776,7 +846,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         FollowPuckViewportStateOptions.Builder()
                                             .pitch(55.0)
                                             .zoom(18.5)
-                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                                             .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                             .build()
                                     )
@@ -965,61 +1035,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        // ── ETA + velocidad (esquina superior derecha durante navegación) ─────
-        AnimatedVisibility(
-            visible  = NavigationState.isRouteActive.value,
-            enter    = fadeIn() + slideInVertically { -it },
-            exit     = fadeOut() + slideOutVertically { -it },
-            modifier = Modifier.align(Alignment.TopEnd).padding(end = 72.dp, top = 8.dp)
-        ) {
-            val speedKmH = NavigationState.currentSpeedKmH.value
-            // ETA estimada: distancia restante / velocidad actual
-            val totalRemaining = currentRoutePoints.size * 0.02  // aprox 20m por punto en zoom 18.5
-            val etaMin = if (speedKmH > 2f) (totalRemaining / speedKmH * 60).toInt().coerceAtLeast(1) else null
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                shadowElevation = 6.dp,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(uiColor).copy(alpha = 0.3f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text  = "${speedKmH.toInt()} km/h",
-                        fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color(uiColor)
-                    )
-                    if (etaMin != null) {
-                        Text(
-                            text  = "~${etaMin} min",
-                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── Brújula (siempre visible, resetea el bearing a Norte) ────────────
-        AnimatedVisibility(
-            visible  = isFollowingLocation,
-            enter    = fadeIn(),
-            exit     = fadeOut(),
-            modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 68.dp)
-        ) {
-            SmallFloatingActionButton(
-                onClick = {
-                    // Rotar el mapa a norte sin salir del follow
-                    mapView.mapboxMap.setCamera(
-                        cameraOptions { bearing(0.0) }
-                    )
-                },
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                contentColor   = Color(uiColor)
-            ) {
-                Icon(Icons.Default.Explore, "Brújula norte", modifier = Modifier.size(18.dp))
-            }
-        }
+        // (ETA/speed HUD eliminado: ya existe el widget del velocimetro)
 
         // ── FABs de control (derecha) ─────────────────────────────────────────
         Column(
@@ -1057,11 +1073,36 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             }
 
+            // Botón guardar favorito (aparece en FABs cuando hay un pin sin ruta)
+            AnimatedVisibility(
+                visible = !NavigationState.isRouteActive.value
+                    && favoriteLocationToSave != null
+                    && selectedDestination == null
+            ) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        favoriteNameToSave    = ""
+                        favoriteAddressToSave = favoriteLocationToSave?.let {
+                            "${String.format("%.5f", it.latitude())}, ${String.format("%.5f", it.longitude())}"
+                        } ?: ""
+                        selectedIconType       = "Star"
+                        isSavingFavorite       = true
+                        showSaveFavoriteDialog = true
+                        autoCenterJob?.cancel()
+                    },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+                    contentColor   = Color(uiColor)
+                ) {
+                    Icon(Icons.Default.FavoriteBorder, "Guardar en favoritos", modifier = Modifier.size(18.dp))
+                }
+            }
+
             // Botón recentrar — primero vista aérea, luego 3D tras 2 segundos
             AnimatedVisibility(visible = !isFollowingLocation) {
                 FloatingActionButton(
                     onClick = {
-                        isFollowingLocation = true
+                        isFollowingLocation  = true
+                        isPlacingDestination = false
                         locationWhenFollowDisabled = null
                         autoCenterJob?.cancel()
                         val vp = mapView.viewport
@@ -1071,7 +1112,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(0.0)
                                 .zoom(17.0)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                                 .padding(com.mapbox.maps.EdgeInsets(0.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -1084,7 +1125,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 FollowPuckViewportStateOptions.Builder()
                                     .pitch(55.0)
                                     .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
                                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                     .build()
                             )
@@ -1128,8 +1169,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (!NavigationState.isRouteActive.value) {
                         IconButton(
                             onClick  = {
-                                selectedDestination = null
-                                routeDistanceText   = ""
+                                selectedDestination  = null
+                                routeDistanceText    = ""
+                                isPlacingDestination = false
                                 destAnnotation?.let { pointAnnotMgr?.delete(it) }
                                 destAnnotation = null
                             },
@@ -1288,30 +1330,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             )
         }
 
-        // ── Botón guardar favorito (aparece en long-press fuera de ruta) ─────
-        AnimatedVisibility(
-            visible  = !NavigationState.isRouteActive.value && favoriteLocationToSave != null && selectedDestination == null,
-            enter    = fadeIn() + slideInVertically { it },
-            exit     = fadeOut() + slideOutVertically { it },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
-        ) {
-            SmallFloatingActionButton(
-                onClick = {
-                    favoriteNameToSave     = ""
-                    favoriteAddressToSave  = favoriteLocationToSave?.let {
-                        "${String.format("%.5f", it.latitude())}, ${String.format("%.5f", it.longitude())}"
-                    } ?: ""
-                    selectedIconType       = "Star"
-                    isSavingFavorite       = true
-                    showSaveFavoriteDialog = true
-                    autoCenterJob?.cancel()
-                },
-                containerColor = Color(uiColor),
-                contentColor   = Color.White
-            ) {
-                Icon(Icons.Default.FavoriteBorder, "Guardar en favoritos", modifier = Modifier.size(18.dp))
-            }
-        }
+        // ── Botón guardar favorito en long-press desde ruta (pequeño, integrado en FABs) ──
+        // (movido a la columna de FABs, eliminado el botón flotante central)
     }
 }
 
