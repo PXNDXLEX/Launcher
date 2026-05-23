@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -154,13 +155,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     // Estado
     val isMapDarkMode = AppSettings.isMapDarkMode.value
+    val configuration = LocalConfiguration.current  // detectar rotación
     var isFollowingLocation by rememberSaveable { mutableStateOf(true) }
-    var hasInitializedPosition by rememberSaveable { mutableStateOf(false) }
+    // NO usar rememberSaveable aquí: al rotar queremos forzar re-centrado
+    var hasInitializedPosition by remember { mutableStateOf(false) }
 
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave     by remember { mutableStateOf("") }
     var favoriteLocationToSave by remember { mutableStateOf<Point?>(null) }
     var selectedIconType       by remember { mutableStateOf("Star") }
+    var favoriteAddressToSave  by remember { mutableStateOf("") }
 
     // NavigationState compartido
     var selectedDestination by NavigationState.activeDestination
@@ -192,8 +196,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var currentMapRotation by remember { mutableStateOf(0f) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
     var autoCenterJob     by remember { mutableStateOf<Job?>(null) }
-    // Posición donde se desactivó el seguimiento (para reactivar cada 5m)
+    // Posición donde se desactivó el seguimiento (para reactivar cada 1m)
     var locationWhenFollowDisabled by remember { mutableStateOf<android.location.Location?>(null) }
+    // Indica si el diálogo de favorito está abierto (pausa el auto-recentrado)
+    var isSavingFavorite by remember { mutableStateOf(false) }
 
     var searchQuery      by remember { mutableStateOf("") }
     var searchResults    by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
@@ -534,10 +540,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 // aquí actualizamos la cámara si estamos en modo seguimiento sin ruta activa
                 val isRouteActive = NavigationState.isRouteActive.value
 
-                // ── Reactivar seguimiento automático cada 5 metros ────────
-                if (!isFollowingLocation && hasInitializedPosition) {
+                // ── Reactivar seguimiento automático cada 1 metro ─────────
+                if (!isFollowingLocation && hasInitializedPosition && !isSavingFavorite) {
                     val refLoc = locationWhenFollowDisabled
-                    if (refLoc != null && loc.distanceTo(refLoc) >= 5f) {
+                    if (refLoc != null && loc.distanceTo(refLoc) >= 1f) {
                         isFollowingLocation = true
                         locationWhenFollowDisabled = null
                         autoCenterJob?.cancel()
@@ -643,6 +649,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         }
     }
 
+    // ── Re-centrar al cambiar orientación (portrait ↔ landscape) ────────────
+    LaunchedEffect(configuration.orientation) {
+        // Al rotar, el mapa pierde el follow; forzamos re-centrado inmediato
+        if (hasInitializedPosition && isFollowingLocation) {
+            val vp = mapView.viewport
+            val followState = vp.makeFollowPuckViewportState(
+                FollowPuckViewportStateOptions.Builder()
+                    .pitch(55.0)
+                    .zoom(18.5)
+                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                    .build()
+            )
+            vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+        } else if (!hasInitializedPosition) {
+            // Si aún no ha inicializado, forzar re-inicialización
+            NavigationState.currentLocation.value?.let { loc ->
+                if (loc.latitude != 0.0) {
+                    hasInitializedPosition = true
+                    val vp = mapView.viewport
+                    val followState = vp.makeFollowPuckViewportState(
+                        FollowPuckViewportStateOptions.Builder()
+                            .pitch(55.0).zoom(18.5)
+                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                            .build()
+                    )
+                    vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                }
+            }
+        }
+    }
+
     // ── Reaccionar a rutas históricas/dashcam ────────────────────────────────
     LaunchedEffect(NavigationState.selectedHistoryRoute.value, NavigationState.selectedHistorySegment.value) {
         updateHistoryOnMap()
@@ -669,14 +708,25 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     // Inicializar el mapa con el estilo correcto
                     applyMapStyle(currentStyle)
 
-                    // Gestures: long-press para destino
+                    // Gestures: long-press para destino o para guardar favorito
                     gestures.addOnMapLongClickListener { point ->
-                        if (NavigationState.isRouteActive.value) return@addOnMapLongClickListener true
+                        val destPt = point
+                        if (NavigationState.isRouteActive.value) {
+                            // En ruta: abrir diálogo para guardar favorito en esta posición
+                            favoriteLocationToSave = destPt
+                            favoriteNameToSave     = ""
+                            favoriteAddressToSave  = "${String.format("%.5f", destPt.latitude())}, ${String.format("%.5f", destPt.longitude())}"
+                            selectedIconType       = "Star"
+                            isSavingFavorite       = true
+                            showSaveFavoriteDialog = true
+                            autoCenterJob?.cancel()
+                            return@addOnMapLongClickListener true
+                        }
 
-                        val destPt = point   // ya es Point de Mapbox
-                        selectedDestination = destPt  // Point? → Point
+                        selectedDestination = destPt
                         routeDistanceText   = ""
                         isFollowingLocation = false
+                        autoCenterJob?.cancel()
 
                         // Anotar destino
                         destAnnotation?.let { pointAnnotMgr?.delete(it) }
@@ -694,21 +744,46 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         false
                     }
 
-                    // Detectar gestos del usuario para desactivar el follow mode
-                    // Se desactiva siempre que el usuario mueva el mapa manualmente;
-                    // se volverá a activar automáticamente tras moverse 5 metros.
+                    // Detectar gestos del usuario para desactivar el follow mode.
+                    // Se desactiva al empezar a mover el mapa; se vuelve a activar:
+                    //   a) Automáticamente tras moverse 1 metro (si no está guardando favorito)
+                    //   b) A los 5 segundos de soltar el dedo (si no está guardando favorito)
                     gestures.addOnMoveListener(object : com.mapbox.maps.plugin.gestures.OnMoveListener {
                         override fun onMoveBegin(detector: com.mapbox.android.gestures.MoveGestureDetector) {
                             if (isFollowingLocation) {
                                 isFollowingLocation = false
-                                // Guardar la posición actual para medir los 5m
                                 locationWhenFollowDisabled = NavigationState.currentLocation.value
                                 mapView.viewport.idle()
                                 autoCenterJob?.cancel()
                             }
                         }
                         override fun onMove(detector: com.mapbox.android.gestures.MoveGestureDetector) = false
-                        override fun onMoveEnd(detector: com.mapbox.android.gestures.MoveGestureDetector) {}
+                        override fun onMoveEnd(detector: com.mapbox.android.gestures.MoveGestureDetector) {
+                            // Iniciar cuenta regresiva de 5s para recentrar
+                            autoCenterJob?.cancel()
+                            autoCenterJob = coroutineScope.launch {
+                                // Esperar 5 segundos, pero pausar si se abre el diálogo de favoritos
+                                var elapsed = 0
+                                while (elapsed < 5000) {
+                                    delay(200)
+                                    if (!isSavingFavorite) elapsed += 200
+                                }
+                                if (!isSavingFavorite) {
+                                    isFollowingLocation = true
+                                    locationWhenFollowDisabled = null
+                                    val vp = mapView.viewport
+                                    val followState = vp.makeFollowPuckViewportState(
+                                        FollowPuckViewportStateOptions.Builder()
+                                            .pitch(55.0)
+                                            .zoom(18.5)
+                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                            .build()
+                                    )
+                                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                                }
+                            }
+                        }
                     })
 
                     // Primera posición - Se manejará en onLocationResult
@@ -887,6 +962,62 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         )
                     }
                 }
+            }
+        }
+
+        // ── ETA + velocidad (esquina superior derecha durante navegación) ─────
+        AnimatedVisibility(
+            visible  = NavigationState.isRouteActive.value,
+            enter    = fadeIn() + slideInVertically { -it },
+            exit     = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopEnd).padding(end = 72.dp, top = 8.dp)
+        ) {
+            val speedKmH = NavigationState.currentSpeedKmH.value
+            // ETA estimada: distancia restante / velocidad actual
+            val totalRemaining = currentRoutePoints.size * 0.02  // aprox 20m por punto en zoom 18.5
+            val etaMin = if (speedKmH > 2f) (totalRemaining / speedKmH * 60).toInt().coerceAtLeast(1) else null
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(uiColor).copy(alpha = 0.3f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text  = "${speedKmH.toInt()} km/h",
+                        fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color(uiColor)
+                    )
+                    if (etaMin != null) {
+                        Text(
+                            text  = "~${etaMin} min",
+                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Brújula (siempre visible, resetea el bearing a Norte) ────────────
+        AnimatedVisibility(
+            visible  = isFollowingLocation,
+            enter    = fadeIn(),
+            exit     = fadeOut(),
+            modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 68.dp)
+        ) {
+            SmallFloatingActionButton(
+                onClick = {
+                    // Rotar el mapa a norte sin salir del follow
+                    mapView.mapboxMap.setCamera(
+                        cameraOptions { bearing(0.0) }
+                    )
+                },
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                contentColor   = Color(uiColor)
+            ) {
+                Icon(Icons.Default.Explore, "Brújula norte", modifier = Modifier.size(18.dp))
             }
         }
 
@@ -1079,29 +1210,107 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         // ── Diálogo guardar favorito ──────────────────────────────────────────
         if (showSaveFavoriteDialog) {
             AlertDialog(
-                onDismissRequest = { showSaveFavoriteDialog = false },
-                title            = { Text("Guardar Favorito") },
-                text             = {
-                    Column {
-                        TextField(value = favoriteNameToSave, onValueChange = { favoriteNameToSave = it }, label = { Text("Nombre") })
-                        Spacer(modifier = Modifier.height(8.dp))
+                onDismissRequest = {
+                    showSaveFavoriteDialog = false
+                    isSavingFavorite = false
+                },
+                title = { Text("Guardar Favorito", fontWeight = FontWeight.Bold) },
+                text  = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Coordenadas de referencia
+                        favoriteLocationToSave?.let { pt ->
+                            Text(
+                                "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}",
+                                fontSize = 11.sp,
+                                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                            )
+                        }
+                        TextField(
+                            value         = favoriteNameToSave,
+                            onValueChange = { favoriteNameToSave = it },
+                            label         = { Text("Nombre del lugar") },
+                            singleLine    = true,
+                            modifier      = Modifier.fillMaxWidth()
+                        )
+                        Text("Tipo de icono", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("Star", "Home", "Work").forEach { type ->
-                                FilterChip(selected = selectedIconType == type, onClick = { selectedIconType = type }, label = { Text(type) })
+                            listOf("Star" to Icons.Default.Star, "Home" to Icons.Default.Home, "Work" to Icons.Default.Work).forEach { (type, icon) ->
+                                FilterChip(
+                                    selected = selectedIconType == type,
+                                    onClick  = { selectedIconType = type },
+                                    label    = { Text(type) },
+                                    leadingIcon = { Icon(icon, null, modifier = Modifier.size(14.dp)) }
+                                )
                             }
                         }
                     }
                 },
                 confirmButton = {
-                    Button(onClick = {
-                        favoriteLocationToSave?.let {
-                            favManager.addFavorite(PlaceResult(favoriteNameToSave, "Favorito guardado", it.latitude(), it.longitude(), selectedIconType))
-                            showSaveFavoriteDialog = false
-                            Toast.makeText(context, "Guardado", Toast.LENGTH_SHORT).show()
+                    Button(
+                        enabled = favoriteNameToSave.isNotBlank(),
+                        onClick = {
+                            favoriteLocationToSave?.let { pt ->
+                                favManager.addFavorite(
+                                    PlaceResult(
+                                        name      = favoriteNameToSave.trim(),
+                                        address   = favoriteAddressToSave.ifEmpty { "Favorito guardado" },
+                                        lat       = pt.latitude(),
+                                        lon       = pt.longitude(),
+                                        iconType  = selectedIconType
+                                    )
+                                )
+                                showSaveFavoriteDialog = false
+                                isSavingFavorite       = false
+                                Toast.makeText(context, "✓ Guardado en favoritos", Toast.LENGTH_SHORT).show()
+                                // Recentrar después de guardar
+                                isFollowingLocation = true
+                                locationWhenFollowDisabled = null
+                                autoCenterJob?.cancel()
+                                val vp = mapView.viewport
+                                val followState = vp.makeFollowPuckViewportState(
+                                    FollowPuckViewportStateOptions.Builder()
+                                        .pitch(55.0).zoom(18.5)
+                                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                        .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                        .build()
+                                )
+                                vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                            }
                         }
-                    }) { Text("Guardar") }
+                    ) { Text("Guardar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showSaveFavoriteDialog = false
+                        isSavingFavorite       = false
+                    }) { Text("Cancelar") }
                 }
             )
+        }
+
+        // ── Botón guardar favorito (aparece en long-press fuera de ruta) ─────
+        AnimatedVisibility(
+            visible  = !NavigationState.isRouteActive.value && favoriteLocationToSave != null && selectedDestination == null,
+            enter    = fadeIn() + slideInVertically { it },
+            exit     = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
+        ) {
+            SmallFloatingActionButton(
+                onClick = {
+                    favoriteNameToSave     = ""
+                    favoriteAddressToSave  = favoriteLocationToSave?.let {
+                        "${String.format("%.5f", it.latitude())}, ${String.format("%.5f", it.longitude())}"
+                    } ?: ""
+                    selectedIconType       = "Star"
+                    isSavingFavorite       = true
+                    showSaveFavoriteDialog = true
+                    autoCenterJob?.cancel()
+                },
+                containerColor = Color(uiColor),
+                contentColor   = Color.White
+            ) {
+                Icon(Icons.Default.FavoriteBorder, "Guardar en favoritos", modifier = Modifier.size(18.dp))
+            }
         }
     }
 }
