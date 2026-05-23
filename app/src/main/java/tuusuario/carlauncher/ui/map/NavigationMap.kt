@@ -926,23 +926,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             }
 
-            // Botón recentrar
+            // Botón recentrar — primero vista aérea, luego 3D tras 2 segundos
             AnimatedVisibility(visible = !isFollowingLocation) {
                 FloatingActionButton(
-                    onClick        = {
+                    onClick = {
                         isFollowingLocation = true
                         locationWhenFollowDisabled = null
                         autoCenterJob?.cancel()
                         val vp = mapView.viewport
-                        val followState = vp.makeFollowPuckViewportState(
+
+                        // Paso 1: vista aérea top-down para orientarse
+                        val aerialState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
-                                .pitch(55.0)
-                                .zoom(18.5)
+                                .pitch(0.0)
+                                .zoom(17.0)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                .padding(com.mapbox.maps.EdgeInsets(0.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
-                        vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                        vp.transitionTo(aerialState, vp.makeDefaultViewportTransition())
+
+                        // Paso 2: volver a 3D inclinado después de 2 segundos
+                        autoCenterJob = coroutineScope.launch {
+                            delay(2000)
+                            val followState = vp.makeFollowPuckViewportState(
+                                FollowPuckViewportStateOptions.Builder()
+                                    .pitch(55.0)
+                                    .zoom(18.5)
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                    .build()
+                            )
+                            vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                        }
                     },
                     containerColor = Color(uiColor).copy(alpha = 0.9f),
                     contentColor   = Color.White
