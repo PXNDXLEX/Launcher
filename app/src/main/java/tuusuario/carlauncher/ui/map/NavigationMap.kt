@@ -192,6 +192,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var currentMapRotation by remember { mutableStateOf(0f) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
     var autoCenterJob     by remember { mutableStateOf<Job?>(null) }
+    // Posición donde se desactivó el seguimiento (para reactivar cada 5m)
+    var locationWhenFollowDisabled by remember { mutableStateOf<android.location.Location?>(null) }
 
     var searchQuery      by remember { mutableStateOf("") }
     var searchResults    by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
@@ -424,16 +426,19 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                     NavigationState.isRouteActive.value = true
                     isFollowingLocation = true
+                    locationWhenFollowDisabled = null
                     autoCenterJob?.cancel()
                     updateRouteOnMap()
 
-                    // Activar viewport 3D de seguimiento
+                    // Activar viewport 3D de seguimiento tipo videojuego
+                    // El padding inferior empuja el puck al 25% inferior de la pantalla
                     val vp = mapView.viewport
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
-                            .pitch(60.0)
+                            .pitch(55.0)
                             .zoom(18.5)
                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                             .build()
                     )
                     vp.transitionTo(followState,
@@ -516,9 +521,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val vp = mapView.viewport
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
-                            .pitch(60.0)
+                            .pitch(55.0)
                             .zoom(18.5)
                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                             .build()
                     )
                     vp.transitionTo(followState, vp.makeImmediateViewportTransition())
@@ -527,14 +533,36 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 // Animar el LocationComponent del mapa es automático via el plugin;
                 // aquí actualizamos la cámara si estamos en modo seguimiento sin ruta activa
                 val isRouteActive = NavigationState.isRouteActive.value
+
+                // ── Reactivar seguimiento automático cada 5 metros ────────
+                if (!isFollowingLocation && hasInitializedPosition) {
+                    val refLoc = locationWhenFollowDisabled
+                    if (refLoc != null && loc.distanceTo(refLoc) >= 5f) {
+                        isFollowingLocation = true
+                        locationWhenFollowDisabled = null
+                        autoCenterJob?.cancel()
+                        val vp = mapView.viewport
+                        val followState = vp.makeFollowPuckViewportState(
+                            FollowPuckViewportStateOptions.Builder()
+                                .pitch(55.0)
+                                .zoom(18.5)
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                .build()
+                        )
+                        vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                    }
+                }
+
                 if (!isRouteActive && isFollowingLocation && hasInitializedPosition) {
                     val vp = mapView.viewport
                     if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
-                                .pitch(60.0)
+                                .pitch(55.0)
                                 .zoom(18.5)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
                         vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -667,25 +695,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
 
                     // Detectar gestos del usuario para desactivar el follow mode
+                    // Se desactiva siempre que el usuario mueva el mapa manualmente;
+                    // se volverá a activar automáticamente tras moverse 5 metros.
                     gestures.addOnMoveListener(object : com.mapbox.maps.plugin.gestures.OnMoveListener {
                         override fun onMoveBegin(detector: com.mapbox.android.gestures.MoveGestureDetector) {
-                            if (!NavigationState.isRouteActive.value) {
+                            if (isFollowingLocation) {
                                 isFollowingLocation = false
+                                // Guardar la posición actual para medir los 5m
+                                locationWhenFollowDisabled = NavigationState.currentLocation.value
                                 mapView.viewport.idle()
                                 autoCenterJob?.cancel()
-                                autoCenterJob = coroutineScope.launch {
-                                    delay(6000)
-                                    isFollowingLocation = true
-                                    // Volver al follow puck mode suavemente
-                                    val vp = mapView.viewport
-                                    val followState = vp.makeFollowPuckViewportState(
-                                        FollowPuckViewportStateOptions.Builder()
-                                            .pitch(0.0).zoom(18.2)
-                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                            .build()
-                                    )
-                                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
-                                }
                             }
                         }
                         override fun onMove(detector: com.mapbox.android.gestures.MoveGestureDetector) = false
@@ -912,14 +931,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 FloatingActionButton(
                     onClick        = {
                         isFollowingLocation = true
+                        locationWhenFollowDisabled = null
                         autoCenterJob?.cancel()
-                        val isRouteActive = NavigationState.isRouteActive.value
                         val vp = mapView.viewport
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
-                                .pitch(if (isRouteActive) 60.0 else 0.0)
-                                .zoom(if (isRouteActive) 18.5 else 18.2)
+                                .pitch(55.0)
+                                .zoom(18.5)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
                         vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -1137,8 +1157,9 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
             modelUri = modelAsset,
             // Escala vinculada al Slider de la UI
             modelScale = listOf(scale, scale, scale),
-            // Rotación inicial, a veces los modelos apuntan hacia +Y o +X, si maneja de lado ajustaremos modelRotation
-            modelRotation = listOf(0f, 0f, 0f)
+            // Los modelos GLB tienen el frente hacia atrás respecto a Mapbox;
+            // se rota 180° en Z (yaw) para que el morro apunte en la dirección de movimiento.
+            modelRotation = listOf(0f, 0f, 180f)
         )
     }
 
