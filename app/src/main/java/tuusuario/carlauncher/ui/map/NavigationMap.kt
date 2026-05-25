@@ -161,6 +161,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var hasInitializedPosition by remember { mutableStateOf(false) }
     // Solo se reproduce una vez por sesión (no rememberSaveable)
     var hasPlayedIntro by remember { mutableStateOf(false) }
+    // HACK heading-up: mapa rota con el bearing, puck siempre apunta arriba
+    // Se activa automáticamente cuando velocidad >= 5 km/h
+    var headingUpModeActive by remember { mutableStateOf(false) }
 
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave     by remember { mutableStateOf("") }
@@ -512,21 +515,31 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val loc = result.lastLocation ?: return
                 if (loc.hasAccuracy() && loc.accuracy > 40f) return
 
+                // ── HACK heading-up: activar/desactivar según velocidad ──────
+                // A ≥5 km/h: mapa rota con el auto, puck queda fijo apuntando arriba
+                val speedKmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0f
+                val shouldActivateHeadingUp = speedKmh >= 5f
+                if (shouldActivateHeadingUp != headingUpModeActive) {
+                    headingUpModeActive = shouldActivateHeadingUp
+                }
+
                 // Bearing explícito del GPS — umbral bajo para respuesta ágil
                 if (loc.hasBearing() && loc.speed > 0.3f) {
                     val newBearing = loc.bearing.toDouble()
-                    // Solo actualizar si el cambio es significativo (>3°) para evitar jitter
-                    if (Math.abs(newBearing - gpsBearing) > 3.0 || gpsBearing == 0.0) {
+                    // Solo actualizar si el cambio es significativo (>2°) para evitar jitter
+                    if (Math.abs(newBearing - gpsBearing) > 2.0 || gpsBearing == 0.0) {
                         gpsBearing       = newBearing
                         lastKnownBearing = loc.bearing
-                        // Si estamos en modo seguimiento, forzar actualización del viewport con el nuevo bearing
+                        // Si estamos en modo seguimiento, actualizar viewport con el nuevo bearing
                         if (isFollowingLocation && hasInitializedPosition) {
                             val vp = mapView.viewport
+                            // SyncWithLocationPuck deja que Mapbox sincronice el bearing
+                            // del mapa con el puck de forma continua y fluida
                             val followState = vp.makeFollowPuckViewportState(
                                 FollowPuckViewportStateOptions.Builder()
                                     .pitch(55.0)
                                     .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(newBearing))
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                     .build()
                             )
@@ -546,51 +559,52 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 // ── Intro cinematográfica al primer fix GPS ─────────────────
                 if (!hasInitializedPosition && loc.latitude != 0.0) {
                     hasInitializedPosition = true
-                    val carPos    = Point.fromLngLat(loc.longitude, loc.latitude)
-                    val carBearing = gpsBearing
+                    val carPos     = Point.fromLngLat(loc.longitude, loc.latitude)
+                    val carBearing = if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
 
                     if (!hasPlayedIntro) {
                         hasPlayedIntro = true
                         coroutineScope.launch {
-                            // Fase 1: Vista frontal del auto (cámara enfrente del coche mirando hacia él)
-                            // bearing = dirección del auto + 180° para estar frente a él
+                            // ── FASE 1: Posicionar cámara en la parte delantera
+                            // del auto inmediatamente (sin animación) — evita ver USA
+                            // bearing = dirección + 180° → cámara mira hacia el frente del auto
                             mapView.mapboxMap.setCamera(
                                 cameraOptions {
                                     center(carPos)
-                                    zoom(19.8)
-                                    pitch(82.0)
-                                    bearing(carBearing + 180.0)
+                                    zoom(20.0)   // muy cerca para ver el auto
+                                    pitch(75.0)  // perspectiva baja, dramática
+                                    bearing(carBearing + 180.0) // enfrente del auto
                                 }
                             )
-                            delay(1800) // Admirar el auto
+                            delay(2000) // Mostrar el frente del auto
 
-                            // Fase 2: Volar hacia arriba (vista aérea)
+                            // ── FASE 2: Volar suavemente a vista de águila
                             mapView.camera.flyTo(
                                 cameraOptions {
                                     center(carPos)
-                                    zoom(15.5)
-                                    pitch(0.0)
-                                    bearing(0.0)
+                                    zoom(14.5)   // vista aérea amplia
+                                    pitch(0.0)   // completamente vertical
+                                    bearing(0.0) // norte arriba
                                 },
                                 com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                    .mapAnimationOptions { duration(2200) }
+                                    .mapAnimationOptions { duration(2800) } // lento y fluido
                             )
-                            delay(2400) // Esperar animación + pausa aérea
+                            delay(3000) // Esperar que termine + pausa aérea
 
-                            // Fase 3: Transición a vista 3D de conducción
+                            // ── FASE 3: Transición fluida a modo 3D de navegación
                             val vp = mapView.viewport
                             val followState = vp.makeFollowPuckViewportState(
                                 FollowPuckViewportStateOptions.Builder()
                                     .pitch(55.0)
                                     .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                     .build()
                             )
                             vp.transitionTo(
                                 followState,
                                 vp.makeDefaultViewportTransition(
-                                    DefaultViewportTransitionOptions.Builder().maxDurationMs(1600).build()
+                                    DefaultViewportTransitionOptions.Builder().maxDurationMs(2000).build()
                                 )
                             )
                         }
@@ -600,7 +614,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(55.0).zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -625,7 +639,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(55.0)
                                 .zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -640,7 +654,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(55.0)
                                 .zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -730,7 +744,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 FollowPuckViewportStateOptions.Builder()
                     .pitch(55.0)
                     .zoom(18.5)
-                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                     .build()
             )
@@ -743,7 +757,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
                             .pitch(55.0).zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                             .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                             .build()
                     )
@@ -856,15 +870,19 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                     })
 
-                    // Primera posición - Se manejará en onLocationResult
+                    // Primera posición — NO inicializar aquí para evitar
+                    // que el mapa arranque en USA y luego haga glitch.
+                    // La intro se maneja completamente en onLocationResult.
+                    // Si ya hay posición previa (re-entrada), centrar sin intro.
                     NavigationState.currentLocation.value?.let { loc ->
-                        if (!hasInitializedPosition) {
+                        if (!hasInitializedPosition && loc.latitude != 0.0) {
+                            // Posicionar silenciosamente antes del primer fix de GPS
                             mapboxMap.setCamera(cameraOptions {
                                 center(Point.fromLngLat(loc.longitude, loc.latitude))
-                                zoom(18.5)
-                                pitch(60.0)
+                                zoom(20.0)   // muy cerca — evita ver USA
+                                pitch(75.0)
+                                bearing(gpsBearing + 180.0)
                             })
-                            hasInitializedPosition = true
                         }
                     }
                 }
@@ -1112,7 +1130,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             FollowPuckViewportStateOptions.Builder()
                                 .pitch(0.0)
                                 .zoom(17.0)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(0.0, 0.0, 0.0, 0.0))
                                 .build()
                         )
@@ -1125,7 +1143,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 FollowPuckViewportStateOptions.Builder()
                                     .pitch(55.0)
                                     .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
+                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                     .build()
                             )
