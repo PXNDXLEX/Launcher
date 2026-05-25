@@ -553,10 +553,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── GPS y seguimiento ────────────────────────────────────────────────────
-    DisposableEffect(context) {
-        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val isBatterySaver = AppSettings.batterySaverMode.value
     // ── Callbacks de GPS y Simulación ─────────────────────────────────────────
     val locationCallback = remember {
         object : LocationCallback() {
@@ -739,7 +735,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             }
         }
-    }
+    } // Cierra el remember { ... }
 
     LaunchedEffect(AppSettings.isGpsSimulationMode.value) {
         if (AppSettings.isGpsSimulationMode.value) {
