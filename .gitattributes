@@ -1,0 +1,22 @@
+# Forzar LF en gradlew para que funcione en runners Linux (GitHub Actions)
+gradlew        text eol=lf
+gradlew.bat    text eol=crlf
+
+# Archivos de texto normales
+*.kt           text eol=lf
+*.kts          text eol=lf
+*.xml          text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.json         text eol=lf
+*.md           text eol=lf
+*.properties   text eol=lf
+
+# Binarios — no tocar line endings
+*.jar          binary
+*.apk          binary
+*.png          binary
+*.jpg          binary
+*.gif          binary
+*.glb          binary
+*.keystore     binary
