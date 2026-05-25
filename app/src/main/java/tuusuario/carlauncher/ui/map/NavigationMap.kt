@@ -87,6 +87,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
+import com.mapbox.maps.plugin.locationcomponent.LocationProvider
+import com.mapbox.maps.plugin.locationcomponent.LocationConsumer
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -140,12 +142,29 @@ private const val HISTORY_LAYER_ID       = "history-layer"
 private const val DASHCAM_SOURCE_ID      = "dashcam-source"
 private const val DASHCAM_LAYER_ID       = "dashcam-layer"
 
+class MockLocationProvider : LocationProvider {
+    val consumers = mutableSetOf<LocationConsumer>()
+    override fun registerLocationConsumer(locationConsumer: LocationConsumer) {
+        consumers.add(locationConsumer)
+    }
+    override fun unregisterLocationConsumer(locationConsumer: LocationConsumer) {
+        consumers.remove(locationConsumer)
+    }
+    fun updateLocation(point: com.mapbox.geojson.Point, bearing: Double) {
+        consumers.forEach {
+            it.onLocationUpdated(point)
+            it.onBearingUpdated(bearing)
+        }
+    }
+}
+
 // ── Composable Principal ─────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, isDarkMode: Boolean = true) {
     val context         = LocalContext.current
+    val mockLocationProvider = remember { MockLocationProvider() }
     val lifecycleOwner  = LocalLifecycleOwner.current
     val focusManager    = LocalFocusManager.current
     val vehicleType     = AppSettings.vehicleType.value
@@ -344,8 +363,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 try {
                     val buildingColor = when (style) {
                         "NEON" -> "#1a1a2e"
-                        "DARK" -> "#2c2c3e"
-                        else   -> "#d4cfc9"
+                        "DARK" -> "#2a2a35" // Un poco más oscuro para que resalten las calles
+                        else   -> "#e0e0e0" // Blanco/gris suave moderno para el día
                     }
                     loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
                         sourceLayer("building")
@@ -357,19 +376,71 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         )
                         minZoom(14.0)
                         fillExtrusionColor(buildingColor)
-                        fillExtrusionHeight(Expression.get("height"))
-                        fillExtrusionBase(Expression.get("min_height"))
-                        fillExtrusionOpacity(0.75)
-                        fillExtrusionAmbientOcclusionIntensity(0.4)
-                        fillExtrusionAmbientOcclusionRadius(3.0)
+                        // Aumentar la altura de los edificios un 150% (x2.5)
+                        fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(2.5)))
+                        fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(2.5)))
+                        fillExtrusionOpacity(0.85)
+                        fillExtrusionAmbientOcclusionIntensity(0.6)
+                        fillExtrusionAmbientOcclusionRadius(4.0)
                     })
+                    
+                    // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
+                    val greenColor = when (style) {
+                        "NEON", "DARK" -> "#1b4332" // Verde oscuro elegante de noche
+                        else -> "#b7e4c7" // Verde pastel moderno de día
+                    }
+                    loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
+                        sourceLayer("landuse")
+                        filter(
+                            Expression.match(
+                                Expression.get("class"),
+                                Expression.literalArray(listOf("park", "pitch", "grass", "forest", "golf_course", "garden")),
+                                Expression.literal(true),
+                                Expression.literal(false)
+                            )
+                        )
+                        fillColor(greenColor)
+                        fillOpacity(0.6)
+                    }, "3d-buildings")
+
+                    // ── Mejorar estética de Carreteras (Glow/Destacar) ─────────────────
+                    val roadColor = when (style) {
+                        "NEON" -> "#16213e"
+                        "DARK" -> "#1c1c24" // Carreteras ligeramente más claras que el fondo para destacarlas
+                        else -> "#ffffff"   // Blancas inmaculadas de día
+                    }
+                    loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
+                        sourceLayer("road")
+                        filter(
+                            Expression.match(
+                                Expression.get("class"),
+                                Expression.literalArray(listOf("motorway", "trunk", "primary", "secondary", "tertiary", "street", "street_limited")),
+                                Expression.literal(true),
+                                Expression.literal(false)
+                            )
+                        )
+                        lineColor(roadColor)
+                        lineWidth(
+                            Expression.interpolate(
+                                Expression.linear(), Expression.zoom(),
+                                Expression.literal(12.0), Expression.literal(2.0),
+                                Expression.literal(18.0), Expression.literal(14.0)
+                            )
+                        )
+                    }, "3d-buildings")
+                    
                 } catch (e: Exception) {
-                    // Algunos estilos no tienen fuente composite con building
+                    // Algunos estilos no tienen fuente composite con building/landuse
                 }
             }
 
             // LocationComponent — puck del vehículo
             val locPlugin = mapView.location
+            try {
+                // Si esto compila, lo usamos
+                locPlugin.setLocationProvider(mockLocationProvider)
+            } catch (e: Exception) {}
+
             locPlugin.updateSettings {
                 enabled = true
                 pulsingEnabled = true
@@ -400,7 +471,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         mapView.camera.easeTo(
                             cameraOptions {
                                 bearing(newBearing)
-                                pitch(55.0)
+                                pitch(70.0)
                             },
                             com.mapbox.maps.plugin.animation.MapAnimationOptions
                                 .mapAnimationOptions { duration(250) }
@@ -511,7 +582,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val vp = mapView.viewport
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
-                            .pitch(55.0)
+                            .pitch(70.0)
                             .zoom(18.5)
                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                             .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
@@ -578,6 +649,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 NavigationState.currentLocation.value = loc
                 if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = loc.speed * 3.6f
 
+                // Propagar ubicación al provider de Mapbox (asegura movimiento del auto 3D)
+                mockLocationProvider.updateLocation(
+                    com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
+                    if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
+                )
+
                 // ── Intro cinematográfica al primer fix GPS ─────────────────
                 if (!hasInitializedPosition && loc.latitude != 0.0) {
                     hasInitializedPosition = true
@@ -619,7 +696,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 val vp = mapView.viewport
                                 val followState = vp.makeFollowPuckViewportState(
                                     FollowPuckViewportStateOptions.Builder()
-                                        .pitch(55.0)
+                                        .pitch(70.0)
                                         .zoom(18.5)
                                         .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                         .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
@@ -640,7 +717,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val vp = mapView.viewport
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
-                                .pitch(55.0).zoom(18.5)
+                                .pitch(70.0).zoom(18.5)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                                 .build()
@@ -664,7 +741,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         val vp = mapView.viewport
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
-                                .pitch(55.0)
+                                .pitch(70.0)
                                 .zoom(18.5)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
@@ -679,7 +756,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
-                                .pitch(55.0)
+                                .pitch(70.0)
                                 .zoom(18.5)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                 .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
@@ -811,7 +888,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 cameraOptions {
                     center(Point.fromLngLat(loc.longitude, loc.latitude))
                     bearing(loc.bearing.toDouble())
-                    pitch(55.0)
+                    pitch(70.0)
                     zoom(18.5)
                 },
                 com.mapbox.maps.plugin.animation.MapAnimationOptions
@@ -1260,7 +1337,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             delay(2000)
                             val followState = vp.makeFollowPuckViewportState(
                                 FollowPuckViewportStateOptions.Builder()
-                                    .pitch(55.0)
+                                    .pitch(70.0)
                                     .zoom(18.5)
                                     .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
