@@ -163,9 +163,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var hasInitializedPosition by remember { mutableStateOf(false) }
     // Solo se reproduce una vez por sesión (no rememberSaveable)
     var hasPlayedIntro by remember { mutableStateOf(false) }
-    // HACK heading-up: mapa rota con el bearing, puck siempre apunta arriba
-    // Se activa automáticamente cuando velocidad >= 5 km/h
-    var headingUpModeActive by remember { mutableStateOf(false) }
 
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave     by remember { mutableStateOf("") }
@@ -376,9 +373,30 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 pulsingColor = android.graphics.Color.parseColor(
                     when (style) { "NEON" -> "#FF9100"; else -> "#2979FF" }
                 )
-                // bearingEnabled = true es esencial para que SyncWithLocationPuck funcione
-                // y para que el viewport sepa qué dirección tiene el puck
                 locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
+            }
+
+            // ── Heading-up SIEMPRE activo: brujula + GPS bearing ──────────────
+            // addOnIndicatorBearingChangedListener usa GPS bearing cuando el auto
+            // se mueve Y brujula del dispositivo cuando esta parado. Funciona siempre.
+            // El mapa rota bajo el icono del auto, que siempre apunta hacia arriba.
+            locPlugin.addOnIndicatorBearingChangedListener { newBearing ->
+                gpsBearing = newBearing
+                lastKnownBearing = newBearing.toFloat()
+                if (isFollowingLocation && hasInitializedPosition) {
+                    val vp = mapView.viewport
+                    if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
+                        // Viewport activo — rotar suavemente la camara
+                        mapView.camera.easeTo(
+                            cameraOptions {
+                                bearing(newBearing)
+                                pitch(55.0)
+                            },
+                            com.mapbox.maps.plugin.animation.MapAnimationOptions
+                                .mapAnimationOptions { duration(250) }
+                        )
+                    }
+                }
             }
 
             // Recrear anotaciones si ya hay destino activo
@@ -548,52 +566,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
                 if (loc.hasAccuracy() && loc.accuracy > 40f) return
-
-                // ── HACK heading-up: activar/desactivar según velocidad ──────
-                // A ≥5 km/h: mapa rota con el auto, puck queda fijo apuntando arriba
-                val speedKmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0f
-                val shouldActivateHeadingUp = speedKmh >= 5f
-                if (shouldActivateHeadingUp != headingUpModeActive) {
-                    headingUpModeActive = shouldActivateHeadingUp
-                }
-
-                // Bearing explícito del GPS — umbral bajo para respuesta ágil
-                if (loc.hasBearing() && loc.speed > 0.3f) {
-                    val newBearing = loc.bearing.toDouble()
-                    // Actualizar si el cambio es significativo (>1.5°) para evitar jitter
-                    if (Math.abs(newBearing - gpsBearing) > 1.5 || gpsBearing == 0.0) {
-                        gpsBearing       = newBearing
-                        lastKnownBearing = loc.bearing
-                        // Rotar la cámara directamente usando easeTo para máxima fluidez.
-                        // easeTo con duration corta da rotación suave en tiempo real.
-                        // Solo si el viewport está activo en modo seguimiento.
-                        if (isFollowingLocation && hasInitializedPosition) {
-                            val vp = mapView.viewport
-                            if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
-                                // El viewport está activo — rotar la cámara directamente
-                                mapView.camera.easeTo(
-                                    cameraOptions {
-                                        bearing(newBearing)
-                                        pitch(55.0)
-                                    },
-                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                        .mapAnimationOptions { duration(300) }
-                                )
-                            } else {
-                                // El viewport no está en estado — re-establecer follow
-                                val followState = vp.makeFollowPuckViewportState(
-                                    FollowPuckViewportStateOptions.Builder()
-                                        .pitch(55.0)
-                                        .zoom(18.5)
-                                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                        .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                        .build()
-                                )
-                                vp.transitionTo(followState, vp.makeImmediateViewportTransition())
-                            }
-                        }
-                    }
-                }
 
                 // Servicios de rastreo
                 com.tuusuario.carlauncher.services.RouteTracker.onLocationUpdate(loc)
