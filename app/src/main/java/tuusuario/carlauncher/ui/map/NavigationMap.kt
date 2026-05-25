@@ -86,6 +86,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -746,7 +747,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             val radiusDegrees = 0.002 // Aprox 200m de radio
             val speedMps = 15f / 3.6f // 15 km/h a metros/segundo
 
-            while (kotlinx.coroutines.isActive && AppSettings.isGpsSimulationMode.value) {
+            while (isActive && AppSettings.isGpsSimulationMode.value) {
                 // Calcular posición en el círculo
                 val newLat = centerLat + radiusDegrees * Math.sin(angle)
                 val newLon = centerLon + radiusDegrees * Math.cos(angle)
