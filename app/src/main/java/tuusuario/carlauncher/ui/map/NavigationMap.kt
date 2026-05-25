@@ -52,7 +52,11 @@ import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.dsl.cameraOptions
+import com.mapbox.maps.extension.style.expressions.dsl.generated.eq
+import com.mapbox.maps.extension.style.expressions.dsl.generated.get
+import com.mapbox.maps.extension.style.expressions.dsl.generated.literal
 import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
 import com.mapbox.maps.extension.style.layers.generated.lineLayer
 import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
 import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
@@ -336,6 +340,32 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 lineJoin(LineJoin.ROUND)
             })
 
+            // ── Edificios 3D con relieve (fill-extrusion) ─────────────────
+            // Disponible en STREETS, DARK y TRAFFIC_NIGHT (fuente "composite")
+            if (style != "SATELLITE") {
+                try {
+                    loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
+                        sourceLayer("building")
+                        filter(eq(get("extrude"), literal("true")))
+                        minZoom(14.0)
+                        fillExtrusionColor(
+                            when (style) {
+                                "NEON"  -> "#1a1a2e"
+                                "DARK"  -> "#2c2c3e"
+                                else    -> "#d4cfc9"
+                            }
+                        )
+                        fillExtrusionHeight(get("height"))
+                        fillExtrusionBase(get("min_height"))
+                        fillExtrusionOpacity(0.75)
+                        fillExtrusionAmbientOcclusionIntensity(0.4)
+                        fillExtrusionAmbientOcclusionRadius(3.0)
+                    })
+                } catch (e: Exception) {
+                    // Algunos estilos no tienen fuente composite con building
+                }
+            }
+
             // LocationComponent — puck del vehículo
             val locPlugin = mapView.location
             locPlugin.updateSettings {
@@ -344,6 +374,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 pulsingColor = android.graphics.Color.parseColor(
                     when (style) { "NEON" -> "#FF9100"; else -> "#2979FF" }
                 )
+                // bearingEnabled = true es esencial para que SyncWithLocationPuck funcione
+                // y para que el viewport sepa qué dirección tiene el puck
                 locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
             }
 
@@ -526,25 +558,37 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 // Bearing explícito del GPS — umbral bajo para respuesta ágil
                 if (loc.hasBearing() && loc.speed > 0.3f) {
                     val newBearing = loc.bearing.toDouble()
-                    // Solo actualizar si el cambio es significativo (>2°) para evitar jitter
-                    if (Math.abs(newBearing - gpsBearing) > 2.0 || gpsBearing == 0.0) {
+                    // Actualizar si el cambio es significativo (>1.5°) para evitar jitter
+                    if (Math.abs(newBearing - gpsBearing) > 1.5 || gpsBearing == 0.0) {
                         gpsBearing       = newBearing
                         lastKnownBearing = loc.bearing
-                        // Si estamos en modo seguimiento, actualizar viewport con el nuevo bearing
+                        // Rotar la cámara directamente usando easeTo para máxima fluidez.
+                        // easeTo con duration corta da rotación suave en tiempo real.
+                        // Solo si el viewport está activo en modo seguimiento.
                         if (isFollowingLocation && hasInitializedPosition) {
                             val vp = mapView.viewport
-                            // SyncWithLocationPuck deja que Mapbox sincronice el bearing
-                            // del mapa con el puck de forma continua y fluida
-                            val followState = vp.makeFollowPuckViewportState(
-                                FollowPuckViewportStateOptions.Builder()
-                                    .pitch(55.0)
-                                    .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                    .build()
-                            )
-                            // Transición inmediata para que el giro sea fluido
-                            vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                            if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
+                                // El viewport está activo — rotar la cámara directamente
+                                mapView.camera.easeTo(
+                                    cameraOptions {
+                                        bearing(newBearing)
+                                        pitch(55.0)
+                                    },
+                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
+                                        .mapAnimationOptions { duration(300) }
+                                )
+                            } else {
+                                // El viewport no está en estado — re-establecer follow
+                                val followState = vp.makeFollowPuckViewportState(
+                                    FollowPuckViewportStateOptions.Builder()
+                                        .pitch(55.0)
+                                        .zoom(18.5)
+                                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                        .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                        .build()
+                                )
+                                vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+                            }
                         }
                     }
                 }
