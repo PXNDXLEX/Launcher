@@ -72,6 +72,7 @@ import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import com.mapbox.maps.plugin.gestures.gestures
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin
+import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateOptions
 import com.mapbox.maps.plugin.viewport.data.OverviewViewportStateOptions
 import com.mapbox.maps.plugin.viewport.viewport
@@ -373,6 +374,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 pulsingColor = android.graphics.Color.parseColor(
                     when (style) { "NEON" -> "#FF9100"; else -> "#2979FF" }
                 )
+                // Fundamental: habilitar el bearing del puck y usar HEADING (brújula)
+                puckBearingEnabled = true
+                puckBearing = PuckBearing.HEADING
                 locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
             }
 
@@ -553,19 +557,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     DisposableEffect(context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
         val isBatterySaver = AppSettings.batterySaverMode.value
-        // 100ms en modo normal para máxima respuesta de navegación
-        val interval    = if (isBatterySaver) 3000L else 100L
-        val minInterval = if (isBatterySaver) 2000L else 50L
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
-            .setMinUpdateIntervalMillis(minInterval)
-            .setMinUpdateDistanceMeters(0.5f)
-            .setMaxUpdateDelayMillis(if (isBatterySaver) 4000L else 200L)
-            .build()
-
-        val locationCallback = object : LocationCallback() {
+    // ── Callbacks de GPS y Simulación ─────────────────────────────────────────
+    val locationCallback = remember {
+        object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
+                // Si la simulación está activa y este resultado NO es mock (no tiene proveedor "mock")
+                // ignoramos el GPS real para que la simulación tome el control.
+                val isMock = result.lastLocation?.provider == "mock"
+                if (AppSettings.isGpsSimulationMode.value && !isMock) return 
+                
                 val loc = result.lastLocation ?: return
-                if (loc.hasAccuracy() && loc.accuracy > 40f) return
+                if (loc.hasAccuracy() && loc.accuracy > 40f && !isMock) return
 
                 // Servicios de rastreo
                 com.tuusuario.carlauncher.services.RouteTracker.onLocationUpdate(loc)
@@ -737,6 +739,66 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             }
         }
+    }
+
+    LaunchedEffect(AppSettings.isGpsSimulationMode.value) {
+        if (AppSettings.isGpsSimulationMode.value) {
+            var angle = 0.0
+            // Usamos la posición actual como centro del círculo, o un valor por defecto si no hay fix
+            val centerLat = NavigationState.currentLocation.value?.latitude ?: 10.998
+            val centerLon = NavigationState.currentLocation.value?.longitude ?: -63.998
+            val radiusDegrees = 0.002 // Aprox 200m de radio
+            val speedMps = 15f / 3.6f // 15 km/h a metros/segundo
+
+            while (kotlinx.coroutines.isActive && AppSettings.isGpsSimulationMode.value) {
+                // Calcular posición en el círculo
+                val newLat = centerLat + radiusDegrees * Math.sin(angle)
+                val newLon = centerLon + radiusDegrees * Math.cos(angle)
+                
+                // Calcular posición un poco atrás para obtener el bearing correcto
+                val prevLat = centerLat + radiusDegrees * Math.sin(angle - 0.05)
+                val prevLon = centerLon + radiusDegrees * Math.cos(angle - 0.05)
+                
+                val bearing = android.location.Location("").apply {
+                    latitude = prevLat
+                    longitude = prevLon
+                }.bearingTo(android.location.Location("").apply {
+                    latitude = newLat
+                    longitude = newLon
+                })
+
+                val mockLoc = android.location.Location("mock").apply {
+                    latitude = newLat
+                    longitude = newLon
+                    speed = speedMps
+                    this.bearing = bearing
+                    accuracy = 5f
+                    time = System.currentTimeMillis()
+                }
+
+                // Inyectar en el callback como si fuera real
+                locationCallback.onLocationResult(LocationResult.create(listOf(mockLoc)))
+                
+                // Incrementar ángulo para el próximo paso (determina qué tan rápido "gira")
+                angle += 0.015
+                
+                // Pausa de simulación ~ 100ms igual que GPS real
+                delay(100)
+            }
+        }
+    }
+
+    // ── GPS y seguimiento ────────────────────────────────────────────────────
+    DisposableEffect(context) {
+        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+        val isBatterySaver = AppSettings.batterySaverMode.value
+        val interval    = if (isBatterySaver) 3000L else 100L
+        val minInterval = if (isBatterySaver) 2000L else 50L
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
+            .setMinUpdateIntervalMillis(minInterval)
+            .setMinUpdateDistanceMeters(0.5f)
+            .setMaxUpdateDelayMillis(if (isBatterySaver) 4000L else 200L)
+            .build()
 
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
@@ -808,6 +870,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 mapView.apply {
+                    // Prevenir el flashazo del planeta entero antes del primer fix GPS
+                    mapView.mapboxMap.setCamera(cameraOptions {
+                        zoom(14.0)
+                        pitch(0.0)
+                        bearing(0.0)
+                    })
+
                     // Inicializar el mapa con el estilo correcto
                     applyMapStyle(currentStyle)
 

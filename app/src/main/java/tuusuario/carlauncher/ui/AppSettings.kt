@@ -18,6 +18,8 @@ object AppSettings {
     val mapStyle = mutableStateOf("DARK") // LIGHT, DARK, NEON, SATELLITE
     val batterySaverMode = mutableStateOf(false)
     val dashcamCameraIndex = mutableStateOf(0)
+    // Modo simulación GPS — no se persiste (solo para testing)
+    val isGpsSimulationMode = mutableStateOf(false)
     
     // Custom Speedometer settings
     val customSpeedoShape = mutableStateOf("ARC")
@@ -114,6 +116,11 @@ object AppSettings {
     fun setDashcamCameraIndex(index: Int) {
         dashcamCameraIndex.value = index
         prefs?.edit()?.putInt("dashcamCameraIndex", index)?.apply()
+    }
+
+    fun setGpsSimulationMode(enabled: Boolean) {
+        isGpsSimulationMode.value = enabled
+        // No se persiste — siempre inicia desactivado
     }
 
     fun setCustomSpeedoShape(shape: String) {

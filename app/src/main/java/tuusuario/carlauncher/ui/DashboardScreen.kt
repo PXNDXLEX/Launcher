@@ -426,6 +426,14 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
                                 }
                             }
                         }
+
+                        SettingsDivider()
+                        SettingsRowSwitch(
+                            icon = Icons.Default.DirectionsCar,
+                            title = "Modo Test de Movimiento",
+                            checked = AppSettings.isGpsSimulationMode.value,
+                            onCheckedChange = { AppSettings.setGpsSimulationMode(it) }
+                        )
                     }
 
                     // ── VELOCÍMETRO ──
