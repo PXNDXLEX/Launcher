@@ -52,9 +52,7 @@ import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.dsl.cameraOptions
-import com.mapbox.maps.extension.style.expressions.dsl.generated.eq
-import com.mapbox.maps.extension.style.expressions.dsl.generated.get
-import com.mapbox.maps.extension.style.expressions.dsl.generated.literal
+import com.mapbox.maps.extension.style.expressions.generated.Expression
 import com.mapbox.maps.extension.style.layers.addLayer
 import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
 import com.mapbox.maps.extension.style.layers.generated.lineLayer
@@ -344,19 +342,23 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             // Disponible en STREETS, DARK y TRAFFIC_NIGHT (fuente "composite")
             if (style != "SATELLITE") {
                 try {
+                    val buildingColor = when (style) {
+                        "NEON" -> "#1a1a2e"
+                        "DARK" -> "#2c2c3e"
+                        else   -> "#d4cfc9"
+                    }
                     loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
                         sourceLayer("building")
-                        filter(eq(get("extrude"), literal("true")))
-                        minZoom(14.0)
-                        fillExtrusionColor(
-                            when (style) {
-                                "NEON"  -> "#1a1a2e"
-                                "DARK"  -> "#2c2c3e"
-                                else    -> "#d4cfc9"
-                            }
+                        filter(
+                            Expression.eq(
+                                Expression.get("extrude"),
+                                Expression.literal("true")
+                            )
                         )
-                        fillExtrusionHeight(get("height"))
-                        fillExtrusionBase(get("min_height"))
+                        minZoom(14.0)
+                        fillExtrusionColor(buildingColor)
+                        fillExtrusionHeight(Expression.get("height"))
+                        fillExtrusionBase(Expression.get("min_height"))
                         fillExtrusionOpacity(0.75)
                         fillExtrusionAmbientOcclusionIntensity(0.4)
                         fillExtrusionAmbientOcclusionRadius(3.0)
