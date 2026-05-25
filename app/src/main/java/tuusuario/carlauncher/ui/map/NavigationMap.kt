@@ -62,6 +62,9 @@ import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
+import com.mapbox.maps.extension.style.layers.addLayerBelow
+import com.mapbox.maps.extension.style.layers.generated.fillLayer
+import com.mapbox.maps.extension.style.expressions.dsl.generated.literalArray
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.annotation.annotations
@@ -147,7 +150,7 @@ class MockLocationProvider : LocationProvider {
     override fun registerLocationConsumer(locationConsumer: LocationConsumer) {
         consumers.add(locationConsumer)
     }
-    override fun unregisterLocationConsumer(locationConsumer: LocationConsumer) {
+    override fun unRegisterLocationConsumer(locationConsumer: LocationConsumer) {
         consumers.remove(locationConsumer)
     }
     fun updateLocation(point: com.mapbox.geojson.Point, bearing: Double) {
