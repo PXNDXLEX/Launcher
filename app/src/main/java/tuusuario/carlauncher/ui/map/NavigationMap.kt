@@ -165,6 +165,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var hasInitializedPosition by remember { mutableStateOf(false) }
     // Solo se reproduce una vez por sesión (no rememberSaveable)
     var hasPlayedIntro by remember { mutableStateOf(false) }
+    var isIntroAnimating by remember { mutableStateOf(false) }
 
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave     by remember { mutableStateOf("") }
@@ -388,6 +389,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             locPlugin.addOnIndicatorBearingChangedListener { newBearing ->
                 gpsBearing = newBearing
                 lastKnownBearing = newBearing.toFloat()
+                
+                // No interrumpir si estamos en la intro o en modo test
+                if (isIntroAnimating || AppSettings.isGpsSimulationMode.value) return@addOnIndicatorBearingChangedListener
+                
                 if (isFollowingLocation && hasInitializedPosition) {
                     val vp = mapView.viewport
                     if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
@@ -582,48 +587,53 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (!hasPlayedIntro) {
                         hasPlayedIntro = true
                         coroutineScope.launch {
-                            // ── FASE 1: Posicionar cámara en la parte delantera
-                            // del auto inmediatamente (sin animación) — evita ver USA
-                            // bearing = dirección + 180° → cámara mira hacia el frente del auto
-                            mapView.mapboxMap.setCamera(
-                                cameraOptions {
-                                    center(carPos)
-                                    zoom(20.0)   // muy cerca para ver el auto
-                                    pitch(75.0)  // perspectiva baja, dramática
-                                    bearing(carBearing + 180.0) // enfrente del auto
-                                }
-                            )
-                            delay(2000) // Mostrar el frente del auto
-
-                            // ── FASE 2: Volar suavemente a vista de águila
-                            mapView.camera.flyTo(
-                                cameraOptions {
-                                    center(carPos)
-                                    zoom(14.5)   // vista aérea amplia
-                                    pitch(0.0)   // completamente vertical
-                                    bearing(0.0) // norte arriba
-                                },
-                                com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                    .mapAnimationOptions { duration(2800) } // lento y fluido
-                            )
-                            delay(3000) // Esperar que termine + pausa aérea
-
-                            // ── FASE 3: Transición fluida a modo 3D de navegación
-                            val vp = mapView.viewport
-                            val followState = vp.makeFollowPuckViewportState(
-                                FollowPuckViewportStateOptions.Builder()
-                                    .pitch(55.0)
-                                    .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                    .build()
-                            )
-                            vp.transitionTo(
-                                followState,
-                                vp.makeDefaultViewportTransition(
-                                    DefaultViewportTransitionOptions.Builder().maxDurationMs(2000).build()
+                            isIntroAnimating = true
+                            try {
+                                // ── FASE 1: Posicionar cámara en la parte delantera
+                                // del auto inmediatamente (sin animación) — evita ver USA
+                                // bearing = dirección + 180° → cámara mira hacia el frente del auto
+                                mapView.mapboxMap.setCamera(
+                                    cameraOptions {
+                                        center(carPos)
+                                        zoom(20.0)   // muy cerca para ver el auto
+                                        pitch(75.0)  // perspectiva baja, dramática
+                                        bearing(carBearing + 180.0) // enfrente del auto
+                                    }
                                 )
-                            )
+                                delay(2000) // Mostrar el frente del auto
+
+                                // ── FASE 2: Volar suavemente a vista de águila
+                                mapView.camera.flyTo(
+                                    cameraOptions {
+                                        center(carPos)
+                                        zoom(14.5)   // vista aérea amplia
+                                        pitch(0.0)   // completamente vertical
+                                        bearing(0.0) // norte arriba
+                                    },
+                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
+                                        .mapAnimationOptions { duration(2800) } // lento y fluido
+                                )
+                                delay(3000) // Esperar que termine + pausa aérea
+
+                                // ── FASE 3: Transición fluida a modo 3D de navegación
+                                val vp = mapView.viewport
+                                val followState = vp.makeFollowPuckViewportState(
+                                    FollowPuckViewportStateOptions.Builder()
+                                        .pitch(55.0)
+                                        .zoom(18.5)
+                                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                        .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                        .build()
+                                )
+                                vp.transitionTo(
+                                    followState,
+                                    vp.makeDefaultViewportTransition(
+                                        DefaultViewportTransitionOptions.Builder().maxDurationMs(2000).build()
+                                    )
+                                )
+                            } finally {
+                                isIntroAnimating = false
+                            }
                         }
                     } else {
                         // Si ya se jugó el intro (rotación de pantalla), centrar directamente
@@ -776,12 +786,37 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 // Inyectar en el callback como si fuera real
                 locationCallback.onLocationResult(LocationResult.create(listOf(mockLoc)))
                 
+                // Intentar forzar la actualización del puck de Mapbox si el método existe
+                try {
+                    mapView.location.javaClass.getMethod("forceLocationUpdate", android.location.Location::class.java)
+                        .invoke(mapView.location, mockLoc)
+                } catch (e: Exception) {
+                    // Ignorar si el método no existe en esta versión de Mapbox
+                }
+                
                 // Incrementar ángulo para el próximo paso (determina qué tan rápido "gira")
                 angle += 0.015
                 
                 // Pausa de simulación ~ 100ms igual que GPS real
                 delay(100)
             }
+        }
+    }
+
+    // ── Mover la cámara manualmente durante simulación ──────────────────────
+    LaunchedEffect(NavigationState.currentLocation.value) {
+        if (AppSettings.isGpsSimulationMode.value && !isIntroAnimating && isFollowingLocation) {
+            val loc = NavigationState.currentLocation.value ?: return@LaunchedEffect
+            mapView.camera.easeTo(
+                cameraOptions {
+                    center(Point.fromLngLat(loc.longitude, loc.latitude))
+                    bearing(loc.bearing.toDouble())
+                    pitch(55.0)
+                    zoom(18.5)
+                },
+                com.mapbox.maps.plugin.animation.MapAnimationOptions
+                    .mapAnimationOptions { duration(150) }
+            )
         }
     }
 
