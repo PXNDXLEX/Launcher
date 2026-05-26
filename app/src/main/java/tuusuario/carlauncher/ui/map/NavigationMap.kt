@@ -366,23 +366,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }
                     })
                     
-                    if (!isNightMode) {
-                        loadedStyle.setStyleLight(light {
-                            position(1.5, 90.0, 80.0)
-                            color("#ffffff")
-                            intensity(0.6)
-                        })
-                    } else {
-                        // Darker sky / fog
-                        loadedStyle.setStyleAtmosphere(
-                            com.mapbox.maps.extension.style.atmosphere.generated.atmosphere {
-                                color("#000000")
-                                highColor("#000000")
-                                spaceColor("#000000")
-                                starIntensity(0.5)
-                            }
-                        )
-                    }
+                    // La iluminación y atmósfera por defecto de Style.DARK y Style.TRAFFIC_NIGHT 
+                    // ya son óptimas y oscuras, por lo que no forzaremos la API de luces de v11 aquí.
                     
                     // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
                     val greenColor = if (isNightMode) {
