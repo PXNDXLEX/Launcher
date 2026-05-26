@@ -1064,10 +1064,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 val bmp = drawCarLightsGlow()
                 style.removeStyleImage("car-lights-glow")
                 style.addImage("car-lights-glow", bmp)
-                // Actualizar iconSize de la capa de luces
-                (style.getLayer(CAR_LIGHTS_LAYER_ID)
-                    as? com.mapbox.maps.extension.style.layers.generated.SymbolLayer
-                )?.iconSize(AppSettings.glowIconSize.value.toDouble())
                 // Aplicar escala del modelo si cambió
                 mapView.location.updateSettings {
                     locationPuck = getVehiclePuck(
