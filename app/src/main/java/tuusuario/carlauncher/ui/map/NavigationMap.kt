@@ -143,6 +143,8 @@ private const val HISTORY_SOURCE_ID      = "history-source"
 private const val HISTORY_LAYER_ID       = "history-layer"
 private const val DASHCAM_SOURCE_ID      = "dashcam-source"
 private const val DASHCAM_LAYER_ID       = "dashcam-layer"
+private const val CAR_LIGHTS_SOURCE_ID   = "car-lights-source"
+private const val CAR_LIGHTS_LAYER_ID    = "car-lights-layer"
 
 class MockLocationProvider : LocationProvider {
     val consumers = mutableSetOf<LocationConsumer>()
@@ -153,9 +155,20 @@ class MockLocationProvider : LocationProvider {
         consumers.remove(locationConsumer)
     }
     fun updateLocation(point: com.mapbox.geojson.Point, bearing: Double) {
+        val location = android.location.Location("mock").apply {
+            latitude = point.latitude()
+            longitude = point.longitude()
+            this.bearing = bearing.toFloat()
+        }
         consumers.forEach {
-            it.onLocationUpdated(point)
+            it.onLocationUpdated(location)
             it.onBearingUpdated(bearing)
+            
+            // Update lights source
+            val map = (it as? com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin)?.let {
+                // In a real implementation we would have a reference to the map here
+                // For now, we update global or map-specific context if possible
+            }
         }
     }
 }
@@ -327,13 +340,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             loadedStyle.addSource(geoJsonSource(DASHCAM_SOURCE_ID) {
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
+            loadedStyle.addSource(geoJsonSource(CAR_LIGHTS_SOURCE_ID) {
+                featureCollection(FeatureCollection.fromFeatures(emptyList()))
+            })
 
             // ── Entorno 3D y Estética ─────────────────
             val isStandard = (style == "DARK" || style == "NEON")
             if (isStandard) {
                 try {
                     // Activar luces dinámicas de ciudad en Mapbox Standard
-                    loadedStyle.setStyleImportConfigProperty("basemap", "lightPreset", "night")
+                    loadedStyle.setStyleImportConfigProperty("basemap", "lightPreset", com.mapbox.bindgen.Value.valueOf("night"))
                 } catch (e: Exception) {}
             } else if (style != "SATELLITE") {
                 try {
@@ -395,6 +411,25 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         )
                     }, "3d-buildings")
                     
+                } catch (e: Exception) {}
+            }
+
+            // ── Efectos Especiales ─────────────────
+            if (isStandard) {
+                try {
+                    // Añadir la textura holográfica de luces al estilo
+                    loadedStyle.addImage("car-lights-glow", drawCarLightsGlow())
+                    
+                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_LIGHTS_LAYER_ID, CAR_LIGHTS_SOURCE_ID) {
+                        iconImage("car-lights-glow")
+                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
+                        iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
+                        iconRotate(Expression.get("bearing"))
+                        iconAllowOverlap(true)
+                        iconIgnorePlacement(true)
+                        // Aumentar tamaño
+                        iconSize(2.0)
+                    })
                 } catch (e: Exception) {}
             }
 
@@ -648,6 +683,20 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
                     if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
                 )
+
+                // Actualizar luces en mapa si existe
+                mapView.mapboxMap.getStyle { style ->
+                    style.getSourceAs<GeoJsonSource>(CAR_LIGHTS_SOURCE_ID)?.featureCollection(
+                        FeatureCollection.fromFeature(
+                            Feature.fromGeometry(
+                                Point.fromLngLat(loc.longitude, loc.latitude),
+                                com.mapbox.geojson.JsonObject().apply {
+                                    addProperty("bearing", loc.bearing.toDouble())
+                                }
+                            )
+                        )
+                    )
+                }
 
                 // ── Intro cinematográfica al primer fix GPS ─────────────────
                 if (!hasInitializedPosition && loc.latitude != 0.0) {
@@ -1705,3 +1754,33 @@ fun drawCustomPin(color: Int): Bitmap {
 }
 
 // (Removidos decodePolyline6 y valhallaTypeToOsrmStyle porque Mapbox Directions API retorna GeoJSON y estilos de maniobra OSRM nativos)
+
+fun drawCarLightsGlow(): Bitmap {
+    val width = 400
+    val height = 400
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    val frontColor = android.graphics.Color.argb(160, 255, 255, 200)
+    val backColor = android.graphics.Color.argb(200, 255, 20, 20)
+    val transparent = android.graphics.Color.TRANSPARENT
+
+    // Left Headlight (Beam pointing UP towards Y=20)
+    paint.shader = LinearGradient(150f, 180f, 150f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawOval(RectF(120f, 20f, 180f, 180f), paint)
+    
+    // Right Headlight
+    paint.shader = LinearGradient(250f, 180f, 250f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawOval(RectF(220f, 20f, 280f, 180f), paint)
+    
+    // Left Taillight (Glow)
+    paint.shader = RadialGradient(160f, 250f, 40f, backColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(160f, 250f, 40f, paint)
+    
+    // Right Taillight (Glow)
+    paint.shader = RadialGradient(240f, 250f, 40f, backColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(240f, 250f, 40f, paint)
+
+    return bitmap
+}
