@@ -221,7 +221,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
     val currentStyle = AppSettings.mapStyle.value
     val routeColorHex = when (currentStyle) {
-        "NEON" -> "#FF9100"
+        "NEON" -> "#FF00FF"
+        "DARK" -> "#00FFFF"
         else   -> "#2979FF"
     }
 
@@ -318,7 +319,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     fun applyMapStyle(style: String) {
         val styleUri = when (style) {
             "SATELLITE" -> Style.SATELLITE_STREETS
-            "DARK", "NEON" -> Style.STANDARD
+            "DARK"      -> Style.DARK
+            "NEON"      -> Style.TRAFFIC_NIGHT
             else        -> Style.MAPBOX_STREETS
         }
         mapView.mapboxMap.loadStyle(styleUri) { loadedStyle ->
@@ -340,31 +342,53 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             })
 
             // ── Entorno 3D y Estética ─────────────────
-            val isStandard = (style == "DARK" || style == "NEON")
-            if (isStandard) {
+            val isNightMode = (style == "DARK" || style == "NEON")
+            if (style != "SATELLITE") {
                 try {
-                    // Activar luces dinámicas de ciudad en Mapbox Standard
-                    loadedStyle.setStyleImportConfigProperty("basemap", "lightPreset", com.mapbox.bindgen.Value.valueOf("night"))
-                } catch (e: Exception) {}
-            } else if (style != "SATELLITE") {
-                try {
-                    // Blanco/gris suave moderno para el día
-                    val buildingColor = "#e0e0e0" 
                     loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
                         sourceLayer("building")
                         filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
                         minZoom(14.0)
-                        fillExtrusionColor(buildingColor)
-                        // Aumentar la altura de los edificios un 150% (x2.5)
-                        fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(2.5)))
-                        fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(2.5)))
-                        fillExtrusionOpacity(0.85)
-                        fillExtrusionAmbientOcclusionIntensity(0.6)
-                        fillExtrusionAmbientOcclusionRadius(4.0)
+                        
+                        if (isNightMode) {
+                            loadedStyle.addImage("building-texture", drawBuildingTexture(style))
+                            fillExtrusionPattern("building-texture")
+                            fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(3.0)))
+                            fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(3.0)))
+                            fillExtrusionOpacity(0.9)
+                        } else {
+                            fillExtrusionColor("#e0e0e0")
+                            fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(2.5)))
+                            fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(2.5)))
+                            fillExtrusionOpacity(0.85)
+                            fillExtrusionAmbientOcclusionIntensity(0.6)
+                            fillExtrusionAmbientOcclusionRadius(4.0)
+                        }
                     })
                     
+                    if (!isNightMode) {
+                        loadedStyle.setStyleLight(light {
+                            position(1.5, 90.0, 80.0)
+                            color("#ffffff")
+                            intensity(0.6)
+                        })
+                    } else {
+                        // Darker sky / fog
+                        loadedStyle.setStyleAtmosphere(
+                            com.mapbox.maps.extension.style.atmosphere.generated.atmosphere {
+                                color("#000000")
+                                highColor("#000000")
+                                spaceColor("#000000")
+                                starIntensity(0.5)
+                            }
+                        )
+                    }
+                    
                     // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
-                    val greenColor = "#b7e4c7" // Verde pastel moderno de día
+                    val greenColor = if (isNightMode) {
+                        if (style == "NEON") "#111118" else "#1a1a24" 
+                    } else "#b7e4c7"
+                    
                     loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
                         sourceLayer("landuse")
                         filter(
@@ -382,7 +406,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }, "3d-buildings")
 
                     // ── Mejorar estética de Carreteras (Glow/Destacar) ─────────────────
-                    val roadColor = "#ffffff"   // Blancas inmaculadas de día
+                    val roadColor = if (isNightMode) {
+                        if (style == "NEON") "#1a1a2e" else "#202020"
+                    } else "#ffffff"
+                    
                     loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
                         sourceLayer("road")
                         filter(
@@ -410,7 +437,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
 
             // ── Efectos Especiales ─────────────────
-            if (isStandard) {
+            if (isNightMode) {
                 try {
                     // Añadir la textura holográfica de luces al estilo
                     loadedStyle.addImage("car-lights-glow", drawCarLightsGlow())
@@ -422,8 +449,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         iconRotate(Expression.get("bearing"))
                         iconAllowOverlap(true)
                         iconIgnorePlacement(true)
-                        // Aumentar tamaño
-                        iconSize(2.0)
+                        // Tamaño adecuado para el nuevo bitmap
+                        iconSize(1.5)
                     })
                 } catch (e: Exception) {}
             }
@@ -1757,25 +1784,55 @@ fun drawCarLightsGlow(): Bitmap {
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    val frontColor = android.graphics.Color.argb(160, 255, 255, 200)
-    val backColor = android.graphics.Color.argb(200, 255, 20, 20)
+    val frontColor = android.graphics.Color.argb(160, 255, 255, 180)
+    val backColor = android.graphics.Color.argb(220, 255, 10, 10)
     val transparent = android.graphics.Color.TRANSPARENT
 
     // Left Headlight (Beam pointing UP towards Y=20)
-    paint.shader = LinearGradient(150f, 180f, 150f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawOval(RectF(120f, 20f, 180f, 180f), paint)
+    paint.shader = LinearGradient(185f, 200f, 185f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawOval(RectF(165f, 20f, 205f, 200f), paint)
     
     // Right Headlight
-    paint.shader = LinearGradient(250f, 180f, 250f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawOval(RectF(220f, 20f, 280f, 180f), paint)
+    paint.shader = LinearGradient(215f, 200f, 215f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawOval(RectF(195f, 20f, 235f, 200f), paint)
     
     // Left Taillight (Glow)
-    paint.shader = RadialGradient(160f, 250f, 40f, backColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(160f, 250f, 40f, paint)
+    paint.shader = RadialGradient(185f, 220f, 20f, backColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(185f, 220f, 20f, paint)
     
     // Right Taillight (Glow)
-    paint.shader = RadialGradient(240f, 250f, 40f, backColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(240f, 250f, 40f, paint)
+    paint.shader = RadialGradient(215f, 220f, 20f, backColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(215f, 220f, 20f, paint)
 
     return bitmap
+}
+
+fun drawBuildingTexture(style: String): Bitmap {
+    val size = 64
+    val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(b)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    
+    // Background (Wall)
+    val bgColor = if (style == "NEON") "#111118" else "#1a1a24"
+    canvas.drawColor(android.graphics.Color.parseColor(bgColor))
+    
+    // Windows
+    val windowColor1 = if (style == "NEON") "#00FFFF" else "#FFFFDD"
+    val windowColor2 = if (style == "NEON") "#FF00FF" else "#FFD54F"
+    
+    p.color = android.graphics.Color.parseColor(windowColor1)
+    
+    // Draw some random rows of windows
+    val random = java.util.Random(42) // Fixed seed so tiles match
+    for (y in 5 until size step 15) {
+        for (x in 5 until size step 15) {
+            if (random.nextDouble() > 0.4) {
+                p.color = android.graphics.Color.parseColor(if (random.nextDouble() > 0.5) windowColor1 else windowColor2)
+                p.alpha = 200
+                canvas.drawRect(x.toFloat(), y.toFloat(), x + 8f, y + 10f, p)
+            }
+        }
+    }
+    return b
 }
