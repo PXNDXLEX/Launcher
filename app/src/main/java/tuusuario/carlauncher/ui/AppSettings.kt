@@ -32,6 +32,16 @@ object AppSettings {
     // Custom Vehicle Icon
     val customVehicleIconPath = mutableStateOf("") // Ruta del ícono personalizado del vehículo
 
+    // ── Ajuste fino de luces del auto (debug/tuning) ─────────────────────────
+    // Todos los valores son coordenadas en el bitmap 512×512 del glow
+    val glowCarHalfW   = mutableStateOf(22f)   // semiancho visual del modelo (px en bitmap)
+    val glowHeadY      = mutableStateOf(240f)  // Y de origen de los faros delanteros
+    val glowHeadReach  = mutableStateOf(40f)   // Y hasta donde llega el haz de luz
+    val glowHeadSpread = mutableStateOf(50f)   // cuánto se abre el cono lateralmente
+    val glowTailY      = mutableStateOf(272f)  // Y de las luces traseras
+    val glowTailRadius = mutableStateOf(14f)   // radio del glow trasero
+    val glowIconSize   = mutableStateOf(1.5f)  // escala del símbolo en el mapa
+
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
 
@@ -44,6 +54,13 @@ object AppSettings {
         speedoColor.value = prefs?.getInt("speedoColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
         vehicle3DScale.value = prefs?.getFloat("vehicle3DScale", 4f) ?: 4f
+        glowCarHalfW.value   = prefs?.getFloat("glowCarHalfW",   22f)  ?: 22f
+        glowHeadY.value      = prefs?.getFloat("glowHeadY",      240f) ?: 240f
+        glowHeadReach.value  = prefs?.getFloat("glowHeadReach",  40f)  ?: 40f
+        glowHeadSpread.value = prefs?.getFloat("glowHeadSpread", 50f)  ?: 50f
+        glowTailY.value      = prefs?.getFloat("glowTailY",      272f) ?: 272f
+        glowTailRadius.value = prefs?.getFloat("glowTailRadius", 14f)  ?: 14f
+        glowIconSize.value   = prefs?.getFloat("glowIconSize",   1.5f) ?: 1.5f
         uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
@@ -82,6 +99,14 @@ object AppSettings {
         vehicle3DScale.value = scale
         prefs?.edit()?.putFloat("vehicle3DScale", scale)?.apply()
     }
+
+    fun setGlowCarHalfW(v: Float)   { glowCarHalfW.value   = v; prefs?.edit()?.putFloat("glowCarHalfW",   v)?.apply() }
+    fun setGlowHeadY(v: Float)      { glowHeadY.value      = v; prefs?.edit()?.putFloat("glowHeadY",      v)?.apply() }
+    fun setGlowHeadReach(v: Float)  { glowHeadReach.value  = v; prefs?.edit()?.putFloat("glowHeadReach",  v)?.apply() }
+    fun setGlowHeadSpread(v: Float) { glowHeadSpread.value = v; prefs?.edit()?.putFloat("glowHeadSpread", v)?.apply() }
+    fun setGlowTailY(v: Float)      { glowTailY.value      = v; prefs?.edit()?.putFloat("glowTailY",      v)?.apply() }
+    fun setGlowTailRadius(v: Float) { glowTailRadius.value = v; prefs?.edit()?.putFloat("glowTailRadius", v)?.apply() }
+    fun setGlowIconSize(v: Float)   { glowIconSize.value   = v; prefs?.edit()?.putFloat("glowIconSize",   v)?.apply() }
 
     fun setUiColor(color: Int) {
         uiColor.value = color

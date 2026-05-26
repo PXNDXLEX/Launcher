@@ -462,7 +462,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         iconAllowOverlap(true)
                         iconIgnorePlacement(true)
                         // Tamaño adecuado para el nuevo bitmap
-                        iconSize(1.5)
+                        iconSize(AppSettings.glowIconSize.value.toDouble())
                     })
                 } catch (e: Exception) {}
             }
@@ -1054,12 +1054,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                     .build()
-            )
-            vp.transitionTo(followState, vp.makeDefaultViewportTransition())
-        } else if (!hasInitializedPosition) {
-            NavigationState.currentLocation.value?.let { loc ->
-                if (loc.latitude != 0.0) {
-                    hasInitializedPosition = true
                     val vp = mapView.viewport
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
@@ -1091,6 +1085,35 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     }
 
     // ── UI ───────────────────────────────────────────────────────────────────
+
+    // Panel de ajuste de luces del auto en tiempo real
+    var showGlowTuning by remember { mutableStateOf(false) }
+
+    // Regenerar el bitmap del glow y subirlo al estilo Mapbox inmediatamente
+    val refreshGlowOnMap: () -> Unit = {
+        mapView.mapboxMap.getStyle { style ->
+            try {
+                val bmp = drawCarLightsGlow()
+                style.removeStyleImage("car-lights-glow")
+                style.addImage("car-lights-glow", bmp)
+                // Actualizar iconSize de la capa de luces
+                (style.getLayer(CAR_LIGHTS_LAYER_ID)
+                    as? com.mapbox.maps.extension.style.layers.generated.SymbolLayer
+                )?.iconSize(AppSettings.glowIconSize.value.toDouble())
+                // Aplicar escala del modelo si cambió
+                mapView.location.updateSettings {
+                    locationPuck = getVehiclePuck(
+                        context,
+                        AppSettings.vehicleType.value,
+                        AppSettings.customVehicleIconPath.value,
+                        AppSettings.mapIconColor.value,
+                        AppSettings.vehicle3DScale.value
+                    )
+                }
+            } catch (e: Exception) { /* ignorar si el estilo no está listo */ }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
 
         AndroidView(
@@ -1472,6 +1495,34 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
+        // ── Panel de ajuste de luces en tiempo real (solo modo simulación) ────
+        if (AppSettings.isGpsSimulationMode.value) {
+            // Panel deslizable desde el borde derecho
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 64.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                GlowTuningPanel(
+                    visible       = showGlowTuning,
+                    onDismiss     = { showGlowTuning = false },
+                    onGlowChanged = refreshGlowOnMap
+                )
+            }
+            // Botón 🔦 para abrir/cerrar el panel (esquina superior izquierda, junto a la barra de búsqueda)
+            SmallFloatingActionButton(
+                onClick        = { showGlowTuning = !showGlowTuning },
+                modifier       = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 60.dp, start = 12.dp),
+                containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0x99111122),
+                contentColor   = Color.White
+            ) {
+                Text(if (showGlowTuning) "✕" else "🔦", fontSize = 16.sp)
+            }
+        }
+
         // ── Panel inferior: acciones de ruta ─────────────────────────────────
         AnimatedVisibility(
             visible  = selectedDestination != null,
@@ -1830,7 +1881,14 @@ fun drawCustomPin(color: Int): Bitmap {
 
 // (Removidos decodePolyline6 y valhallaTypeToOsrmStyle porque Mapbox Directions API retorna GeoJSON y estilos de maniobra OSRM nativos)
 
-fun drawCarLightsGlow(): Bitmap {
+fun drawCarLightsGlow(
+    carHalfW : Float = AppSettings.glowCarHalfW.value,
+    headY    : Float = AppSettings.glowHeadY.value,
+    headReach: Float = AppSettings.glowHeadReach.value,
+    headSpread:Float = AppSettings.glowHeadSpread.value,
+    tailY    : Float = AppSettings.glowTailY.value,
+    tailRadius:Float = AppSettings.glowTailRadius.value
+): Bitmap {
     val w = 512
     val h = 512
     val cx = w / 2f  // 256 = center
@@ -1838,43 +1896,40 @@ fun drawCarLightsGlow(): Bitmap {
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    // -- Car body reference: center at (256, 256), width ~50px --
-    val carHalfW = 22f  // Half the visual width of the 3D car model
-    
-    // === HEADLIGHTS (cone beams pointing UP toward Y=0) ===
-    val beamColor = android.graphics.Color.argb(100, 255, 255, 200)
+    val beamColor   = android.graphics.Color.argb(100, 255, 255, 200)
     val transparent = android.graphics.Color.TRANSPARENT
-    
+
+    // === HEADLIGHTS (haz apuntando hacia arriba, Y=0) ===
     // Left headlight cone
     val leftPath = Path()
-    leftPath.moveTo(cx - carHalfW - 2f, 240f)   // Origin at left headlight
-    leftPath.lineTo(cx - carHalfW - 50f, 40f)    // Fans out left
-    leftPath.lineTo(cx - 5f, 40f)                 // Fans in toward center
+    leftPath.moveTo(cx - carHalfW - 2f, headY)           // origen faro izquierdo
+    leftPath.lineTo(cx - carHalfW - headSpread, headReach) // abre hacia la izquierda
+    leftPath.lineTo(cx - 5f, headReach)                    // cierra hacia el centro
     leftPath.close()
-    paint.shader = LinearGradient(cx - carHalfW, 240f, cx - carHalfW, 40f, beamColor, transparent, Shader.TileMode.CLAMP)
+    paint.shader = LinearGradient(cx - carHalfW, headY, cx - carHalfW, headReach, beamColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawPath(leftPath, paint)
-    
+
     // Right headlight cone
     val rightPath = Path()
-    rightPath.moveTo(cx + carHalfW + 2f, 240f)   // Origin at right headlight
-    rightPath.lineTo(cx + carHalfW + 50f, 40f)    // Fans out right
-    rightPath.lineTo(cx + 5f, 40f)                 // Fans in toward center
+    rightPath.moveTo(cx + carHalfW + 2f, headY)           // origen faro derecho
+    rightPath.lineTo(cx + carHalfW + headSpread, headReach) // abre hacia la derecha
+    rightPath.lineTo(cx + 5f, headReach)                    // cierra hacia el centro
     rightPath.close()
-    paint.shader = LinearGradient(cx + carHalfW, 240f, cx + carHalfW, 40f, beamColor, transparent, Shader.TileMode.CLAMP)
+    paint.shader = LinearGradient(cx + carHalfW, headY, cx + carHalfW, headReach, beamColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawPath(rightPath, paint)
-    
-    // === TAILLIGHTS (small red glows) ===
+
+    // === TAILLIGHTS (pequeños glow rojos) ===
     val tailColor = android.graphics.Color.argb(180, 255, 15, 15)
-    
+
     // Left taillight
-    paint.shader = RadialGradient(cx - carHalfW, 272f, 14f, tailColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx - carHalfW, 272f, 14f, paint)
-    
+    paint.shader = RadialGradient(cx - carHalfW, tailY, tailRadius, tailColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx - carHalfW, tailY, tailRadius, paint)
+
     // Right taillight
-    paint.shader = RadialGradient(cx + carHalfW, 272f, 14f, tailColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx + carHalfW, 272f, 14f, paint)
-    
-    // === GROUND REFLECTION (subtle warm pool under the car) ===
+    paint.shader = RadialGradient(cx + carHalfW, tailY, tailRadius, tailColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx + carHalfW, tailY, tailRadius, paint)
+
+    // === GROUND REFLECTION (pool de luz cálida bajo el auto) ===
     val reflColor = android.graphics.Color.argb(40, 255, 220, 150)
     paint.shader = RadialGradient(cx, 256f, 45f, reflColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawCircle(cx, 256f, 45f, paint)
