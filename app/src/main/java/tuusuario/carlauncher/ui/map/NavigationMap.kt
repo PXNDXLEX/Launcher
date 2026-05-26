@@ -345,29 +345,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             val isNightMode = (style == "DARK" || style == "NEON")
             if (style != "SATELLITE") {
                 try {
+                    // Colores de edificios según el modo
+                    val buildingColor = if (isNightMode) {
+                        if (style == "NEON") "#12121f" else "#1a1a2a"
+                    } else "#e0e0e0"
+                    val heightMult = if (isNightMode) 3.0 else 2.5
+                    
                     loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
                         sourceLayer("building")
                         filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
                         minZoom(14.0)
-                        
-                        if (isNightMode) {
-                            loadedStyle.addImage("building-texture", drawBuildingTexture(style))
-                            fillExtrusionPattern("building-texture")
-                            fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(3.0)))
-                            fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(3.0)))
-                            fillExtrusionOpacity(0.9)
-                        } else {
-                            fillExtrusionColor("#e0e0e0")
-                            fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(2.5)))
-                            fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(2.5)))
-                            fillExtrusionOpacity(0.85)
+                        fillExtrusionColor(buildingColor)
+                        fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(heightMult)))
+                        fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(heightMult)))
+                        fillExtrusionOpacity(if (isNightMode) 0.92 else 0.85)
+                        if (!isNightMode) {
                             fillExtrusionAmbientOcclusionIntensity(0.6)
                             fillExtrusionAmbientOcclusionRadius(4.0)
                         }
                     })
                     
-                    // La iluminación y atmósfera por defecto de Style.DARK y Style.TRAFFIC_NIGHT 
-                    // ya son óptimas y oscuras, por lo que no forzaremos la API de luces de v11 aquí.
+                    // ── Reflejos de ventanas en el suelo (solo modo noche) ───────
+                    // Capa plana debajo de los edificios que simula la luz de ventanas
+                    // derramándose sobre las aceras y el asfalto
+                    if (isNightMode) {
+                        val glowColor = if (style == "NEON") "#1a0033" else "#2a1800"
+                        loadedStyle.addLayerBelow(fillLayer("building-glow", "composite") {
+                            sourceLayer("building")
+                            filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
+                            minZoom(14.0)
+                            fillColor(glowColor)
+                            fillOpacity(0.65)
+                        }, "3d-buildings")
+                    }
                     
                     // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
                     val greenColor = if (isNightMode) {
@@ -1776,61 +1786,53 @@ fun drawCustomPin(color: Int): Bitmap {
 // (Removidos decodePolyline6 y valhallaTypeToOsrmStyle porque Mapbox Directions API retorna GeoJSON y estilos de maniobra OSRM nativos)
 
 fun drawCarLightsGlow(): Bitmap {
-    val width = 400
-    val height = 400
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val w = 512
+    val h = 512
+    val cx = w / 2f  // 256 = center
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    val frontColor = android.graphics.Color.argb(160, 255, 255, 180)
-    val backColor = android.graphics.Color.argb(220, 255, 10, 10)
+    // -- Car body reference: center at (256, 256), width ~50px --
+    val carHalfW = 22f  // Half the visual width of the 3D car model
+    
+    // === HEADLIGHTS (cone beams pointing UP toward Y=0) ===
+    val beamColor = android.graphics.Color.argb(100, 255, 255, 200)
     val transparent = android.graphics.Color.TRANSPARENT
-
-    // Left Headlight (Beam pointing UP towards Y=20)
-    paint.shader = LinearGradient(185f, 200f, 185f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawOval(RectF(165f, 20f, 205f, 200f), paint)
     
-    // Right Headlight
-    paint.shader = LinearGradient(215f, 200f, 215f, 20f, frontColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawOval(RectF(195f, 20f, 235f, 200f), paint)
+    // Left headlight cone
+    val leftPath = Path()
+    leftPath.moveTo(cx - carHalfW - 2f, 240f)   // Origin at left headlight
+    leftPath.lineTo(cx - carHalfW - 50f, 40f)    // Fans out left
+    leftPath.lineTo(cx - 5f, 40f)                 // Fans in toward center
+    leftPath.close()
+    paint.shader = LinearGradient(cx - carHalfW, 240f, cx - carHalfW, 40f, beamColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawPath(leftPath, paint)
     
-    // Left Taillight (Glow)
-    paint.shader = RadialGradient(185f, 220f, 20f, backColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(185f, 220f, 20f, paint)
+    // Right headlight cone
+    val rightPath = Path()
+    rightPath.moveTo(cx + carHalfW + 2f, 240f)   // Origin at right headlight
+    rightPath.lineTo(cx + carHalfW + 50f, 40f)    // Fans out right
+    rightPath.lineTo(cx + 5f, 40f)                 // Fans in toward center
+    rightPath.close()
+    paint.shader = LinearGradient(cx + carHalfW, 240f, cx + carHalfW, 40f, beamColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawPath(rightPath, paint)
     
-    // Right Taillight (Glow)
-    paint.shader = RadialGradient(215f, 220f, 20f, backColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(215f, 220f, 20f, paint)
+    // === TAILLIGHTS (small red glows) ===
+    val tailColor = android.graphics.Color.argb(180, 255, 15, 15)
+    
+    // Left taillight
+    paint.shader = RadialGradient(cx - carHalfW, 272f, 14f, tailColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx - carHalfW, 272f, 14f, paint)
+    
+    // Right taillight
+    paint.shader = RadialGradient(cx + carHalfW, 272f, 14f, tailColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx + carHalfW, 272f, 14f, paint)
+    
+    // === GROUND REFLECTION (subtle warm pool under the car) ===
+    val reflColor = android.graphics.Color.argb(40, 255, 220, 150)
+    paint.shader = RadialGradient(cx, 256f, 45f, reflColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx, 256f, 45f, paint)
 
     return bitmap
-}
-
-fun drawBuildingTexture(style: String): Bitmap {
-    val size = 64
-    val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(b)
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    
-    // Background (Wall)
-    val bgColor = if (style == "NEON") "#111118" else "#1a1a24"
-    canvas.drawColor(android.graphics.Color.parseColor(bgColor))
-    
-    // Windows
-    val windowColor1 = if (style == "NEON") "#00FFFF" else "#FFFFDD"
-    val windowColor2 = if (style == "NEON") "#FF00FF" else "#FFD54F"
-    
-    p.color = android.graphics.Color.parseColor(windowColor1)
-    
-    // Draw some random rows of windows
-    val random = java.util.Random(42) // Fixed seed so tiles match
-    for (y in 5 until size step 15) {
-        for (x in 5 until size step 15) {
-            if (random.nextDouble() > 0.4) {
-                p.color = android.graphics.Color.parseColor(if (random.nextDouble() > 0.5) windowColor1 else windowColor2)
-                p.alpha = 200
-                canvas.drawRect(x.toFloat(), y.toFloat(), x + 8f, y + 10f, p)
-            }
-        }
-    }
-    return b
 }
