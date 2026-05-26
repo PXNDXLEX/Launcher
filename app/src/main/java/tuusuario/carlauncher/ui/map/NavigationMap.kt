@@ -310,8 +310,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     fun applyMapStyle(style: String) {
         val styleUri = when (style) {
             "SATELLITE" -> Style.SATELLITE_STREETS
-            "DARK"      -> Style.DARK
-            "NEON"      -> Style.TRAFFIC_NIGHT
+            "DARK", "NEON" -> Style.STANDARD
             else        -> Style.MAPBOX_STREETS
         }
         mapView.mapboxMap.loadStyle(styleUri) { loadedStyle ->
@@ -329,53 +328,20 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
 
-            // Casing de la ruta (borde oscuro)
-            loadedStyle.addLayer(lineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID) {
-                lineColor("#0D1B2A")
-                lineWidth(14.0)
-                lineCap(LineCap.ROUND)
-                lineJoin(LineJoin.ROUND)
-                lineOpacity(0.8)
-            })
-            // Ruta principal
-            loadedStyle.addLayer(lineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID) {
-                lineColor(routeColorHex)
-                lineWidth(9.0)
-                lineCap(LineCap.ROUND)
-                lineJoin(LineJoin.ROUND)
-            })
-            // Ruta histórica
-            loadedStyle.addLayer(lineLayer(HISTORY_LAYER_ID, HISTORY_SOURCE_ID) {
-                lineColor("#4CAF50")
-                lineWidth(5.0)
-                lineCap(LineCap.ROUND)
-                lineJoin(LineJoin.ROUND)
-            })
-            // Ruta dashcam
-            loadedStyle.addLayer(lineLayer(DASHCAM_LAYER_ID, DASHCAM_SOURCE_ID) {
-                lineColor("#FF9800")
-                lineWidth(5.0)
-                lineCap(LineCap.ROUND)
-                lineJoin(LineJoin.ROUND)
-            })
-
-            // ── Edificios 3D con relieve (fill-extrusion) ─────────────────
-            // Disponible en STREETS, DARK y TRAFFIC_NIGHT (fuente "composite")
-            if (style != "SATELLITE") {
+            // ── Entorno 3D y Estética ─────────────────
+            val isStandard = (style == "DARK" || style == "NEON")
+            if (isStandard) {
                 try {
-                    val buildingColor = when (style) {
-                        "NEON" -> "#1a1a2e"
-                        "DARK" -> "#2a2a35" // Un poco más oscuro para que resalten las calles
-                        else   -> "#e0e0e0" // Blanco/gris suave moderno para el día
-                    }
+                    // Activar luces dinámicas de ciudad en Mapbox Standard
+                    loadedStyle.setStyleImportConfigProperty("basemap", "lightPreset", "night")
+                } catch (e: Exception) {}
+            } else if (style != "SATELLITE") {
+                try {
+                    // Blanco/gris suave moderno para el día
+                    val buildingColor = "#e0e0e0" 
                     loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
                         sourceLayer("building")
-                        filter(
-                            Expression.eq(
-                                Expression.get("extrude"),
-                                Expression.literal("true")
-                            )
-                        )
+                        filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
                         minZoom(14.0)
                         fillExtrusionColor(buildingColor)
                         // Aumentar la altura de los edificios un 150% (x2.5)
@@ -387,10 +353,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     })
                     
                     // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
-                    val greenColor = when (style) {
-                        "NEON", "DARK" -> "#1b4332" // Verde oscuro elegante de noche
-                        else -> "#b7e4c7" // Verde pastel moderno de día
-                    }
+                    val greenColor = "#b7e4c7" // Verde pastel moderno de día
                     loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
                         sourceLayer("landuse")
                         filter(
@@ -408,11 +371,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }, "3d-buildings")
 
                     // ── Mejorar estética de Carreteras (Glow/Destacar) ─────────────────
-                    val roadColor = when (style) {
-                        "NEON" -> "#16213e"
-                        "DARK" -> "#1c1c24" // Carreteras ligeramente más claras que el fondo para destacarlas
-                        else -> "#ffffff"   // Blancas inmaculadas de día
-                    }
+                    val roadColor = "#ffffff"   // Blancas inmaculadas de día
                     loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
                         sourceLayer("road")
                         filter(
@@ -436,11 +395,39 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         )
                     }, "3d-buildings")
                     
-                } catch (e: Exception) {
-                    // Algunos estilos no tienen fuente composite con building/landuse
-                }
+                } catch (e: Exception) {}
             }
 
+            // ── Capas de Ruta Visuales ─────────────────
+            // Añadidas AL FINAL para garantizar que se dibujen SOBRE carreteras y áreas verdes
+            loadedStyle.addLayer(lineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID) {
+                lineColor("#0D1B2A")
+                lineWidth(14.0)
+                lineCap(LineCap.ROUND)
+                lineJoin(LineJoin.ROUND)
+                lineOpacity(0.8)
+            })
+            loadedStyle.addLayer(lineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID) {
+                lineColor(routeColorHex)
+                lineWidth(9.0)
+                lineCap(LineCap.ROUND)
+                lineJoin(LineJoin.ROUND)
+            })
+            loadedStyle.addLayer(lineLayer(HISTORY_LAYER_ID, HISTORY_SOURCE_ID) {
+                lineColor("#4CAF50")
+                lineWidth(5.0)
+                lineCap(LineCap.ROUND)
+                lineJoin(LineJoin.ROUND)
+            })
+            loadedStyle.addLayer(lineLayer(DASHCAM_LAYER_ID, DASHCAM_SOURCE_ID) {
+                lineColor("#FF9800")
+                lineWidth(5.0)
+                lineCap(LineCap.ROUND)
+                lineJoin(LineJoin.ROUND)
+            })
+
+            // (Las capas estéticas terminan aquí)
+            
             // LocationComponent — puck del vehículo
             val locPlugin = mapView.location
             try {
