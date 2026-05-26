@@ -394,11 +394,13 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
                         sourceLayer("landuse")
                         filter(
-                            Expression.match(
-                                Expression.get("class"),
-                                Expression.literal(listOf("park", "pitch", "grass", "forest", "golf_course", "garden")),
-                                Expression.literal(true),
-                                Expression.literal(false)
+                            Expression.any(
+                                Expression.eq(Expression.get("class"), Expression.literal("park")),
+                                Expression.eq(Expression.get("class"), Expression.literal("pitch")),
+                                Expression.eq(Expression.get("class"), Expression.literal("grass")),
+                                Expression.eq(Expression.get("class"), Expression.literal("forest")),
+                                Expression.eq(Expression.get("class"), Expression.literal("golf_course")),
+                                Expression.eq(Expression.get("class"), Expression.literal("garden"))
                             )
                         )
                         fillColor(greenColor)
@@ -414,11 +416,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
                         sourceLayer("road")
                         filter(
-                            Expression.match(
-                                Expression.get("class"),
-                                Expression.literal(listOf("motorway", "trunk", "primary", "secondary", "tertiary", "street", "street_limited")),
-                                Expression.literal(true),
-                                Expression.literal(false)
+                            Expression.any(
+                                Expression.eq(Expression.get("class"), Expression.literal("motorway")),
+                                Expression.eq(Expression.get("class"), Expression.literal("trunk")),
+                                Expression.eq(Expression.get("class"), Expression.literal("primary")),
+                                Expression.eq(Expression.get("class"), Expression.literal("secondary")),
+                                Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
+                                Expression.eq(Expression.get("class"), Expression.literal("street")),
+                                Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
                             )
                         )
                         lineColor(roadColor)
