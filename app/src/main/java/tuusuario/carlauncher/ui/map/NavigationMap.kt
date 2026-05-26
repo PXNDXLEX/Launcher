@@ -505,10 +505,37 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
 
             // ── Heading-up SIEMPRE activo: brujula + GPS bearing ──────────────
+            var lastIndicatorPos: com.mapbox.geojson.Point? = null
+            var lastIndicatorBearing: Double = 0.0
+            val updateGlow = {
+                lastIndicatorPos?.let { pos ->
+                    mapView.mapboxMap.getStyle { style ->
+                        style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>("car-lights-source")?.featureCollection(
+                            com.mapbox.geojson.FeatureCollection.fromFeature(
+                                com.mapbox.geojson.Feature.fromGeometry(
+                                    pos,
+                                    com.google.gson.JsonObject().apply {
+                                        addProperty("bearing", lastIndicatorBearing)
+                                    }
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+
+            locPlugin.addOnIndicatorPositionChangedListener { point ->
+                lastIndicatorPos = point
+                updateGlow()
+            }
+
             // addOnIndicatorBearingChangedListener usa GPS bearing cuando el auto
             // se mueve Y brujula del dispositivo cuando esta parado. Funciona siempre.
             // El mapa rota bajo el icono del auto, que siempre apunta hacia arriba.
             locPlugin.addOnIndicatorBearingChangedListener { newBearing ->
+                lastIndicatorBearing = newBearing
+                updateGlow()
+                
                 gpsBearing = newBearing
                 lastKnownBearing = newBearing.toFloat()
                 
@@ -705,20 +732,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
                     if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
                 )
-
-                // Actualizar luces en mapa si existe
-                mapView.mapboxMap.getStyle { style ->
-                    style.getSourceAs<GeoJsonSource>(CAR_LIGHTS_SOURCE_ID)?.featureCollection(
-                        FeatureCollection.fromFeature(
-                            Feature.fromGeometry(
-                                Point.fromLngLat(loc.longitude, loc.latitude),
-                                com.google.gson.JsonObject().apply {
-                                    addProperty("bearing", loc.bearing.toDouble())
-                                }
-                            )
-                        )
-                    )
-                }
 
                 // ── Intro cinematográfica al primer fix GPS ─────────────────
                 if (!hasInitializedPosition && loc.latitude != 0.0) {
