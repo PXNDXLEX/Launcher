@@ -163,8 +163,8 @@ fun GlowTuningPanel(
                 TuningSlider(
                     label = "Escala modelo (vehicle3DScale)",
                     value = AppSettings.vehicle3DScale.value,
-                    range  = 0.5f..20f,
-                    format = "%.2f"
+                    range  = 0.005f..0.02f,
+                    format = "%.4f"
                 ) { AppSettings.setVehicle3DScale(it) }
 
                 Spacer(Modifier.height(12.dp))
@@ -179,6 +179,7 @@ fun GlowTuningPanel(
                         AppSettings.setGlowTailY(272f)
                         AppSettings.setGlowTailRadius(14f)
                         AppSettings.setGlowIconSize(1.5f)
+                        AppSettings.setVehicle3DScale(0.01f)
                         onGlowChanged()
                     },
                     modifier = Modifier.fillMaxWidth(),

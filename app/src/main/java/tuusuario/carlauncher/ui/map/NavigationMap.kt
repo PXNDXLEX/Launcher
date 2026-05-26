@@ -1,4 +1,4 @@
-﻿package com.tuusuario.carlauncher.ui.map
+package com.tuusuario.carlauncher.ui.map
 
 import android.Manifest
 import android.animation.ValueAnimator
@@ -322,7 +322,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         val styleUri = when (style) {
             "SATELLITE" -> Style.SATELLITE_STREETS
             "DARK"      -> Style.DARK
-            "NEON"      -> Style.TRAFFIC_NIGHT
+            "NEON"      -> Style.DARK // Usamos DARK como base para asegurar que los edificios existan en el composite source
             else        -> Style.MAPBOX_STREETS
         }
         mapView.mapboxMap.loadStyle(styleUri) { loadedStyle ->
@@ -421,54 +421,96 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                     
                     // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
-                    val greenColor = if (isNightMode) {
-                        if (style == "NEON") "#111118" else "#1a1a24" 
-                    } else "#b7e4c7"
-                    
-                    loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
-                        sourceLayer("landuse")
-                        filter(
-                            Expression.any(
-                                Expression.eq(Expression.get("class"), Expression.literal("park")),
-                                Expression.eq(Expression.get("class"), Expression.literal("pitch")),
-                                Expression.eq(Expression.get("class"), Expression.literal("grass")),
-                                Expression.eq(Expression.get("class"), Expression.literal("forest")),
-                                Expression.eq(Expression.get("class"), Expression.literal("golf_course")),
-                                Expression.eq(Expression.get("class"), Expression.literal("garden"))
-                            )
-                        )
-                        fillColor(greenColor)
-                        fillOpacity(0.6)
-                    }, "3d-buildings")
+                    // Detectar primera capa de etiquetas para que nombres de calles queden visibles
+                    val firstSymbolLayerId: String? = try {
+                        loadedStyle.styleLayers.firstOrNull { it.type == "symbol" }?.id
+                    } catch (e: Exception) { null }
+                    val labelRef = firstSymbolLayerId ?: "3d-buildings"
 
-                    // ── Mejorar estética de Carreteras (Glow/Destacar) ─────────────────
+                    val greenColor = if (isNightMode) {
+                        if (style == "NEON") "#111118" else "#1a1a24"
+                    } else "#b7e4c7"
+
+                    try {
+                        loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
+                            sourceLayer("landuse")
+                            filter(
+                                Expression.any(
+                                    Expression.eq(Expression.get("class"), Expression.literal("park")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("pitch")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("grass")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("forest")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("golf_course")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("garden"))
+                                )
+                            )
+                            fillColor(greenColor)
+                            fillOpacity(0.6)
+                        }, labelRef)
+                    } catch (e: Exception) {}
+
                     val roadColor = if (isNightMode) {
                         if (style == "NEON") "#1a1a2e" else "#202020"
-                    } else "#ffffff"
-                    
-                    loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
-                        sourceLayer("road")
-                        filter(
-                            Expression.any(
-                                Expression.eq(Expression.get("class"), Expression.literal("motorway")),
-                                Expression.eq(Expression.get("class"), Expression.literal("trunk")),
-                                Expression.eq(Expression.get("class"), Expression.literal("primary")),
-                                Expression.eq(Expression.get("class"), Expression.literal("secondary")),
-                                Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
-                                Expression.eq(Expression.get("class"), Expression.literal("street")),
-                                Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
+                    } else "#c0c0c0"
+
+                    // Borde blanco de carreteras (road casing) para modos oscuros
+                    if (isNightMode) {
+                        try {
+                            loadedStyle.addLayerBelow(lineLayer("custom-roads-casing", "composite") {
+                                sourceLayer("road")
+                                filter(
+                                    Expression.any(
+                                        Expression.eq(Expression.get("class"), Expression.literal("motorway")),
+                                        Expression.eq(Expression.get("class"), Expression.literal("trunk")),
+                                        Expression.eq(Expression.get("class"), Expression.literal("primary")),
+                                        Expression.eq(Expression.get("class"), Expression.literal("secondary")),
+                                        Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
+                                        Expression.eq(Expression.get("class"), Expression.literal("street")),
+                                        Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
+                                    )
+                                )
+                                lineColor("#ffffff")
+                                lineWidth(
+                                    Expression.interpolate(
+                                        Expression.linear(), Expression.zoom(),
+                                        Expression.literal(12.0), Expression.literal(3.5),
+                                        Expression.literal(18.0), Expression.literal(17.0)
+                                    )
+                                )
+                                lineOpacity(0.35)
+                                lineCap(LineCap.ROUND)
+                                lineJoin(LineJoin.ROUND)
+                            }, labelRef)
+                        } catch (e: Exception) {}
+                    }
+
+                    try {
+                        loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
+                            sourceLayer("road")
+                            filter(
+                                Expression.any(
+                                    Expression.eq(Expression.get("class"), Expression.literal("motorway")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("trunk")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("primary")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("secondary")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("street")),
+                                    Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
+                                )
                             )
-                        )
-                        lineColor(roadColor)
-                        lineWidth(
-                            Expression.interpolate(
-                                Expression.linear(), Expression.zoom(),
-                                Expression.literal(12.0), Expression.literal(2.0),
-                                Expression.literal(18.0), Expression.literal(14.0)
+                            lineColor(roadColor)
+                            lineWidth(
+                                Expression.interpolate(
+                                    Expression.linear(), Expression.zoom(),
+                                    Expression.literal(12.0), Expression.literal(2.0),
+                                    Expression.literal(18.0), Expression.literal(14.0)
+                                )
                             )
-                        )
-                    }, "3d-buildings")
-                    
+                            lineCap(LineCap.ROUND)
+                            lineJoin(LineJoin.ROUND)
+                        }, labelRef)
+                    } catch (e: Exception) {}
+
                 } catch (e: Exception) {}
             }
 
@@ -780,33 +822,44 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         coroutineScope.launch {
                             isIntroAnimating = true
                             try {
-                                // ── FASE 1: Posicionar cámara en la parte delantera
-                                // del auto inmediatamente (sin animación) — evita ver USA
-                                // bearing = dirección + 180° → cámara mira hacia el frente del auto
+                                // â”€â”€ FASE 1: Posicionar cÃ¡mara en Ã¡ngulo diagonal delantero inmediatamente
                                 mapView.mapboxMap.setCamera(
                                     cameraOptions {
                                         center(carPos)
-                                        zoom(20.0)   // muy cerca para ver el auto
-                                        pitch(75.0)  // perspectiva baja, dramática
-                                        bearing(carBearing + 180.0) // enfrente del auto
+                                        zoom(20.0)
+                                        pitch(75.0)
+                                        bearing(carBearing + 145.0)
                                     }
                                 )
-                                delay(2000) // Mostrar el frente del auto
+                                delay(200)
 
-                                // ── FASE 2: Volar suavemente a vista de águila
+                                // â”€â”€ FASE 2: Paneo de Ã³rbita cinematogrÃ¡fico por delante
+                                mapView.camera.easeTo(
+                                    cameraOptions {
+                                        center(carPos)
+                                        zoom(19.8)
+                                        pitch(70.0)
+                                        bearing(carBearing + 215.0)
+                                    },
+                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
+                                        .mapAnimationOptions { duration(3000) }
+                                )
+                                delay(3000)
+
+                                // FASE 3: Vuelo hacia arriba estilo aguila (top-down)
                                 mapView.camera.flyTo(
                                     cameraOptions {
                                         center(carPos)
-                                        zoom(14.5)   // vista aérea amplia
-                                        pitch(0.0)   // completamente vertical
-                                        bearing(0.0) // norte arriba
+                                        zoom(14.5)
+                                        pitch(0.0)
+                                        bearing(0.0)
                                     },
                                     com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                        .mapAnimationOptions { duration(2800) } // lento y fluido
+                                        .mapAnimationOptions { duration(3000) }
                                 )
-                                delay(3000) // Esperar que termine + pausa aérea
+                                delay(3200)
 
-                                // ── FASE 3: Transición fluida a modo 3D de navegación
+                                // FASE 4: Activar viewport de seguimiento de navegacion
                                 val vp = mapView.viewport
                                 val followState = vp.makeFollowPuckViewportState(
                                     FollowPuckViewportStateOptions.Builder()
@@ -827,7 +880,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                             }
                         }
                     } else {
-                        // Si ya se jugó el intro (rotación de pantalla), centrar directamente
+                        // Si ya se jugo el intro (rotacion de pantalla), centrar directamente
                         val vp = mapView.viewport
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
@@ -1079,7 +1132,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     // ── UI ───────────────────────────────────────────────────────────────────
 
     // Panel de ajuste de luces del auto en tiempo real
-    var showGlowTuning by remember { mutableStateOf(false) }
+    val showGlowTuning = NavigationState.showGlowTuning.value
 
     // Regenerar el bitmap del glow y subirlo al estilo Mapbox inmediatamente
     val refreshGlowOnMap: () -> Unit = {
@@ -1483,32 +1536,30 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         }
 
-        // ── Panel de ajuste de luces en tiempo real (solo modo simulación) ────
-        if (AppSettings.isGpsSimulationMode.value) {
-            // Panel deslizable desde el borde derecho
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 64.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                GlowTuningPanel(
-                    visible       = showGlowTuning,
-                    onDismiss     = { showGlowTuning = false },
-                    onGlowChanged = refreshGlowOnMap
-                )
-            }
-            // Botón 🔦 para abrir/cerrar el panel (esquina superior izquierda, junto a la barra de búsqueda)
-            SmallFloatingActionButton(
-                onClick        = { showGlowTuning = !showGlowTuning },
-                modifier       = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(top = 60.dp, start = 12.dp),
-                containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0x99111122),
-                contentColor   = Color.White
-            ) {
-                Text(if (showGlowTuning) "✕" else "🔦", fontSize = 16.sp)
-            }
+        // ── Panel de ajuste de luces en tiempo real ────
+        // Panel deslizable desde el borde derecho
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 64.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            GlowTuningPanel(
+                visible       = showGlowTuning,
+                onDismiss     = { NavigationState.showGlowTuning.value = false },
+                onGlowChanged = refreshGlowOnMap
+            )
+        }
+        // Boton 🔦 para abrir/cerrar el panel (esquina superior izquierda, junto a la barra de busqueda)
+        SmallFloatingActionButton(
+            onClick        = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
+            modifier       = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 60.dp, start = 12.dp),
+            containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0x99111122),
+            contentColor   = Color.White
+        ) {
+            Text(if (showGlowTuning) "✕" else "🔦", fontSize = 16.sp)
         }
 
         // ── Panel inferior: acciones de ruta ─────────────────────────────────
