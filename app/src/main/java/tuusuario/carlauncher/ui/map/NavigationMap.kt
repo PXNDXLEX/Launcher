@@ -1,4 +1,4 @@
-﻿package com.tuusuario.carlauncher.ui.map
+package com.tuusuario.carlauncher.ui.map
 
 import android.Manifest
 import android.animation.ValueAnimator
@@ -63,6 +63,7 @@ import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
 import com.mapbox.maps.extension.style.layers.addLayerBelow
+import com.mapbox.maps.extension.style.layers.addLayerAbove
 import com.mapbox.maps.extension.style.layers.generated.fillLayer
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.camera
