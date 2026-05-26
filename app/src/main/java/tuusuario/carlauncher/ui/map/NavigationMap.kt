@@ -1,4 +1,4 @@
-package com.tuusuario.carlauncher.ui.map
+﻿package com.tuusuario.carlauncher.ui.map
 
 import android.Manifest
 import android.animation.ValueAnimator
@@ -1940,43 +1940,80 @@ fun drawBuildingFacadeTexture(isNeon: Boolean): Bitmap {
     val h   = 256
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val cv  = Canvas(bmp)
-    val p   = Paint(Paint.ANTI_ALIAS_FLAG)
     val rng = java.util.Random(42L)
 
-    val bgHex = if (isNeon) "#0f0f18" else "#14141f"
-    cv.drawColor(android.graphics.Color.parseColor(bgHex))
+    // Fondo del edificio: Azul oscuro tipo noche
+    val bgHex = if (isNeon) "#0f0f18" else "#141724"
+    val bgColor = android.graphics.Color.parseColor(bgHex)
+    cv.drawColor(bgColor)
 
-    // Grid de ventanas uniforme y con el mismo tamaÃ±o
-    val cols     = 8
-    val rows     = 8
-    val winW     = 16f
-    val winH     = 16f
-    val hPad     = (w - cols * winW) / (cols + 1)
-    val vPad     = (h - rows * winH) / (rows + 1)
+    // Grid de ventanas espaciadas (3 columnas x 3 filas) para evitar saturaciÃ³n
+    val cols      = 3
+    val rows      = 3
+    val winW      = 40f
+    val winH      = 30f
+    val glowH     = 16f
+    val hPad      = (w - cols * winW) / (cols + 1)
+    val vPad      = (h - rows * (winH + glowH)) / (rows + 1)
     val litChance = 0.40f
 
-    // Color de luces: neon cyan para NEON, blanco cÃ¡lido para DARK
+    // Colores para ventanas y sus cruces/marcos
     val litColor = if (isNeon) {
-        android.graphics.Color.argb(220, 0, 229, 255)
+        android.graphics.Color.argb(255, 0, 229, 255) // Cian neÃ³n
     } else {
-        android.graphics.Color.argb(180, 255, 224, 130)
+        android.graphics.Color.argb(255, 255, 213, 79) // Amarillo cÃ¡lido
     }
-    val darkColor = android.graphics.Color.argb(20,  10,  10,  18)
+    val darkColor = android.graphics.Color.parseColor("#090b11")
+    val litCrossColor = bgColor // La cruz de la ventana encendida usa el color del edificio
+    val darkCrossColor = android.graphics.Color.parseColor("#1b2030") // Cruz visible en ventanas apagadas
+
+    // Brillo proyectado hacia abajo (glow)
+    val glowColorStart = if (isNeon) {
+        android.graphics.Color.argb(130, 0, 229, 255)
+    } else {
+        android.graphics.Color.argb(130, 255, 213, 79)
+    }
+    val glowColorEnd = android.graphics.Color.argb(0, 0, 0, 0)
+
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
 
     for (row in 0 until rows) {
-        val y = vPad + row * (winH + vPad)
+        val y = vPad + row * (winH + glowH + vPad)
         for (col in 0 until cols) {
             val x    = hPad + col * (winW + hPad)
             val rect = android.graphics.RectF(x, y, x + winW, y + winH)
+            
+            val isLit = rng.nextFloat() < litChance
 
-            p.color = if (rng.nextFloat() < litChance) litColor else darkColor
+            // 1. Dibujar el fondo de la ventana
             p.style = Paint.Style.FILL
-            cv.drawRoundRect(rect, 2f, 2f, p)
+            p.color = if (isLit) litColor else darkColor
+            cv.drawRoundRect(rect, 3f, 3f, p)
 
-            p.color = android.graphics.Color.argb(60, 0, 0, 0)
+            // 2. Si estÃ¡ iluminada, dibujar el brillo proyectado hacia abajo
+            if (isLit) {
+                val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    shader = android.graphics.LinearGradient(
+                        rect.left + winW / 2, rect.bottom,
+                        rect.left + winW / 2, rect.bottom + glowH,
+                        glowColorStart,
+                        glowColorEnd,
+                        android.graphics.Shader.TileMode.CLAMP
+                    )
+                }
+                cv.drawRect(rect.left, rect.bottom, rect.right, rect.bottom + glowH, glowPaint)
+            }
+
+            // 3. Dibujar la cruz del marco de la ventana
             p.style = Paint.Style.STROKE
-            p.strokeWidth = 1f
-            cv.drawRoundRect(rect, 2f, 2f, p)
+            p.color = if (isLit) litCrossColor else darkCrossColor
+            p.strokeWidth = 2.5f
+            
+            // LÃ­nea vertical
+            cv.drawLine(rect.left + winW / 2, rect.top, rect.left + winW / 2, rect.bottom, p)
+            // LÃ­nea horizontal
+            cv.drawLine(rect.left, rect.top + winH / 2, rect.right, rect.top + winH / 2, p)
         }
     }
 
