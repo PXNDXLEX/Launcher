@@ -1031,17 +1031,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                     .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
                     .build()
-                    val vp = mapView.viewport
-                    val followState = vp.makeFollowPuckViewportState(
-                        FollowPuckViewportStateOptions.Builder()
-                            .pitch(55.0).zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                            .build()
-                    )
-                    vp.transitionTo(followState, vp.makeImmediateViewportTransition())
-                }
-            }
+            )
+            vp.transitionTo(followState, vp.makeImmediateViewportTransition())
         }
     }
 
