@@ -64,7 +64,6 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
 import com.mapbox.maps.extension.style.layers.addLayerBelow
 import com.mapbox.maps.extension.style.layers.generated.fillLayer
-import com.mapbox.maps.extension.style.expressions.dsl.generated.literalArray
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.annotation.annotations
@@ -397,7 +396,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         filter(
                             Expression.match(
                                 Expression.get("class"),
-                                Expression.literalArray(listOf("park", "pitch", "grass", "forest", "golf_course", "garden")),
+                                Expression.literal(listOf("park", "pitch", "grass", "forest", "golf_course", "garden")),
                                 Expression.literal(true),
                                 Expression.literal(false)
                             )
@@ -417,7 +416,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         filter(
                             Expression.match(
                                 Expression.get("class"),
-                                Expression.literalArray(listOf("motorway", "trunk", "primary", "secondary", "tertiary", "street", "street_limited")),
+                                Expression.literal(listOf("motorway", "trunk", "primary", "secondary", "tertiary", "street", "street_limited")),
                                 Expression.literal(true),
                                 Expression.literal(false)
                             )
