@@ -155,13 +155,8 @@ class MockLocationProvider : LocationProvider {
         consumers.remove(locationConsumer)
     }
     fun updateLocation(point: com.mapbox.geojson.Point, bearing: Double) {
-        val location = android.location.Location("mock").apply {
-            latitude = point.latitude()
-            longitude = point.longitude()
-            this.bearing = bearing.toFloat()
-        }
         consumers.forEach {
-            it.onLocationUpdated(location)
+            it.onLocationUpdated(point)
             it.onBearingUpdated(bearing)
             
             // Update lights source
@@ -690,7 +685,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         FeatureCollection.fromFeature(
                             Feature.fromGeometry(
                                 Point.fromLngLat(loc.longitude, loc.latitude),
-                                com.mapbox.geojson.JsonObject().apply {
+                                com.google.gson.JsonObject().apply {
                                     addProperty("bearing", loc.bearing.toDouble())
                                 }
                             )
