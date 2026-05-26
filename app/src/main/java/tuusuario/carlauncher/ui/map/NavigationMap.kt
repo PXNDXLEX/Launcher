@@ -352,13 +352,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     } else "#e0e0e0"
                     val heightMult = if (isNightMode) 3.0 else 2.5
 
-                    // ── Textura de fachada con ventanas iluminadas (solo modo noche) ─
-                    if (isNightMode) {
+                    // ── Textura de fachada con ventanas iluminadas (solo DARK) ─────────
+                    // NEON usa color sólido — fillExtrusionPattern no es compatible
+                    // con el estilo TRAFFIC_NIGHT y hace desaparecer los edificios.
+                    if (style == "DARK") {
                         try {
-                            val facadeBitmap = drawBuildingFacadeTexture(
-                                seed = System.currentTimeMillis(),
-                                isNeon = (style == "NEON")
-                            )
+                            val facadeBitmap = drawBuildingFacadeTexture()
                             loadedStyle.addImage(BUILDING_FACADE_IMAGE_ID, facadeBitmap)
                         } catch (e: Exception) { /* fallback a color sólido */ }
                     }
@@ -367,10 +366,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         sourceLayer("building")
                         filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
                         minZoom(14.0)
-                        if (isNightMode) {
-                            // Usar textura de ventanas cuando está disponible en el estilo
+                        if (style == "DARK") {
+                            // Textura estática de ventanas blancas (seed fijo = no cambia)
                             fillExtrusionPattern(BUILDING_FACADE_IMAGE_ID)
                         } else {
+                            // NEON y LIGHT usan color sólido
                             fillExtrusionColor(buildingColor)
                         }
                         fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(heightMult)))
@@ -1015,32 +1015,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         }
     }
 
-    // ── Animación dinámica de ventanas en edificios (cada 10 segundos) ────────
-    // Solo activa en modos DARK y NEON. Regenera la textura de fachada con
-    // ventanas distintas encendidas/apagadas para simular la vida de la ciudad.
-    val isNightStyleActive = currentStyle == "DARK" || currentStyle == "NEON"
-    LaunchedEffect(isNightStyleActive, mapReady) {
-        if (!isNightStyleActive || !mapReady) return@LaunchedEffect
-        // Delay inicial para dejar que el mapa termine de cargar
-        delay(3000L)
-        var seed = System.currentTimeMillis()
-        while (isActive) {
-            delay(10_000L)  // Esperar 10 segundos entre cambios
-            seed += 7919L   // Incremento primo para buena distribución random
-            val isNeon = currentStyle == "NEON"
-            // Generar la textura fuera del hilo principal (operación de Canvas/CPU)
-            val newFacade = withContext(Dispatchers.Default) {
-                drawBuildingFacadeTexture(seed = seed, isNeon = isNeon)
-            }
-            mapView.mapboxMap.getStyle { style ->
-                try {
-                    // Reemplazar la textura existente (removeStyleImage + addImage)
-                    style.removeStyleImage(BUILDING_FACADE_IMAGE_ID)
-                    style.addImage(BUILDING_FACADE_IMAGE_ID, newFacade)
-                } catch (e: Exception) { /* ignorar si el estilo cambió */ }
-            }
-        }
-    }
+    // ── Animación dinámica de ventanas eliminada ─────────────────────────────
+    // Las ventanas son fijas (seed constante). Se genera una sola vez al cargar
+    // el estilo y no vuelve a cambiar, evitando el efecto de papel de regalos.
 
 
     // ── Re-centrar al cambiar orientación (portrait ↔ landscape) ────────────
@@ -1937,102 +1914,60 @@ fun drawCarLightsGlow(
     return bitmap
 }
 
-// ── Generador de textura de fachada con ventanas iluminadas ──────────────────────
+// ── Textura est\u00e1tica de fachada de edificio (modo DARK) ─────────────────────
 //
-// Genera un Bitmap que se usa como `fillExtrusionPattern` en los edificios 3D.
-// La textura simula una fachada de edificio de noche: filas y columnas de
-// ventanas, algunas iluminadas (amarillo cálido / blanco frío) y otras oscuras.
-// Cada llamada con distinto `seed` produce un patrón diferente de ventanas
-// encendidas, lo que da el efecto de gente apagando/encendiendo luces.
+// Genera un Bitmap 256\u00d7512 que se aplica como `fillExtrusionPattern` en los
+// edificios 3D del modo noche. Ventanas blancas tenues sobre fondo oscuro.
 //
-// Parámetros:
-//   seed   — semilla para Random; cambiar produce distintas ventanas iluminadas
-//   isNeon — ajusta la paleta para el estilo cyberpunk (tintes violeta/cyan)
-fun drawBuildingFacadeTexture(seed: Long, isNeon: Boolean = false): Bitmap {
-    // Dimensiones 256×512 (potencia de 2, optimizadas para GPU)
-    // La proporción vertical 1:2 funciona bien en edificios típicos
-    val w = 256
-    val h = 512
-    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint  = Paint(Paint.ANTI_ALIAS_FLAG)
-    val rng    = java.util.Random(seed)
+// Dise\u00f1o deliberadamente minimalista:
+//   - Seed FIJA (42) \u2192 el patr\u00f3n nunca cambia entre renders
+//   - Pocas ventanas (4 col \u00d7 8 filas) \u2192 no se ve como papel de regalos
+//   - Color \u00fanico: blanco muy suave \u2192 realista, sin colores llamativos
+//   - ~45% de ventanas iluminadas \u2192 ciudad tranquila de noche
+fun drawBuildingFacadeTexture(): Bitmap {
+    val w   = 256
+    val h   = 512
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val cv  = Canvas(bmp)
+    val p   = Paint(Paint.ANTI_ALIAS_FLAG)
+    // Seed fija \u2014 el patr\u00f3n es siempre el mismo, no parpadea
+    val rng = java.util.Random(42L)
 
-    // ── Fondo: color de fachada oscura ────────────────────────────────────────
-    val bgColor = when {
-        isNeon -> android.graphics.Color.parseColor("#0e0e1f")
-        else   -> android.graphics.Color.parseColor("#1c1c2a")
-    }
-    canvas.drawColor(bgColor)
+    // Fondo de fachada: gris muy oscuro azulado
+    cv.drawColor(android.graphics.Color.parseColor("#181822"))
 
-    // ── Parámetros de la cuadrícula de ventanas ───────────────────────────────
-    val cols         = 8          // ventanas por fila horizontal
-    val rows         = 20         // filas de ventanas (piso por piso)
-    val winW         = 22f        // ancho de cada ventana en px
-    val winH         = 16f        // alto de cada ventana en px
-    val hPadding     = (w - cols * winW) / (cols + 1)
-    val vPadding     = (h - rows * winH) / (rows + 1)
-    // Probabilidad de que una ventana esté iluminada (65% → ciudad activa)
-    val litChance    = 0.65f
+    // Grid de ventanas
+    val cols     = 4
+    val rows     = 8
+    val winW     = 36f
+    val winH     = 26f
+    val hPad     = (w - cols * winW) / (cols + 1)
+    val vPad     = (h - rows * winH) / (rows + 1)
+    val litChance = 0.45f
 
-    // ── Paleta de colores de ventanas (luz cálida y fría, realista) ───────────
-    val warmYellow   = android.graphics.Color.argb(230, 255, 200, 90)   // incandescente
-    val coolWhite    = android.graphics.Color.argb(210, 200, 225, 255)  // LED/fluorescente
-    val warmOrange   = android.graphics.Color.argb(180, 255, 160, 60)   // tungsteno
-    val neonBlue     = android.graphics.Color.argb(200, 100, 200, 255)  // solo NEON
-    val neonPurple   = android.graphics.Color.argb(190, 180, 100, 255)  // solo NEON
-    val darkWindow   = android.graphics.Color.argb(50,  10,  10,  20)   // apagada
+    // Color \u00fanico: blanco muy suave (luz de LED a baja intensidad)
+    val litColor  = android.graphics.Color.argb(170, 235, 240, 255)
+    val darkColor = android.graphics.Color.argb(25,  10,  10,  18)
 
-    val litColors = if (isNeon) {
-        listOf(warmYellow, coolWhite, neonBlue, neonPurple, warmOrange)
-    } else {
-        listOf(warmYellow, coolWhite, warmOrange, coolWhite, warmYellow)
-    }
-
-    // ── Dibujar cada ventana ──────────────────────────────────────────────────
     for (row in 0 until rows) {
-        val y = vPadding + row * (winH + vPadding)
+        val y = vPad + row * (winH + vPad)
         for (col in 0 until cols) {
-            val x = hPadding + col * (winW + hPadding)
-
-            val isLit = rng.nextFloat() < litChance
-            val windowColor = if (isLit) {
-                litColors[rng.nextInt(litColors.size)]
-            } else {
-                darkWindow
-            }
-
-            // Fondo de la ventana
-            paint.color = windowColor
-            paint.style = Paint.Style.FILL
+            val x    = hPad + col * (winW + hPad)
             val rect = android.graphics.RectF(x, y, x + winW, y + winH)
-            canvas.drawRoundRect(rect, 2f, 2f, paint)
 
-            // Glow sutil alrededor de ventanas iluminadas (luz que se filtra)
-            if (isLit) {
-                val r = android.graphics.Color.red(windowColor)
-                val g = android.graphics.Color.green(windowColor)
-                val b = android.graphics.Color.blue(windowColor)
-                paint.color = android.graphics.Color.argb(30, r, g, b)
-                val glowRect = android.graphics.RectF(x - 3f, y - 3f, x + winW + 3f, y + winH + 3f)
-                canvas.drawRoundRect(glowRect, 4f, 4f, paint)
-            }
+            // Ventana iluminada u oscura
+            p.color = if (rng.nextFloat() < litChance) litColor else darkColor
+            p.style = Paint.Style.FILL
+            cv.drawRoundRect(rect, 3f, 3f, p)
 
-            // Marco de la ventana (borde oscuro que da profundidad)
-            paint.color = android.graphics.Color.argb(120, 5, 5, 15)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1.5f
-            canvas.drawRoundRect(rect, 2f, 2f, paint)
+            // Marco de concreto (borde oscuro)
+            p.color = android.graphics.Color.argb(80, 0, 0, 0)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 2f
+            cv.drawRoundRect(rect, 3f, 3f, p)
         }
     }
 
-    // ── Bandas de cornisa entre pisos (separación horizontal sutil) ───────────
-    paint.style = Paint.Style.FILL
-    paint.color = android.graphics.Color.argb(40, 0, 0, 0)
-    for (row in 0 until rows) {
-        val y = vPadding + row * (winH + vPadding) + winH
-        canvas.drawRect(0f, y, w.toFloat(), y + vPadding * 0.4f, paint)
-    }
-
-    return bitmap
+    return bmp
 }
+
