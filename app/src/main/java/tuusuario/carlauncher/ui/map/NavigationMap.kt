@@ -352,7 +352,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 try {
                     // Colores de edificios según el modo
                     val buildingColor = if (isNightMode) {
-                        if (style == "NEON") "#12121f" else "#1a1a2a"
+                        if (style == "NEON") "#090514" else "#1a1a2a" // Cyberpunk dark purple
                     } else "#e0e0e0"
                     val heightMult = if (isNightMode) 3.0 else 2.5
 
@@ -413,13 +413,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     // Capa plana debajo de los edificios que simula la luz de ventanas
                     // derramándose sobre las aceras y el asfalto
                     if (isNightMode) {
-                        val glowColor = if (style == "NEON") "#1a0033" else "#2a1800"
+                        val glowColor = if (style == "NEON") "#FF0055" else "#2a1800" // Cyberpunk Hot Pink glow
+                        val glowOpacity = if (style == "NEON") 0.35 else 0.65
                         loadedStyle.addLayerBelow(fillLayer("building-glow", "composite") {
                             sourceLayer("building")
                             filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
                             minZoom(14.0)
                             fillColor(glowColor)
-                            fillOpacity(0.65)
+                            fillOpacity(glowOpacity)
                         }, "3d-buildings")
                     }
                     
@@ -431,7 +432,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     val labelRef = firstSymbolLayerId ?: "3d-buildings"
 
                     val greenColor = if (isNightMode) {
-                        if (style == "NEON") "#111118" else "#1a1a24"
+                        if (style == "NEON") "#0A0014" else "#1a1a24" // Dark synthwave parks
                     } else "#b7e4c7"
 
                     try {
@@ -452,9 +453,26 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         }, labelRef)
                     } catch (e: Exception) {}
 
+                    // ── Fondo (Agua y Tierra) para estilo Cyberpunk ──────────
+                    if (style == "NEON") {
+                        try {
+                            loadedStyle.addLayerBelow(fillLayer("custom-water", "composite") {
+                                sourceLayer("water")
+                                fillColor("#04001A") // Deep cyber water
+                            }, labelRef)
+                            loadedStyle.addLayerBelow(fillLayer("custom-landcover", "composite") {
+                                sourceLayer("landcover")
+                                fillColor("#05050A") // Dark cyber ground
+                            }, labelRef)
+                        } catch (e: Exception) {}
+                    }
+
                     val roadColor = if (isNightMode) {
-                        if (style == "NEON") "#1a1a2e" else "#202020"
+                        if (style == "NEON") "#030308" else "#202020" // Pitch black roads
                     } else "#c0c0c0"
+
+                    val casingColor = if (style == "NEON") "#00FFFF" else "#ffffff" // Cyan neon edges
+                    val casingOpacity = if (style == "NEON") 0.7 else 0.35
 
                     // Borde blanco de carreteras (road casing) para modos oscuros
                     if (isNightMode) {
@@ -472,7 +490,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
                                     )
                                 )
-                                lineColor("#ffffff")
+                                lineColor(casingColor)
                                 lineWidth(
                                     Expression.interpolate(
                                         Expression.linear(), Expression.zoom(),
@@ -480,7 +498,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                         Expression.literal(18.0), Expression.literal(17.0)
                                     )
                                 )
-                                lineOpacity(0.35)
+                                lineOpacity(casingOpacity)
                                 lineCap(LineCap.ROUND)
                                 lineJoin(LineJoin.ROUND)
                             }, labelRef)
