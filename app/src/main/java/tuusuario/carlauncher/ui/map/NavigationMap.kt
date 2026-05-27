@@ -194,8 +194,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     var isFollowingLocation by rememberSaveable { mutableStateOf(true) }
     // NO usar rememberSaveable aquí: al rotar queremos forzar re-centrado
     var hasInitializedPosition by remember { mutableStateOf(false) }
-    // Solo se reproduce una vez por sesión (no rememberSaveable)
-    var hasPlayedIntro by remember { mutableStateOf(false) }
+    // Solo se reproduce una vez por sesión (rememberSaveable evita que se reinicie al rotar)
+    var hasPlayedIntro by rememberSaveable { mutableStateOf(false) }
     var isIntroAnimating by remember { mutableStateOf(false) }
     // Posición GPS lista para la intro — se llena en onLocationResult,
     // la animación se dispara cuando mapReady también es true
@@ -583,6 +583,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 puckBearingEnabled = true
                 puckBearing = PuckBearing.HEADING
                 locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
+            }
+
+            // Forzar actualización de ubicación para que el modelo 3D aparezca inmediatamente
+            // al cambiar el estilo (día/noche), de lo contrario Mapbox espera un evento de GPS real
+            NavigationState.currentLocation.value?.let { loc ->
+                mockLocationProvider.updateLocation(
+                    com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
+                    if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
+                )
             }
 
             // ── Heading-up SIEMPRE activo: brujula + GPS bearing ──────────────
@@ -1057,17 +1066,28 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         isIntroAnimating = true
 
         try {
-            // ── FASE 1: Frente inclinado del auto, muy de cerca ────────────
-            // setCamera es instantáneo — posiciona sin animación
+            // ── FASE 1: Frente inclinado del auto, acercamiento (zoom-in) ──
+            // Posicionar un poco más lejos
             mapView.mapboxMap.setCamera(
                 cameraOptions {
                     center(carPos)
-                    zoom(21.0)
-                    pitch(78.0)
+                    zoom(19.5)
+                    pitch(65.0)
                     bearing(carBearing + 165.0)
                 }
             )
-            delay(1000) // pausa para que el usuario vea bien el frente del auto
+            // Hacer un easeTo acercándose lentamente para detallar el modelo
+            mapView.camera.easeTo(
+                cameraOptions {
+                    center(carPos)
+                    zoom(21.5)
+                    pitch(78.0)
+                    bearing(carBearing + 165.0)
+                },
+                com.mapbox.maps.plugin.animation.MapAnimationOptions
+                    .mapAnimationOptions { duration(1800) }
+            )
+            delay(2000) // pausa para completar el acercamiento y que el usuario lo vea
 
             // ── FASE 2: Órbita suave alrededor del frente del auto ─────────
             mapView.camera.easeTo(
