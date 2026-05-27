@@ -1882,6 +1882,8 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
         "SPORT"     -> "asset://models/Sports.glb"
         // Si tienes "TAXI" en tus opciones futuras, aquí se mapeará
         "TAXI"      -> "asset://models/Taxi.glb"
+        "STYLUS"    -> "asset://models/Stylus.glb"
+        "CORSA"     -> "asset://models/Corsa.glb"
         else        -> null
     }
 
@@ -1919,9 +1921,9 @@ fun drawVehicleBitmap(context: Context, type: String, color: Int, heightScale: F
     val height = (140 * heightScale).toInt()
 
     val drawableResId = when (type) {
-        "SEDAN"     -> R.drawable.ic_sedan
-        "HATCHBACK" -> R.drawable.ic_hatchback
-        else        -> null
+        "SEDAN", "STYLUS"    -> R.drawable.ic_sedan
+        "HATCHBACK", "CORSA" -> R.drawable.ic_hatchback
+        else                 -> null
     }
     if (drawableResId != null) {
         val vd = VectorDrawableCompat.create(context.resources, drawableResId, null)

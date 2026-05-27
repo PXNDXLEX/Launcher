@@ -380,7 +380,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                             onClick = { expandedSection = if (expandedSection == "vehicle_type") "" else "vehicle_type" }
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("FLECHA", "SEDAN", "HATCHBACK", "SPORT", "TAXI").forEach { option ->
+                                listOf("FLECHA", "SEDAN", "HATCHBACK", "SPORT", "TAXI", "STYLUS", "CORSA").forEach { option ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                             .background(if (AppSettings.vehicleType.value == option) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
