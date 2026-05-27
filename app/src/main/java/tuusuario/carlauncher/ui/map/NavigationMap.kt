@@ -822,7 +822,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                     if (!hasPlayedIntro) {
                         hasPlayedIntro = true
-                        // Guardar posición — el LaunchedEffect la recoge cuando mapReady sea true
+                        // Bloquear INMEDIATAMENTE cualquier camera move del GPS
+                        // antes de que el LaunchedEffect tenga oportunidad de arrancar
+                        isIntroAnimating = true
                         pendingIntroPos = Pair(carPos, carBearing)
                     } else {
                         // Si ya se jugó el intro (rotación de pantalla), centrar directamente
@@ -863,7 +865,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     }
                 }
 
-                if (!isRouteActive && isFollowingLocation && hasInitializedPosition) {
+                // No activar follow-mode durante la intro — interrumpiría la animación
+                if (!isIntroAnimating && !isRouteActive && isFollowingLocation && hasInitializedPosition) {
                     val vp = mapView.viewport
                     if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
                         val followState = vp.makeFollowPuckViewportState(
@@ -1046,10 +1049,19 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
         // Consumir el pendiente para no re-disparar
         pendingIntroPos = null
+
+        // Desactivar follow-mode y detener cualquier viewport activo
+        // para que NADA pueda cancelar las animaciones de cámara que siguen
+        isFollowingLocation = false
+        mapView.viewport.idle()
+
+        // isIntroAnimating ya es true (lo pusimos en onLocationResult)
+        // pero aseguramos también aquí por si acaso
         isIntroAnimating = true
 
         try {
             // ── FASE 1: Frente inclinado del auto, muy de cerca ────────────
+            // setCamera es instantáneo — posiciona sin animación
             mapView.mapboxMap.setCamera(
                 cameraOptions {
                     center(carPos)
@@ -1058,9 +1070,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     bearing(carBearing + 165.0)
                 }
             )
-            delay(800)
+            delay(1000) // pausa para que el usuario vea bien el frente del auto
 
-            // ── FASE 2: Órbita alrededor del frente del auto ───────────────
+            // ── FASE 2: Órbita suave alrededor del frente del auto ─────────
             mapView.camera.easeTo(
                 cameraOptions {
                     center(carPos)
@@ -1069,11 +1081,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     bearing(carBearing + 270.0)
                 },
                 com.mapbox.maps.plugin.animation.MapAnimationOptions
-                    .mapAnimationOptions { duration(3500) }
+                    .mapAnimationOptions { duration(4000) }
             )
-            delay(3500)
+            delay(4200) // delay ligeramente mayor que duration para dejar terminar
 
-            // ── FASE 3: Vista aérea del área (estilo águila) ───────────────
+            // ── FASE 3: Vuelo aéreo — vista del área (estilo águila) ───────
             mapView.camera.flyTo(
                 cameraOptions {
                     center(carPos)
@@ -1082,11 +1094,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     bearing(0.0)
                 },
                 com.mapbox.maps.plugin.animation.MapAnimationOptions
-                    .mapAnimationOptions { duration(3000) }
+                    .mapAnimationOptions { duration(3500) }
             )
-            delay(3200)
+            delay(3700)
 
             // ── FASE 4: Volver a navegación — activar follow mode ──────────
+            isFollowingLocation = true
             val vp = mapView.viewport
             val followState = vp.makeFollowPuckViewportState(
                 FollowPuckViewportStateOptions.Builder()
@@ -1102,8 +1115,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     DefaultViewportTransitionOptions.Builder().maxDurationMs(2500).build()
                 )
             )
+            delay(2600) // esperar que termine la transición antes de liberar el flag
         } finally {
             isIntroAnimating = false
+            isFollowingLocation = true  // garantizar restauración en caso de error
         }
     }
 
