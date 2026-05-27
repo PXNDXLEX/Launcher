@@ -197,6 +197,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     // Solo se reproduce una vez por sesión (no rememberSaveable)
     var hasPlayedIntro by remember { mutableStateOf(false) }
     var isIntroAnimating by remember { mutableStateOf(false) }
+    // Posición GPS lista para la intro — se llena en onLocationResult,
+    // la animación se dispara cuando mapReady también es true
+    var pendingIntroPos by remember { mutableStateOf<Pair<Point, Double>?>(null) }
 
     var showSaveFavoriteDialog by remember { mutableStateOf(false) }
     var favoriteNameToSave     by remember { mutableStateOf("") }
@@ -811,7 +814,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
                 )
 
-                // ── Intro cinematográfica al primer fix GPS ─────────────────
+                // ── Almacenar posición para la intro cinematográfica ─────────
                 if (!hasInitializedPosition && loc.latitude != 0.0) {
                     hasInitializedPosition = true
                     val carPos     = Point.fromLngLat(loc.longitude, loc.latitude)
@@ -819,68 +822,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                     if (!hasPlayedIntro) {
                         hasPlayedIntro = true
-                        coroutineScope.launch {
-                            isIntroAnimating = true
-                            try {
-                                // â”€â”€ FASE 1: Posicionar cÃ¡mara en Ã¡ngulo diagonal delantero inmediatamente
-                                mapView.mapboxMap.setCamera(
-                                    cameraOptions {
-                                        center(carPos)
-                                        zoom(20.0)
-                                        pitch(75.0)
-                                        bearing(carBearing + 145.0)
-                                    }
-                                )
-                                delay(200)
-
-                                // â”€â”€ FASE 2: Paneo de Ã³rbita cinematogrÃ¡fico por delante
-                                mapView.camera.easeTo(
-                                    cameraOptions {
-                                        center(carPos)
-                                        zoom(19.8)
-                                        pitch(70.0)
-                                        bearing(carBearing + 215.0)
-                                    },
-                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                        .mapAnimationOptions { duration(3000) }
-                                )
-                                delay(3000)
-
-                                // FASE 3: Vuelo hacia arriba estilo aguila (top-down)
-                                mapView.camera.flyTo(
-                                    cameraOptions {
-                                        center(carPos)
-                                        zoom(14.5)
-                                        pitch(0.0)
-                                        bearing(0.0)
-                                    },
-                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                        .mapAnimationOptions { duration(3000) }
-                                )
-                                delay(3200)
-
-                                // FASE 4: Activar viewport de seguimiento de navegacion
-                                val vp = mapView.viewport
-                                val followState = vp.makeFollowPuckViewportState(
-                                    FollowPuckViewportStateOptions.Builder()
-                                        .pitch(70.0)
-                                        .zoom(18.5)
-                                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                        .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                        .build()
-                                )
-                                vp.transitionTo(
-                                    followState,
-                                    vp.makeDefaultViewportTransition(
-                                        DefaultViewportTransitionOptions.Builder().maxDurationMs(2000).build()
-                                    )
-                                )
-                            } finally {
-                                isIntroAnimating = false
-                            }
-                        }
+                        // Guardar posición — el LaunchedEffect la recoge cuando mapReady sea true
+                        pendingIntroPos = Pair(carPos, carBearing)
                     } else {
-                        // Si ya se jugo el intro (rotacion de pantalla), centrar directamente
+                        // Si ya se jugó el intro (rotación de pantalla), centrar directamente
                         val vp = mapView.viewport
                         val followState = vp.makeFollowPuckViewportState(
                             FollowPuckViewportStateOptions.Builder()
@@ -1089,6 +1034,76 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     LaunchedEffect(currentStyle) {
         if (currentStyle != lastAppliedStyle) {
             applyMapStyle(currentStyle)
+        }
+    }
+
+    // ── Intro cinematográfica: espera a que el mapa esté listo ───────────────
+    // Se dispara cuando mapReady y pendingIntroPos son ambos válidos.
+    // Garantizamos que el estilo esté cargado antes de mover la cámara.
+    LaunchedEffect(mapReady, pendingIntroPos) {
+        val (carPos, carBearing) = pendingIntroPos ?: return@LaunchedEffect
+        if (!mapReady) return@LaunchedEffect
+
+        // Consumir el pendiente para no re-disparar
+        pendingIntroPos = null
+        isIntroAnimating = true
+
+        try {
+            // ── FASE 1: Frente inclinado del auto, muy de cerca ────────────
+            mapView.mapboxMap.setCamera(
+                cameraOptions {
+                    center(carPos)
+                    zoom(21.0)
+                    pitch(78.0)
+                    bearing(carBearing + 165.0)
+                }
+            )
+            delay(800)
+
+            // ── FASE 2: Órbita alrededor del frente del auto ───────────────
+            mapView.camera.easeTo(
+                cameraOptions {
+                    center(carPos)
+                    zoom(20.5)
+                    pitch(72.0)
+                    bearing(carBearing + 270.0)
+                },
+                com.mapbox.maps.plugin.animation.MapAnimationOptions
+                    .mapAnimationOptions { duration(3500) }
+            )
+            delay(3500)
+
+            // ── FASE 3: Vista aérea del área (estilo águila) ───────────────
+            mapView.camera.flyTo(
+                cameraOptions {
+                    center(carPos)
+                    zoom(14.0)
+                    pitch(0.0)
+                    bearing(0.0)
+                },
+                com.mapbox.maps.plugin.animation.MapAnimationOptions
+                    .mapAnimationOptions { duration(3000) }
+            )
+            delay(3200)
+
+            // ── FASE 4: Volver a navegación — activar follow mode ──────────
+            val vp = mapView.viewport
+            val followState = vp.makeFollowPuckViewportState(
+                FollowPuckViewportStateOptions.Builder()
+                    .pitch(70.0)
+                    .zoom(18.5)
+                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                    .build()
+            )
+            vp.transitionTo(
+                followState,
+                vp.makeDefaultViewportTransition(
+                    DefaultViewportTransitionOptions.Builder().maxDurationMs(2500).build()
+                )
+            )
+        } finally {
+            isIntroAnimating = false
         }
     }
 

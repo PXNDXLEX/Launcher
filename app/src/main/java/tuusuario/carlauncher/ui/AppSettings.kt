@@ -10,7 +10,7 @@ object AppSettings {
     val speedoStyle = mutableStateOf("PREMIUM")
     val speedoColor = mutableStateOf(Color.parseColor("#007AFF"))
     val vehicleType = mutableStateOf("SEDAN") // Universal vehicle type
-    val vehicle3DScale = mutableStateOf(0.01f) // Escala del modelo 3D
+    val vehicle3DScale = mutableStateOf(0.15f) // Escala del modelo 3D
     val uiColor = mutableStateOf(Color.parseColor("#007AFF"))
     val mapIconColor = mutableStateOf(Color.parseColor("#007AFF")) // Color independiente para el icono en el mapa
     val isDarkMode = mutableStateOf(true)
@@ -53,7 +53,7 @@ object AppSettings {
         speedoStyle.value = prefs?.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
         speedoColor.value = prefs?.getInt("speedoColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
-        vehicle3DScale.value = prefs?.getFloat("vehicle3DScale", 0.01f) ?: 0.01f
+        vehicle3DScale.value = prefs?.getFloat("vehicle3DScale", 0.15f) ?: 0.15f
         glowCarHalfW.value   = prefs?.getFloat("glowCarHalfW",   22f)  ?: 22f
         glowHeadY.value      = prefs?.getFloat("glowHeadY",      240f) ?: 240f
         glowHeadReach.value  = prefs?.getFloat("glowHeadReach",  40f)  ?: 40f
