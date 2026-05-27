@@ -1047,9 +1047,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         val (carPos, carBearing) = pendingIntroPos ?: return@LaunchedEffect
         if (!mapReady) return@LaunchedEffect
 
-        // Consumir el pendiente para no re-disparar
-        pendingIntroPos = null
-
         // Desactivar follow-mode y detener cualquier viewport activo
         // para que NADA pueda cancelar las animaciones de cámara que siguen
         isFollowingLocation = false
@@ -1119,6 +1116,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         } finally {
             isIntroAnimating = false
             isFollowingLocation = true  // garantizar restauración en caso de error
+            pendingIntroPos = null // Consumir el pendiente al final para evitar cancelación prematura
         }
     }
 
