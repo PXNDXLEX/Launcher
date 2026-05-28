@@ -1889,9 +1889,9 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
 
     if (modelAsset != null) {
         // Los modelos originales (Sedan, Hatchback) tienen un nodo interno en Blender con matriz x100.
-        // Los nuevos modelos de manex3d.com vienen en escala 1:1 real, por lo que sin multiplicar
-        // son microscópicos en comparación. Aplicamos un multiplicador de x65 para igualarlos.
-        val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 65f else scale
+        // Los nuevos modelos al exportarse desde Blender (sin modificar la escala de la escena) 
+        // pueden quedar en escala de milímetros. Aplicamos un multiplicador de x2500 para igualarlos.
+        val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 2500f else scale
 
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
