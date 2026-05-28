@@ -260,7 +260,13 @@ private fun GlowPreviewCanvas(onGlowChanged: () -> Unit) {
     val tailR   = AppSettings.glowTailRadius.value
 
     val bmp: Bitmap = remember(halfW, headY, reach, spread, tailY, tailR) {
-        drawCarLightsGlow(halfW, headY, reach, spread, tailY, tailR)
+        val headBmp = drawHeadlightsGlow(halfW, headY, reach, spread)
+        val tailBmp = drawTaillightsGlow(halfW, tailY, tailR, false)
+        val combined = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(combined)
+        canvas.drawBitmap(headBmp, 0f, 0f, null)
+        canvas.drawBitmap(tailBmp, 0f, 0f, null)
+        combined
     }
 
     Box(
