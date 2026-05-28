@@ -1890,8 +1890,9 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
     if (modelAsset != null) {
         // Los modelos originales (Sedan, Hatchback) tienen un nodo interno en Blender con matriz x100.
         // Los nuevos modelos al exportarse desde Blender (sin modificar la escala de la escena) 
-        // pueden quedar en escala de milímetros. Aplicamos un multiplicador de x2500 para igualarlos.
-        val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 2500f else scale
+        // pueden quedar en escala de milímetros. Aplicamos un multiplicador de x500 para igualarlos
+        // al tamaño de un auto real (~4.5 - 5 metros) dentro del mapa.
+        val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 500f else scale
 
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
