@@ -33,12 +33,20 @@ import com.tuusuario.carlauncher.ui.AppSettings
 // Para fijarlo permanentemente: copiar los valores que muestra el panel
 // en los defaults de AppSettings.init() y hacer un nuevo build.
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+
 @Composable
 fun GlowTuningPanel(
     visible: Boolean,
     onDismiss: () -> Unit,
     onGlowChanged: () -> Unit   // callback para que NavigationMap regenere el glow
 ) {
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+
     AnimatedVisibility(
         visible = visible,
         enter   = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
@@ -46,6 +54,14 @@ fun GlowTuningPanel(
     ) {
         Box(
             modifier = Modifier
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        offsetX += dragAmount.x
+                        offsetY += dragAmount.y
+                    }
+                }
                 .fillMaxHeight()
                 .width(300.dp)
                 .background(

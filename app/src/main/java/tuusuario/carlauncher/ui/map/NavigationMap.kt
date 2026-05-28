@@ -833,7 +833,20 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 com.tuusuario.carlauncher.services.DashcamRouteTracker.onLocationUpdate(loc)
 
                 NavigationState.currentLocation.value = loc
-                if (loc.hasSpeed()) NavigationState.currentSpeedKmH.value = loc.speed * 3.6f
+                if (loc.hasSpeed()) {
+                    val spd = loc.speed * 3.6f
+                    NavigationState.currentSpeedKmH.value = spd
+                    if (spd < 1f) {
+                        if (NavigationState.lastZeroSpeedTime == 0L) {
+                            NavigationState.lastZeroSpeedTime = System.currentTimeMillis()
+                        } else if (System.currentTimeMillis() - NavigationState.lastZeroSpeedTime > 2000L) {
+                            NavigationState.isBraking.value = true
+                        }
+                    } else {
+                        NavigationState.lastZeroSpeedTime = 0L
+                        NavigationState.isBraking.value = false
+                    }
+                }
 
                 // Propagar ubicación al provider de Mapbox (asegura movimiento del auto 3D)
                 mockLocationProvider.updateLocation(
@@ -1222,6 +1235,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     }
 
     Box(modifier = modifier.fillMaxSize()) {
+
+        val isBraking = NavigationState.isBraking.value
+        LaunchedEffect(isBraking) {
+            refreshGlowOnMap()
+        }
 
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -1903,13 +1921,11 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
         // pueden quedar en escala de milímetros. Aplicamos un multiplicador de x500 para igualarlos
         // al tamaño de un auto real (~4.5 - 5 metros) dentro del mapa.
         val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 500f else scale
-        // Estiramos un poco la altura (Z) para evitar que se vean aplastados ("bajos de altura")
-        val finalScaleZ = if (vehicleType == "STYLUS" || vehicleType == "CORSA") finalScale * 1.25f else finalScale
 
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
             // Escala vinculada al Slider de la UI (y ajustada por el multiplicador de base)
-            modelScale = listOf(finalScale, finalScale, finalScaleZ),
+            modelScale = listOf(finalScale, finalScale, finalScale),
             // Los modelos GLB tienen el frente hacia atrás respecto a Mapbox;
             // se rota 180° en Z (yaw) para que el morro apunte en la dirección de movimiento.
             modelRotation = listOf(0f, 0f, 180f)
@@ -2012,7 +2028,8 @@ fun drawCarLightsGlow(
     headReach: Float = AppSettings.glowHeadReach.value,
     headSpread:Float = AppSettings.glowHeadSpread.value,
     tailY    : Float = AppSettings.glowTailY.value,
-    tailRadius:Float = AppSettings.glowTailRadius.value
+    tailRadius:Float = AppSettings.glowTailRadius.value,
+    isBraking: Boolean = NavigationState.isBraking.value
 ): Bitmap {
     val w = 512
     val h = 512

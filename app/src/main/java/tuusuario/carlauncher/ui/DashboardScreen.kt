@@ -100,6 +100,8 @@ data class RouteStep(
 object NavigationState { 
     val showGlowTuning = mutableStateOf(false)
     val currentSpeedKmH = mutableStateOf(0f) 
+    val isBraking = mutableStateOf(false)
+    var lastZeroSpeedTime: Long = 0L
     val currentLocation = mutableStateOf<android.location.Location?>(null)
     val selectedHistoryRoute = mutableStateOf<com.tuusuario.carlauncher.services.DailyRoute?>(null)
     val selectedDashcamRoute = mutableStateOf<List<com.tuusuario.carlauncher.services.RoutePoint>?>(null)

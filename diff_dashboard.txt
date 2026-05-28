@@ -1,0 +1,66 @@
+﻿diff --git a/app/src/main/java/tuusuario/carlauncher/ui/DashboardScreen.kt b/app/src/main/java/tuusuario/carlauncher/ui/DashboardScreen.kt
+index 627755a..ebd0d8c 100644
+--- a/app/src/main/java/tuusuario/carlauncher/ui/DashboardScreen.kt
++++ b/app/src/main/java/tuusuario/carlauncher/ui/DashboardScreen.kt
+@@ -98,6 +98,7 @@ data class RouteStep(
+ )
+ 
+ object NavigationState { 
++    val showGlowTuning = mutableStateOf(false)
+     val currentSpeedKmH = mutableStateOf(0f) 
+     val currentLocation = mutableStateOf<android.location.Location?>(null)
+     val selectedHistoryRoute = mutableStateOf<com.tuusuario.carlauncher.services.DailyRoute?>(null)
+@@ -273,7 +274,14 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
+         }
+ 
+         if (showSettingsDialog) {
+-            PremiumSettingsDialog(onDismiss = { showSettingsDialog = false })
++            PremiumSettingsDialog(
++                onDismiss = { showSettingsDialog = false },
++                onNavigateToMap = {
++                    currentScreen = "MAPA_FULL"
++                    showSettingsDialog = false
++                    NavigationState.showGlowTuning.value = true
++                }
++            )
+         }
+ 
+         if (NavigationState.selectedHistoryRoute.value != null || NavigationState.selectedDashcamRoute.value != null) {
+@@ -311,7 +319,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
+ 
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+-fun PremiumSettingsDialog(onDismiss: () -> Unit) {
++fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
+     val context = LocalContext.current
+     val coroutineScope = rememberCoroutineScope()
+     var expandedSection by remember { mutableStateOf("") }
+@@ -386,11 +394,11 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
+                                 }
+                                 
+                                 Spacer(modifier = Modifier.height(8.dp))
+-                                Text("Escala del modelo 3D: ${String.format("%.1f", AppSettings.vehicle3DScale.value)}", fontSize = 14.sp)
++                                Text("Escala del modelo 3D: ${String.format("%.4f", AppSettings.vehicle3DScale.value)}", fontSize = 14.sp)
+                                 Slider(
+                                     value = AppSettings.vehicle3DScale.value,
+                                     onValueChange = { AppSettings.setVehicle3DScale(it) },
+-                                    valueRange = 0.1f..50f,
++                                    valueRange = 0.005f..0.02f,
+                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                                 )
+                             }
+@@ -400,6 +408,14 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit) {
+                             isExpanded = expandedSection == "map_icon_color",
+                             onClick = { expandedSection = if (expandedSection == "map_icon_color") "" else "map_icon_color" }
+                         ) { ColorPicker(AppSettings.mapIconColor.value) { AppSettings.setMapIconColor(it) } }
++                        
++                        SettingsDivider()
++                        SettingsRow(
++                            icon = Icons.Default.Tune,
++                            title = "Ajustar Luces y Dimensiones",
++                            subtitle = "Calibraci├│n fina de faros, escala y brillos en el mapa",
++                            onClick = onNavigateToMap
++                        )
+                     }
+ 
+                     // ÔöÇÔöÇ NAVEGACI├ôN ÔöÇÔöÇ

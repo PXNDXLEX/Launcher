@@ -1,0 +1,89 @@
+﻿diff --git a/app/src/main/java/tuusuario/carlauncher/ui/map/NavigationMap.kt b/app/src/main/java/tuusuario/carlauncher/ui/map/NavigationMap.kt
+index 456035b..462ee59 100644
+--- a/app/src/main/java/tuusuario/carlauncher/ui/map/NavigationMap.kt
++++ b/app/src/main/java/tuusuario/carlauncher/ui/map/NavigationMap.kt
+@@ -780,34 +780,59 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false,
+                         coroutineScope.launch {
+                             isIntroAnimating = true
+                             try {
+-                                // ÔöÇÔöÇ FASE 1: Posicionar c├ímara en la parte delantera
+-                                // del auto inmediatamente (sin animaci├│n) ÔÇö evita ver USA
+-                                // bearing = direcci├│n + 180┬░ ÔåÆ c├ímara mira hacia el frente del auto
++                                // ├óÔÇØÔé¼├óÔÇØÔé¼ FASE 1: Posicionar c├â┬ímara en ├â┬íngulo diagonal delantero inmediatamente
+                                 mapView.mapboxMap.setCamera(
+                                     cameraOptions {
+                                         center(carPos)
+-                                        zoom(20.0)   // muy cerca para ver el auto
+-                                        pitch(75.0)  // perspectiva baja, dram├ítica
+-                                        bearing(carBearing + 180.0) // enfrente del auto
++                                        zoom(20.0)
++                                        pitch(75.0)
++                                        bearing(carBearing + 145.0)
+                                     }
+                                 )
+-                                delay(2000) // Mostrar el frente del auto
++                                delay(200)
+ 
+-                                // ÔöÇÔöÇ FASE 2: Volar suavemente a vista de ├íguila
+-                                mapView.camera.flyTo(
++                                // ├óÔÇØÔé¼├óÔÇØÔé¼ FASE 2: Paneo de ├â┬│rbita cinematogr├â┬ífico por delante
++                                mapView.camera.easeTo(
+                                     cameraOptions {
+                                         center(carPos)
+-                                        zoom(14.5)   // vista a├®rea amplia
+-                                        pitch(0.0)   // completamente vertical
+-                                        bearing(0.0) // norte arriba
++                                        zoom(19.8)
++                                        pitch(70.0)
++                                        bearing(carBearing + 215.0)
+                                     },
+                                     com.mapbox.maps.plugin.animation.MapAnimationOptions
+-                                        .mapAnimationOptions { duration(2800) } // lento y fluido
++                                        .mapAnimationOptions { duration(3000) }
+                                 )
+-                                delay(3000) // Esperar que termine + pausa a├®rea
++                                delay(3000)
+ 
+-                                // ÔöÇÔöÇ FASE 3: Transici├│n fluida a modo 3D de navegaci├│n
+-                                val vp = mapView.viewport
++                                // ├óÔÇØÔé¼├óÔÇØÔé¼ FASE 3: Vuelo hacia arriba estilo ├â┬íguila (top-down)
++                                mapView.camera.flyTo(
++                                    cameraOptions {
++                                        center(carPos)
++                                        zoom(14.5)
++                                        pitch(0.0)
++                                        bearing(0.0)
++                                    },
++                                    com.mapbox.maps.plugin.animation.MapAnimationOptions
++                                        .mapAnimationOptions { duration(3000) }
++                                )
++                                delay(3200)
++                            } finally {
++                                isIntroAnimating = false
++                            }
++                        }
++                    } else {
++                        // Si ya se jug├â┬│ el intro, centrar directamente
++                        val vp = mapView.viewport
++                        val followState = vp.makeFollowPuckViewportState(
++                            FollowPuckViewportStateOptions.Builder()
++                                .pitch(70.0).zoom(18.5)
++                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
++                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
++                                .build()
++                        )
++                        vp.transitionTo(followState, vp.makeImmediateViewportTransition())
++                    }
++                    val vp = mapView.viewport
+                                 val followState = vp.makeFollowPuckViewportState(
+                                     FollowPuckViewportStateOptions.Builder()
+                                         .pitch(70.0)
+@@ -1079,7 +1104,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false,
+     // ÔöÇÔöÇ UI ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+ 
+     // Panel de ajuste de luces del auto en tiempo real
+-    var showGlowTuning by remember { mutableStateOf(false) }
++    val showGlowTuning = NavigationState.showGlowTuning.value
+ 
+     // Regenerar el bitmap del glow y subirlo al estilo Mapbox inmediatamente
+     val refreshGlowOnMap: () -> Unit = {

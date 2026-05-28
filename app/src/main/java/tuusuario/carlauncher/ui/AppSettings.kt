@@ -53,14 +53,9 @@ object AppSettings {
         speedoStyle.value = prefs?.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
         speedoColor.value = prefs?.getInt("speedoColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
-        vehicle3DScale.value = prefs?.getFloat("vehicle3DScale", 0.15f) ?: 0.15f
-        glowCarHalfW.value   = prefs?.getFloat("glowCarHalfW",   22f)  ?: 22f
-        glowHeadY.value      = prefs?.getFloat("glowHeadY",      240f) ?: 240f
-        glowHeadReach.value  = prefs?.getFloat("glowHeadReach",  40f)  ?: 40f
-        glowHeadSpread.value = prefs?.getFloat("glowHeadSpread", 50f)  ?: 50f
-        glowTailY.value      = prefs?.getFloat("glowTailY",      272f) ?: 272f
-        glowTailRadius.value = prefs?.getFloat("glowTailRadius", 14f)  ?: 14f
-        glowIconSize.value   = prefs?.getFloat("glowIconSize",   1.5f) ?: 1.5f
+        
+        loadVehicleSpecificSettings(vehicleType.value)
+
         uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
@@ -79,6 +74,18 @@ object AppSettings {
         isInitialized = true
     }
 
+    private fun loadVehicleSpecificSettings(type: String) {
+        val p = "${type}_"
+        vehicle3DScale.value = prefs?.getFloat(p + "vehicle3DScale", 0.15f) ?: 0.15f
+        glowCarHalfW.value   = prefs?.getFloat(p + "glowCarHalfW",   22f)  ?: 22f
+        glowHeadY.value      = prefs?.getFloat(p + "glowHeadY",      240f) ?: 240f
+        glowHeadReach.value  = prefs?.getFloat(p + "glowHeadReach",  40f)  ?: 40f
+        glowHeadSpread.value = prefs?.getFloat(p + "glowHeadSpread", 50f)  ?: 50f
+        glowTailY.value      = prefs?.getFloat(p + "glowTailY",      272f) ?: 272f
+        glowTailRadius.value = prefs?.getFloat(p + "glowTailRadius", 14f)  ?: 14f
+        glowIconSize.value   = prefs?.getFloat(p + "glowIconSize",   1.5f) ?: 1.5f
+    }
+
     // Funciones elegantes para cambiar y GUARDAR al mismo tiempo
     fun setSpeedoStyle(style: String) {
         speedoStyle.value = style
@@ -93,20 +100,21 @@ object AppSettings {
     fun setVehicleType(type: String) {
         vehicleType.value = type
         prefs?.edit()?.putString("vehicleType", type)?.apply()
+        loadVehicleSpecificSettings(type)
     }
 
     fun setVehicle3DScale(scale: Float) {
         vehicle3DScale.value = scale
-        prefs?.edit()?.putFloat("vehicle3DScale", scale)?.apply()
+        prefs?.edit()?.putFloat("${vehicleType.value}_vehicle3DScale", scale)?.apply()
     }
 
-    fun setGlowCarHalfW(v: Float)   { glowCarHalfW.value   = v; prefs?.edit()?.putFloat("glowCarHalfW",   v)?.apply() }
-    fun setGlowHeadY(v: Float)      { glowHeadY.value      = v; prefs?.edit()?.putFloat("glowHeadY",      v)?.apply() }
-    fun setGlowHeadReach(v: Float)  { glowHeadReach.value  = v; prefs?.edit()?.putFloat("glowHeadReach",  v)?.apply() }
-    fun setGlowHeadSpread(v: Float) { glowHeadSpread.value = v; prefs?.edit()?.putFloat("glowHeadSpread", v)?.apply() }
-    fun setGlowTailY(v: Float)      { glowTailY.value      = v; prefs?.edit()?.putFloat("glowTailY",      v)?.apply() }
-    fun setGlowTailRadius(v: Float) { glowTailRadius.value = v; prefs?.edit()?.putFloat("glowTailRadius", v)?.apply() }
-    fun setGlowIconSize(v: Float)   { glowIconSize.value   = v; prefs?.edit()?.putFloat("glowIconSize",   v)?.apply() }
+    fun setGlowCarHalfW(v: Float)   { glowCarHalfW.value   = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowCarHalfW",   v)?.apply() }
+    fun setGlowHeadY(v: Float)      { glowHeadY.value      = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowHeadY",      v)?.apply() }
+    fun setGlowHeadReach(v: Float)  { glowHeadReach.value  = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowHeadReach",  v)?.apply() }
+    fun setGlowHeadSpread(v: Float) { glowHeadSpread.value = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowHeadSpread", v)?.apply() }
+    fun setGlowTailY(v: Float)      { glowTailY.value      = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowTailY",      v)?.apply() }
+    fun setGlowTailRadius(v: Float) { glowTailRadius.value = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowTailRadius", v)?.apply() }
+    fun setGlowIconSize(v: Float)   { glowIconSize.value   = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowIconSize",   v)?.apply() }
 
     fun setUiColor(color: Int) {
         uiColor.value = color
