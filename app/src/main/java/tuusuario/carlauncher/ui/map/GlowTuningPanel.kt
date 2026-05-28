@@ -133,13 +133,6 @@ fun GlowTuningPanel(
                     format = "%.0f px"
                 ) { AppSettings.setGlowHeadSpread(it); onGlowChanged() }
 
-                TuningSlider(
-                    label = "Altura Z de faros (headHeight)",
-                    value = AppSettings.glowHeadHeight.value,
-                    range  = -100f..100f,
-                    format = "%.0f px"
-                ) { AppSettings.setGlowHeadHeight(it); onGlowChanged() }
-
                 Spacer(Modifier.height(8.dp))
                 Divider(color = Color(0xFF1A1A3A))
                 Spacer(Modifier.height(8.dp))
@@ -160,13 +153,6 @@ fun GlowTuningPanel(
                     range  = 4f..60f,
                     format = "%.0f px"
                 ) { AppSettings.setGlowTailRadius(it); onGlowChanged() }
-
-                TuningSlider(
-                    label = "Altura Z traseras (tailHeight)",
-                    value = AppSettings.glowTailHeight.value,
-                    range  = -100f..100f,
-                    format = "%.0f px"
-                ) { AppSettings.setGlowTailHeight(it); onGlowChanged() }
 
                 Spacer(Modifier.height(8.dp))
                 Divider(color = Color(0xFF1A1A3A))
@@ -233,8 +219,6 @@ fun GlowTuningPanel(
                     appendLine("glowTailRadius = ${AppSettings.glowTailRadius.value}")
                     appendLine("glowIconSize   = ${AppSettings.glowIconSize.value}")
                     appendLine("vehicle3DScale = ${AppSettings.vehicle3DScale.value}")
-                    appendLine("glowHeadHeight = ${AppSettings.glowHeadHeight.value}")
-                    appendLine("glowTailHeight = ${AppSettings.glowTailHeight.value}")
                 }
                 Text(
                     vals,

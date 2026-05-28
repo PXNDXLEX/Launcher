@@ -553,8 +553,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
                         iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
                         iconRotate(Expression.get("bearing"))
-                        iconTranslate(listOf(0.0, -AppSettings.glowHeadHeight.value.toDouble()))
-                        iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
                         iconAllowOverlap(true)
                         iconIgnorePlacement(true)
                         iconSize(Expression.get("iconSize"))
@@ -562,11 +560,9 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                     loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_TAILLIGHTS_LAYER_ID, CAR_TAILLIGHTS_SOURCE_ID) {
                         iconImage("car-taillights-glow")
-                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.VIEWPORT)
+                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
                         iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
                         iconRotate(Expression.get("bearing"))
-                        iconTranslate(listOf(0.0, -AppSettings.glowTailHeight.value.toDouble()))
-                        iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
                         iconAllowOverlap(true)
                         iconIgnorePlacement(true)
                         iconSize(Expression.get("iconSize"))
@@ -1393,20 +1389,6 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             },
             update = { _ ->
                 // Actualizar altura de las luces si el estilo está cargado
-                val headOffset = AppSettings.glowHeadHeight.value
-                val tailOffset = AppSettings.glowTailHeight.value
-                mapView.mapboxMap.getStyle { style ->
-                    try {
-                        val headLayer = style.getLayerAs<com.mapbox.maps.extension.style.layers.generated.SymbolLayer>(CAR_HEADLIGHTS_LAYER_ID)
-                        headLayer?.iconTranslate(listOf(0.0, -headOffset.toDouble()))
-                        headLayer?.iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
-
-                        val tailLayer = style.getLayerAs<com.mapbox.maps.extension.style.layers.generated.SymbolLayer>(CAR_TAILLIGHTS_LAYER_ID)
-                        tailLayer?.iconTranslate(listOf(0.0, -tailOffset.toDouble()))
-                        tailLayer?.iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
-                    } catch (e: Exception) {}
-                }
-
                 // El mapa se actualiza vía LaunchedEffects y callbacks; aquí solo
                 // sincronizamos el marcador de destino cuando cambia el estado global
                 if (mapReady) {
