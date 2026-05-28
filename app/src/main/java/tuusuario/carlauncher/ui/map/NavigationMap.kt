@@ -145,8 +145,10 @@ private const val HISTORY_SOURCE_ID      = "history-source"
 private const val HISTORY_LAYER_ID       = "history-layer"
 private const val DASHCAM_SOURCE_ID      = "dashcam-source"
 private const val DASHCAM_LAYER_ID       = "dashcam-layer"
-private const val CAR_LIGHTS_SOURCE_ID   = "car-lights-source"
-private const val CAR_LIGHTS_LAYER_ID    = "car-lights-layer"
+private const val CAR_HEADLIGHTS_SOURCE_ID = "car-headlights-source"
+private const val CAR_HEADLIGHTS_LAYER_ID  = "car-headlights-layer"
+private const val CAR_TAILLIGHTS_SOURCE_ID = "car-taillights-source"
+private const val CAR_TAILLIGHTS_LAYER_ID  = "car-taillights-layer"
 private const val BUILDING_FACADE_IMAGE_ID = "building-facade-windows"
 
 class MockLocationProvider : LocationProvider {
@@ -343,7 +345,10 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             loadedStyle.addSource(geoJsonSource(DASHCAM_SOURCE_ID) {
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
-            loadedStyle.addSource(geoJsonSource(CAR_LIGHTS_SOURCE_ID) {
+            loadedStyle.addSource(geoJsonSource(CAR_HEADLIGHTS_SOURCE_ID) {
+                featureCollection(FeatureCollection.fromFeatures(emptyList()))
+            })
+            loadedStyle.addSource(geoJsonSource(CAR_TAILLIGHTS_SOURCE_ID) {
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
 
@@ -539,19 +544,32 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             // ── Efectos Especiales ─────────────────
             if (isNightMode) {
                 try {
-                    // Añadir la textura holográfica de luces al estilo
-                    loadedStyle.addImage("car-lights-glow", drawCarLightsGlow())
+                    // Añadir texturas al estilo
+                    loadedStyle.addImage("car-headlights-glow", drawHeadlightsGlow())
+                    loadedStyle.addImage("car-taillights-glow", drawTaillightsGlow())
                     
-                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_LIGHTS_LAYER_ID, CAR_LIGHTS_SOURCE_ID) {
-                        iconImage("car-lights-glow")
+                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_HEADLIGHTS_LAYER_ID, CAR_HEADLIGHTS_SOURCE_ID) {
+                        iconImage("car-headlights-glow")
                         iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
                         iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
                         iconRotate(Expression.get("bearing"))
-                        iconTranslate(listOf(0.0, -AppSettings.glowHeightOffset.value.toDouble()))
+                        iconTranslate(listOf(0.0, -AppSettings.glowHeadHeight.value.toDouble()))
+                        iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
                         iconAllowOverlap(true)
                         iconIgnorePlacement(true)
-                        // Tamaño adecuado para el nuevo bitmap
-                        iconSize(AppSettings.glowIconSize.value.toDouble())
+                        iconSize(Expression.get("iconSize"))
+                    })
+
+                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_TAILLIGHTS_LAYER_ID, CAR_TAILLIGHTS_SOURCE_ID) {
+                        iconImage("car-taillights-glow")
+                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.VIEWPORT)
+                        iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
+                        iconRotate(Expression.get("bearing"))
+                        iconTranslate(listOf(0.0, -AppSettings.glowTailHeight.value.toDouble()))
+                        iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
+                        iconAllowOverlap(true)
+                        iconIgnorePlacement(true)
+                        iconSize(Expression.get("iconSize"))
                     })
                 } catch (e: Exception) {}
             }
@@ -620,16 +638,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             val updateGlow = {
                 lastIndicatorPos?.let { pos ->
                     mapView.mapboxMap.getStyle { style ->
-                        style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>("car-lights-source")?.featureCollection(
-                            com.mapbox.geojson.FeatureCollection.fromFeature(
-                                com.mapbox.geojson.Feature.fromGeometry(
-                                    pos,
-                                    com.google.gson.JsonObject().apply {
-                                        addProperty("bearing", lastIndicatorBearing)
-                                    }
-                                )
+                        val featureCollection = com.mapbox.geojson.FeatureCollection.fromFeature(
+                            com.mapbox.geojson.Feature.fromGeometry(
+                                pos,
+                                com.google.gson.JsonObject().apply {
+                                    addProperty("bearing", lastIndicatorBearing)
+                                    addProperty("iconSize", AppSettings.glowIconSize.value.toDouble())
+                                }
                             )
                         )
+                        style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
+                        style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_TAILLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
                     }
                 }
             }
@@ -1009,8 +1028,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     longitude = newLon
                 })
 
-                // Simular semáforos: detenerse por 30 iteraciones (3 seg) cada 150 iteraciones (15 seg)
-                val isSimBraking = (iteration % 150 < 30)
+                // Simular semáforos: detenerse por 5 iteraciones (5 seg) cada 20 iteraciones (20 seg)
+                val isSimBraking = (iteration % 20 < 5)
                 val currentSimSpeed = if (isSimBraking) 0f else speedMps
 
                 val mockLoc = android.location.Location("mock").apply {
@@ -1027,7 +1046,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 
                 // Si no está frenando, avanzar en el círculo
                 if (!isSimBraking) {
-                    angle += 0.02
+                    angle += 0.035
                 }
                 
                 iteration++
@@ -1039,11 +1058,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     // Ignorar si el método no existe en esta versión de Mapbox
                 }
                 
-                // Incrementar ángulo para el próximo paso (determina qué tan rápido "gira")
-                angle += 0.015
-                
-                // Pausa de simulación ~ 100ms igual que GPS real
-                delay(100)
+                // Pausa de simulación: 1000ms igual que GPS real de Android
+                delay(1000)
             }
         }
     }
@@ -1230,9 +1246,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     val refreshGlowOnMap: () -> Unit = {
         mapView.mapboxMap.getStyle { style ->
             try {
-                val bmp = drawCarLightsGlow()
-                style.removeStyleImage("car-lights-glow")
-                style.addImage("car-lights-glow", bmp)
+                val headBmp = drawHeadlightsGlow()
+                val tailBmp = drawTaillightsGlow()
+                style.removeStyleImage("car-headlights-glow")
+                style.removeStyleImage("car-taillights-glow")
+                style.addImage("car-headlights-glow", headBmp)
+                style.addImage("car-taillights-glow", tailBmp)
                 // Aplicar escala del modelo si cambió
                 mapView.location.updateSettings {
                     locationPuck = getVehiclePuck(
@@ -1374,11 +1393,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             },
             update = { _ ->
                 // Actualizar altura de las luces si el estilo está cargado
-                val hOffset = AppSettings.glowHeightOffset.value
+                val headOffset = AppSettings.glowHeadHeight.value
+                val tailOffset = AppSettings.glowTailHeight.value
                 mapView.mapboxMap.getStyle { style ->
                     try {
-                        val layer = style.getLayerAs<com.mapbox.maps.extension.style.layers.generated.SymbolLayer>("car-lights-layer")
-                        layer?.iconTranslate(listOf(0.0, -hOffset.toDouble()))
+                        val headLayer = style.getLayerAs<com.mapbox.maps.extension.style.layers.generated.SymbolLayer>(CAR_HEADLIGHTS_LAYER_ID)
+                        headLayer?.iconTranslate(listOf(0.0, -headOffset.toDouble()))
+                        headLayer?.iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
+
+                        val tailLayer = style.getLayerAs<com.mapbox.maps.extension.style.layers.generated.SymbolLayer>(CAR_TAILLIGHTS_LAYER_ID)
+                        tailLayer?.iconTranslate(listOf(0.0, -tailOffset.toDouble()))
+                        tailLayer?.iconTranslateAnchor(com.mapbox.maps.extension.style.layers.properties.generated.IconTranslateAnchor.VIEWPORT)
                     } catch (e: Exception) {}
                 }
 
@@ -2044,18 +2069,15 @@ fun drawCustomPin(color: Int): Bitmap {
 
 // (Removidos decodePolyline6 y valhallaTypeToOsrmStyle porque Mapbox Directions API retorna GeoJSON y estilos de maniobra OSRM nativos)
 
-fun drawCarLightsGlow(
+fun drawHeadlightsGlow(
     carHalfW : Float = AppSettings.glowCarHalfW.value,
     headY    : Float = AppSettings.glowHeadY.value,
     headReach: Float = AppSettings.glowHeadReach.value,
-    headSpread:Float = AppSettings.glowHeadSpread.value,
-    tailY    : Float = AppSettings.glowTailY.value,
-    tailRadius:Float = AppSettings.glowTailRadius.value,
-    isBraking: Boolean = NavigationState.isBraking.value
+    headSpread:Float = AppSettings.glowHeadSpread.value
 ): Bitmap {
     val w = 512
     val h = 512
-    val cx = w / 2f  // 256 = center
+    val cx = w / 2f
     val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -2063,40 +2085,57 @@ fun drawCarLightsGlow(
     val beamColor   = android.graphics.Color.argb(100, 255, 255, 200)
     val transparent = android.graphics.Color.TRANSPARENT
 
-    // === HEADLIGHTS (haz apuntando hacia arriba, Y=0) ===
-    // Left headlight cone
+    // === HEADLIGHTS ===
     val leftPath = Path()
-    leftPath.moveTo(cx - carHalfW - 2f, headY)           // origen faro izquierdo
-    leftPath.lineTo(cx - carHalfW - headSpread, headReach) // abre hacia la izquierda
-    leftPath.lineTo(cx - 5f, headReach)                    // cierra hacia el centro
+    leftPath.moveTo(cx - carHalfW - 2f, headY)
+    leftPath.lineTo(cx - carHalfW - headSpread, headReach)
+    leftPath.lineTo(cx - 5f, headReach)
     leftPath.close()
     paint.shader = LinearGradient(cx - carHalfW, headY, cx - carHalfW, headReach, beamColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawPath(leftPath, paint)
 
-    // Right headlight cone
     val rightPath = Path()
-    rightPath.moveTo(cx + carHalfW + 2f, headY)           // origen faro derecho
-    rightPath.lineTo(cx + carHalfW + headSpread, headReach) // abre hacia la derecha
-    rightPath.lineTo(cx + 5f, headReach)                    // cierra hacia el centro
+    rightPath.moveTo(cx + carHalfW + 2f, headY)
+    rightPath.lineTo(cx + carHalfW + headSpread, headReach)
+    rightPath.lineTo(cx + 5f, headReach)
     rightPath.close()
     paint.shader = LinearGradient(cx + carHalfW, headY, cx + carHalfW, headReach, beamColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawPath(rightPath, paint)
 
-    // === TAILLIGHTS (pequeños glow rojos) ===
-    val tailColor = android.graphics.Color.argb(180, 255, 15, 15)
-
-    // Left taillight
-    paint.shader = RadialGradient(cx - carHalfW, tailY, tailRadius, tailColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx - carHalfW, tailY, tailRadius, paint)
-
-    // Right taillight
-    paint.shader = RadialGradient(cx + carHalfW, tailY, tailRadius, tailColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx + carHalfW, tailY, tailRadius, paint)
-
-    // === GROUND REFLECTION (pool de luz cálida bajo el auto) ===
+    // === GROUND REFLECTION ===
     val reflColor = android.graphics.Color.argb(40, 255, 220, 150)
     paint.shader = RadialGradient(cx, 256f, 45f, reflColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawCircle(cx, 256f, 45f, paint)
+
+    return bitmap
+}
+
+fun drawTaillightsGlow(
+    carHalfW : Float = AppSettings.glowCarHalfW.value,
+    tailY    : Float = AppSettings.glowTailY.value,
+    tailRadius:Float = AppSettings.glowTailRadius.value,
+    isBraking: Boolean = NavigationState.isBraking.value
+): Bitmap {
+    val w = 512
+    val h = 512
+    val cx = w / 2f
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    val transparent = android.graphics.Color.TRANSPARENT
+    
+    // Si está frenando, la intensidad al 100% y radio +50%. Si no, tenues (70 alfa).
+    val alpha = if (isBraking) 255 else 70
+    val radius = if (isBraking) tailRadius * 1.5f else tailRadius
+    val tailColor = android.graphics.Color.argb(alpha, 255, 15, 15)
+
+    // === TAILLIGHTS ===
+    paint.shader = RadialGradient(cx - carHalfW, tailY, radius, tailColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx - carHalfW, tailY, radius, paint)
+
+    paint.shader = RadialGradient(cx + carHalfW, tailY, radius, tailColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx + carHalfW, tailY, radius, paint)
 
     return bitmap
 }
