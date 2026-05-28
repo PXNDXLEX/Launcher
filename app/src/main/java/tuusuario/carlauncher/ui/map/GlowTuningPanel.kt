@@ -172,8 +172,8 @@ fun GlowTuningPanel(
                 Divider(color = Color(0xFF1A1A3A))
                 Spacer(Modifier.height(8.dp))
 
-                // ── Escala del modelo 3D ─────────────────────────────────────
-                SectionLabel("MODELO 3D")
+                // ── Escala del modelo 3D y Altura Visual ─────────────────────
+                SectionLabel("MODELO 3D / INTEGRACIÓN")
 
                 // Slider de escala del modelo 3D (0.1 = pequeño, 0.3 = grande)
                 TuningSlider(
@@ -182,6 +182,13 @@ fun GlowTuningPanel(
                     range  = 0.1f..0.3f,
                     format = "%.3f"
                 ) { AppSettings.setVehicle3DScale(it) }
+
+                TuningSlider(
+                    label = "Altura visual de luces (Z-Offset)",
+                    value = AppSettings.glowHeightOffset.value,
+                    range  = -100f..100f,
+                    format = "%.0f px"
+                ) { AppSettings.setGlowHeightOffset(it); onGlowChanged() }
 
                 Spacer(Modifier.height(12.dp))
 

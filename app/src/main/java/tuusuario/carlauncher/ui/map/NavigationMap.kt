@@ -546,6 +546,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
                         iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
                         iconRotate(Expression.get("bearing"))
+                        iconTranslate(listOf(0.0, -AppSettings.glowHeightOffset.value.toDouble()))
                         iconAllowOverlap(true)
                         iconIgnorePlacement(true)
                         // Tamaño adecuado para el nuevo bitmap
@@ -989,6 +990,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             val radiusDegrees = 0.002 // Aprox 200m de radio
             val speedMps = 15f / 3.6f // 15 km/h a metros/segundo
 
+            var iteration = 0
             while (isActive && AppSettings.isGpsSimulationMode.value) {
                 // Calcular posición en el círculo
                 val newLat = centerLat + radiusDegrees * Math.sin(angle)
@@ -1006,10 +1008,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     longitude = newLon
                 })
 
+                // Simular semáforos: detenerse por 30 iteraciones (3 seg) cada 150 iteraciones (15 seg)
+                val isSimBraking = (iteration % 150 < 30)
+                val currentSimSpeed = if (isSimBraking) 0f else speedMps
+
                 val mockLoc = android.location.Location("mock").apply {
                     latitude = newLat
                     longitude = newLon
-                    speed = speedMps
+                    speed = currentSimSpeed
                     this.bearing = bearing
                     accuracy = 5f
                     time = System.currentTimeMillis()
@@ -1018,6 +1024,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 // Inyectar en el callback como si fuera real
                 locationCallback.onLocationResult(LocationResult.create(listOf(mockLoc)))
                 
+                // Si no está frenando, avanzar en el círculo
+                if (!isSimBraking) {
+                    angle += 0.02
+                }
+                
+                iteration++
                 // Intentar forzar la actualización del puck de Mapbox si el método existe
                 try {
                     mapView.location.javaClass.getMethod("forceLocationUpdate", android.location.Location::class.java)
@@ -1360,6 +1372,15 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 }
             },
             update = { _ ->
+                // Actualizar altura de las luces si el estilo está cargado
+                val hOffset = AppSettings.glowHeightOffset.value
+                mapView.mapboxMap.getStyle { style ->
+                    try {
+                        val layer = style.getLayerAs<com.mapbox.maps.extension.style.layers.generated.SymbolLayer>("car-lights-layer")
+                        layer?.iconTranslate(listOf(0.0, -hOffset.toDouble()))
+                    } catch (e: Exception) {}
+                }
+
                 // El mapa se actualiza vía LaunchedEffects y callbacks; aquí solo
                 // sincronizamos el marcador de destino cuando cambia el estado global
                 if (mapReady) {

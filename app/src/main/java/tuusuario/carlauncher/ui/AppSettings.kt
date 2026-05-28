@@ -41,6 +41,7 @@ object AppSettings {
     val glowTailY      = mutableStateOf(272f)  // Y de las luces traseras
     val glowTailRadius = mutableStateOf(14f)   // radio del glow trasero
     val glowIconSize   = mutableStateOf(1.5f)  // escala del símbolo en el mapa
+    val glowHeightOffset = mutableStateOf(0f)  // altura visual (Z-offset simulado en pantalla)
 
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
@@ -84,6 +85,7 @@ object AppSettings {
         glowTailY.value      = prefs?.getFloat(p + "glowTailY",      272f) ?: 272f
         glowTailRadius.value = prefs?.getFloat(p + "glowTailRadius", 14f)  ?: 14f
         glowIconSize.value   = prefs?.getFloat(p + "glowIconSize",   1.5f) ?: 1.5f
+        glowHeightOffset.value = prefs?.getFloat(p + "glowHeightOffset", 0f) ?: 0f
     }
 
     // Funciones elegantes para cambiar y GUARDAR al mismo tiempo
@@ -115,6 +117,7 @@ object AppSettings {
     fun setGlowTailY(v: Float)      { glowTailY.value      = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowTailY",      v)?.apply() }
     fun setGlowTailRadius(v: Float) { glowTailRadius.value = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowTailRadius", v)?.apply() }
     fun setGlowIconSize(v: Float)   { glowIconSize.value   = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowIconSize",   v)?.apply() }
+    fun setGlowHeightOffset(v: Float) { glowHeightOffset.value = v; prefs?.edit()?.putFloat("${vehicleType.value}_glowHeightOffset", v)?.apply() }
 
     fun setUiColor(color: Int) {
         uiColor.value = color
