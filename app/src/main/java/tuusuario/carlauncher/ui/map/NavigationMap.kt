@@ -1888,10 +1888,15 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
     }
 
     if (modelAsset != null) {
+        // Los modelos originales (Sedan, Hatchback) tienen un nodo interno en Blender con matriz x100.
+        // Los nuevos modelos de manex3d.com vienen en escala 1:1 real, por lo que sin multiplicar
+        // son microscópicos en comparación. Aplicamos un multiplicador de x65 para igualarlos.
+        val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 65f else scale
+
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
-            // Escala vinculada al Slider de la UI
-            modelScale = listOf(scale, scale, scale),
+            // Escala vinculada al Slider de la UI (y ajustada por el multiplicador de base)
+            modelScale = listOf(finalScale, finalScale, finalScale),
             // Los modelos GLB tienen el frente hacia atrás respecto a Mapbox;
             // se rota 180° en Z (yaw) para que el morro apunte en la dirección de movimiento.
             modelRotation = listOf(0f, 0f, 180f)
