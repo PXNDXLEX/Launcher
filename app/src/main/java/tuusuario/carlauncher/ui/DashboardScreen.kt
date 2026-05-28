@@ -275,15 +275,42 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        if (showSettingsDialog) {
-            PremiumSettingsDialog(
-                onDismiss = { showSettingsDialog = false },
-                onNavigateToMap = {
-                    currentScreen = "MAPA_FULL"
-                    showSettingsDialog = false
-                    NavigationState.showGlowTuning.value = true
+        // Menú de configuración con animación fluida
+        AnimatedVisibility(
+            visible = showSettingsDialog,
+            enter = fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.9f, animationSpec = tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)),
+            exit = fadeOut(animationSpec = tween(200)) + scaleOut(targetScale = 0.9f, animationSpec = tween(200)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            androidx.activity.compose.BackHandler(enabled = showSettingsDialog) {
+                showSettingsDialog = false
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = { showSettingsDialog = false }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(modifier = Modifier.clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = {} // Evitar cerrar al hacer clic dentro de la tarjeta
+                )) {
+                    PremiumSettingsDialog(
+                        onDismiss = { showSettingsDialog = false },
+                        onNavigateToMap = {
+                            currentScreen = "MAPA_FULL"
+                            showSettingsDialog = false
+                            NavigationState.showGlowTuning.value = true
+                        }
+                    )
                 }
-            )
+            }
         }
 
         if (NavigationState.selectedHistoryRoute.value != null || NavigationState.selectedDashcamRoute.value != null) {
@@ -332,12 +359,13 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
         uri?.let { pendingCropUri = it; showSpeedoCropper = true }
     }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Card(
-            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
+    // Ya no usamos Dialog() nativo, la tarjeta se renderiza directamente para ser animada
+    Card(
+        modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+    ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header
                 Box(
@@ -613,7 +641,6 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                 }
             }
         }
-    }
 
 
 
@@ -972,33 +999,43 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
     }
 
     Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        when (currentScreen) {
-            "MAPA_FULL" -> {
-                Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                    NavigationMap(isFullScreen = true, isDarkMode = isDarkMode)
+        Crossfade(targetState = currentScreen, animationSpec = tween(400), label = "ScreenTransition") { targetScreen ->
+            when (targetScreen) {
+                "MAPA_FULL" -> {
+                    Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
+                        NavigationMap(isFullScreen = true, isDarkMode = isDarkMode)
+                    }
                 }
-            }
-            "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
-            "RUTAS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RouteHistoryScreen() }
-            "VIDEOS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { com.tuusuario.carlauncher.ui.widgets.DashcamGalleryScreen() }
-            "DASHBOARD" -> {
-                if (isLandscape) {
-                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.60f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Column(modifier = Modifier.weight(0.40f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
-                                DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
+                "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
+                "RUTAS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RouteHistoryScreen() }
+                "VIDEOS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { com.tuusuario.carlauncher.ui.widgets.DashcamGalleryScreen() }
+                "DASHBOARD" -> {
+                    if (isLandscape) {
+                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Box(modifier = Modifier.weight(0.60f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                            Column(modifier = Modifier.weight(0.40f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { 
+                                    Crossfade(targetState = AppSettings.speedoStyle.value, animationSpec = tween(350), label = "SpeedoTransition") { _ ->
+                                        SpeedometerWidget() 
+                                    }
+                                }
+                                Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
+                                    DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
+                                }
                             }
                         }
-                    }
-                } else {
-                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(modifier = Modifier.weight(0.55f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                        Row(modifier = Modifier.weight(0.45f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { SpeedometerWidget() }
-                            Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
-                                DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
+                    } else {
+                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Box(modifier = Modifier.weight(0.55f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
+                            Row(modifier = Modifier.weight(0.45f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { 
+                                    Crossfade(targetState = AppSettings.speedoStyle.value, animationSpec = tween(350), label = "SpeedoTransition") { _ ->
+                                        SpeedometerWidget() 
+                                    }
+                                }
+                                Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
+                                    DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
+                                }
                             }
                         }
                     }

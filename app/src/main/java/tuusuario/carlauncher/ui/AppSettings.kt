@@ -58,9 +58,24 @@ object AppSettings {
 
         uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
         mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
-        isDarkMode.value = prefs?.getBoolean("isDarkMode", true) ?: true
-        isMapDarkMode.value = prefs?.getBoolean("isMapDarkMode", true) ?: true
-        mapStyle.value = prefs?.getString("mapStyle", "DARK") ?: "DARK"
+
+        // Calcular el modo noche basado en la hora (19:00 - 04:59 es de noche)
+        val calendar = java.util.Calendar.getInstance()
+        val hourOfDay = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        val isNightTime = hourOfDay >= 19 || hourOfDay < 5
+
+        isDarkMode.value = isNightTime
+        isMapDarkMode.value = isNightTime
+        mapStyle.value = if (isNightTime) "DARK" else "LIGHT"
+
+        // Guardar los valores calculados en prefs para que estén sincronizados
+        prefs?.edit()?.apply {
+            putBoolean("isDarkMode", isNightTime)
+            putBoolean("isMapDarkMode", isNightTime)
+            putString("mapStyle", mapStyle.value)
+            apply()
+        }
+
         batterySaverMode.value = prefs?.getBoolean("batterySaverMode", false) ?: false
         dashcamCameraIndex.value = prefs?.getInt("dashcamCameraIndex", 0) ?: 0
         customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"

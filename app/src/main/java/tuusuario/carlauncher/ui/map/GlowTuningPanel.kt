@@ -65,7 +65,7 @@ fun GlowTuningPanel(
                 .fillMaxHeight()
                 .width(300.dp)
                 .background(
-                    Color(0xE6050510),
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
                     RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
                 )
                 .padding(12.dp)
@@ -82,14 +82,14 @@ fun GlowTuningPanel(
                 ) {
                     Text(
                         "🔦 Ajuste de Luces",
-                        color = Color(0xFF00E5FF),
+                        color = MaterialTheme.colorScheme.primary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, null, tint = Color(0xFF888888), modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
                 }
 
@@ -99,7 +99,7 @@ fun GlowTuningPanel(
                 GlowPreviewCanvas(onGlowChanged)
 
                 Spacer(Modifier.height(12.dp))
-                Divider(color = Color(0xFF1A1A3A))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(Modifier.height(8.dp))
 
                 // ── Sliders de faros delanteros ──────────────────────────────
@@ -134,7 +134,7 @@ fun GlowTuningPanel(
                 ) { AppSettings.setGlowHeadSpread(it); onGlowChanged() }
 
                 Spacer(Modifier.height(8.dp))
-                Divider(color = Color(0xFF1A1A3A))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(Modifier.height(8.dp))
 
                 // ── Sliders de luces traseras ────────────────────────────────
@@ -155,7 +155,7 @@ fun GlowTuningPanel(
                 ) { AppSettings.setGlowTailRadius(it); onGlowChanged() }
 
                 Spacer(Modifier.height(8.dp))
-                Divider(color = Color(0xFF1A1A3A))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(Modifier.height(8.dp))
 
                 // ── Tamaño del icono en el mapa ──────────────────────────────
@@ -169,7 +169,7 @@ fun GlowTuningPanel(
                 ) { AppSettings.setGlowIconSize(it); onGlowChanged() }
 
                 Spacer(Modifier.height(8.dp))
-                Divider(color = Color(0xFF1A1A3A))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(Modifier.height(8.dp))
 
                 // ── Escala del modelo 3D ─────────────────────────────────────
@@ -199,7 +199,7 @@ fun GlowTuningPanel(
                         onGlowChanged()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252))
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
@@ -222,7 +222,7 @@ fun GlowTuningPanel(
                 }
                 Text(
                     vals,
-                    color = Color(0xFF556677),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     lineHeight = 13.sp
@@ -258,7 +258,7 @@ private fun GlowPreviewCanvas(onGlowChanged: () -> Unit) {
             .fillMaxWidth()
             .height(140.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF08080F)),
+            .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
     ) {
         androidx.compose.foundation.Image(
@@ -268,7 +268,7 @@ private fun GlowPreviewCanvas(onGlowChanged: () -> Unit) {
         )
         Text(
             "PREVIEW (512×512 → escala)",
-            color = Color(0xFF334455),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             fontSize = 8.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)
@@ -290,10 +290,10 @@ private fun TuningSlider(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(label, color = Color(0xFF8899AA), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             Text(
                 String.format(format, value),
-                color = Color(0xFF00E5FF),
+                color = MaterialTheme.colorScheme.primary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
@@ -305,9 +305,9 @@ private fun TuningSlider(
             valueRange = range,
             modifier = Modifier.fillMaxWidth().height(28.dp),
             colors = SliderDefaults.colors(
-                thumbColor       = Color(0xFF00E5FF),
-                activeTrackColor = Color(0xFF007799),
-                inactiveTrackColor = Color(0xFF1A2233)
+                thumbColor       = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
     }
@@ -318,7 +318,7 @@ private fun TuningSlider(
 private fun SectionLabel(text: String) {
     Text(
         text,
-        color = Color(0xFF445566),
+        color = MaterialTheme.colorScheme.primary,
         fontSize = 9.sp,
         fontWeight = FontWeight.Bold,
         fontFamily = FontFamily.Monospace,
