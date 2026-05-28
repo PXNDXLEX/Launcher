@@ -458,11 +458,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                         try {
                             loadedStyle.addLayerBelow(fillLayer("custom-water", "composite") {
                                 sourceLayer("water")
-                                fillColor("#04001A") // Deep cyber water
+                                fillColor("#000000") // Pitch black cyber water
                             }, labelRef)
                             loadedStyle.addLayerBelow(fillLayer("custom-landcover", "composite") {
                                 sourceLayer("landcover")
-                                fillColor("#05050A") // Dark cyber ground
+                                fillColor("#000000") // Pitch black cyber ground
                             }, labelRef)
                         } catch (e: Exception) {}
                     }
@@ -1260,7 +1260,17 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
 
                         // Anotar destino
                         destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                        val pm = pointAnnotMgr ?: mapView.annotations.createPointAnnotationManager().also { pointAnnotMgr = it }
+                        val pm = pointAnnotMgr ?: mapView.annotations.createPointAnnotationManager().apply {
+                            addClickListener { annotation ->
+                                favoriteLocationToSave = annotation.point
+                                favoriteNameToSave = ""
+                                favoriteAddressToSave = "${String.format("%.5f", annotation.point.latitude())}, ${String.format("%.5f", annotation.point.longitude())}"
+                                selectedIconType = "Star"
+                                isSavingFavorite = true
+                                showSaveFavoriteDialog = true
+                                true
+                            }
+                        }.also { pointAnnotMgr = it }
                         val iconBmp = drawCustomPin(uiColor)
                         destAnnotation = pm.create(PointAnnotationOptions().withPoint(destPt).withIconImage(iconBmp))
                         true
@@ -1893,11 +1903,13 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
         // pueden quedar en escala de milímetros. Aplicamos un multiplicador de x500 para igualarlos
         // al tamaño de un auto real (~4.5 - 5 metros) dentro del mapa.
         val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 500f else scale
+        // Estiramos un poco la altura (Z) para evitar que se vean aplastados ("bajos de altura")
+        val finalScaleZ = if (vehicleType == "STYLUS" || vehicleType == "CORSA") finalScale * 1.25f else finalScale
 
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
             // Escala vinculada al Slider de la UI (y ajustada por el multiplicador de base)
-            modelScale = listOf(finalScale, finalScale, finalScale),
+            modelScale = listOf(finalScale, finalScale, finalScaleZ),
             // Los modelos GLB tienen el frente hacia atrás respecto a Mapbox;
             // se rota 180° en Z (yaw) para que el morro apunte en la dirección de movimiento.
             modelRotation = listOf(0f, 0f, 180f)
