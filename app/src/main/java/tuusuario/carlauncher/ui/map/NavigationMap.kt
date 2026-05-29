@@ -657,30 +657,16 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             // addOnIndicatorBearingChangedListener usa GPS bearing cuando el auto
             // se mueve Y brujula del dispositivo cuando esta parado. Funciona siempre.
             // El mapa rota bajo el icono del auto, que siempre apunta hacia arriba.
+            // IMPORTANTE: NO llamar easeTo aquí cuando el FollowPuckViewportState está activo
+            // (SyncWithLocationPuck ya gestiona bearing/pitch automáticamente). Dos sistemas
+            // controlando la cámara al mismo tiempo causan el efecto de "glitch/temblor".
             locPlugin.addOnIndicatorBearingChangedListener { newBearing ->
                 lastIndicatorBearing = newBearing
                 updateGlow()
-                
                 gpsBearing = newBearing
                 lastKnownBearing = newBearing.toFloat()
-                
-                // No interrumpir si estamos en la intro o en modo test
-                if (isIntroAnimating || AppSettings.isGpsSimulationMode.value) return@addOnIndicatorBearingChangedListener
-                
-                if (isFollowingLocation && hasInitializedPosition) {
-                    val vp = mapView.viewport
-                    if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
-                        // Viewport activo — rotar suavemente la camara
-                        mapView.camera.easeTo(
-                            cameraOptions {
-                                bearing(newBearing)
-                                pitch(70.0)
-                            },
-                            com.mapbox.maps.plugin.animation.MapAnimationOptions
-                                .mapAnimationOptions { duration(250) }
-                        )
-                    }
-                }
+                // El viewport FollowPuckViewportState con SyncWithLocationPuck
+                // ya rota la cámara automáticamente — no hacer easeTo aquí.
             }
 
             // Recrear anotaciones si ya hay destino activo
