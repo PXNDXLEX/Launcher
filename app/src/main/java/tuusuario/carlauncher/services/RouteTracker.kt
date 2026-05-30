@@ -339,4 +339,38 @@ object RouteTracker {
     fun getAllPoints(route: DailyRoute): List<RoutePoint> {
         return route.segments.flatMap { it.points }
     }
+
+    /**
+     * Extrae un segmento de tiempo de una ruta, abarcando X segundos alrededor de la hora dada.
+     * Útil para aislar un pico de velocidad.
+     */
+    fun extractWindowSegment(route: DailyRoute, targetTimeStr: String, windowSeconds: Int = 30): RouteSegment? {
+        try {
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+            val targetTime = java.time.LocalTime.parse(targetTimeStr, formatter)
+            val halfWindow = windowSeconds / 2L
+            
+            val allPoints = getAllPoints(route)
+            val windowPoints = allPoints.filter { pt ->
+                try {
+                    val ptTime = java.time.LocalTime.parse(pt.timestamp, formatter)
+                    val diff = java.time.Duration.between(targetTime, ptTime).seconds
+                    kotlin.math.abs(diff) <= halfWindow
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            
+            if (windowPoints.isEmpty()) return null
+            
+            return RouteSegment(
+                startTime = windowPoints.first().timestamp.take(5),
+                endTime = windowPoints.last().timestamp.take(5),
+                points = windowPoints.toMutableList()
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
 }

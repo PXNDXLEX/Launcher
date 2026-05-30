@@ -104,7 +104,11 @@ fun RecordsScreen() {
             // ── TARJETA RÉCORD HISTÓRICO ──────────────────────────────────────
             allTime?.let { champion ->
                 item {
-                    AllTimeChampionCard(record = champion, accentColor = accentColor)
+                    AllTimeChampionCard(
+                        record = champion,
+                        accentColor = accentColor,
+                        onClick = { openRouteForDate(champion.date, champion.time) }
+                    )
                     Spacer(Modifier.height(4.dp))
                 }
             }
@@ -121,7 +125,7 @@ fun RecordsScreen() {
                         isToday   = true,
                         isAllTime = today.date == allTime?.date && today.maxSpeedKmH == allTime.maxSpeedKmH,
                         accentColor = accentColor,
-                        onClick   = { openRouteForDate(today.date) }
+                        onClick   = { openRouteForDate(today.date, today.time) }
                     )
                 }
             }
@@ -145,7 +149,7 @@ fun RecordsScreen() {
                         isToday   = false,
                         isAllTime = record.date == allTime?.date && record.maxSpeedKmH == allTime.maxSpeedKmH,
                         accentColor = accentColor,
-                        onClick   = { openRouteForDate(record.date) }
+                        onClick   = { openRouteForDate(record.date, record.time) }
                     )
                 }
             }
@@ -155,17 +159,19 @@ fun RecordsScreen() {
     }
 }
 
-// ── Abre la ruta del día correspondiente en el mapa ──────────────────────────
-private fun openRouteForDate(date: String) {
+// ── Abre un fragmento de 30 segundos de la ruta alrededor de la marca ──────────
+private fun openRouteForDate(date: String, timeStr: String) {
     val route = RouteTracker.loadRoute(date)
     if (route != null) {
+        val snippet = RouteTracker.extractWindowSegment(route, timeStr, 30)
+        NavigationState.selectedHistorySegment.value = snippet
         NavigationState.selectedHistoryRoute.value = route
     }
 }
 
 // ── Tarjeta grande del campeón histórico ─────────────────────────────────────
 @Composable
-fun AllTimeChampionCard(record: SpeedRecord, accentColor: Color) {
+fun AllTimeChampionCard(record: SpeedRecord, accentColor: Color, onClick: () -> Unit) {
     // Animación de brillo giratorio
     val infiniteTransition = rememberInfiniteTransition(label = "championGlow")
     val glowAngle by infiniteTransition.animateFloat(
@@ -183,7 +189,7 @@ fun AllTimeChampionCard(record: SpeedRecord, accentColor: Color) {
     )
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape    = RoundedCornerShape(20.dp),
         colors   = CardDefaults.cardColors(
             containerColor = accentColor.copy(alpha = 0.10f)

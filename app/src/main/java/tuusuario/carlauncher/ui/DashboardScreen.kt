@@ -826,13 +826,57 @@ fun RouteHistoryScreen() {
 
                 // ── SEGMENTS LIST ──
                 if (currentRoute != null && currentRoute.segments.isNotEmpty()) {
+                    val reversedSegments = currentRoute.segments.reversed()
+                    
                     androidx.compose.foundation.lazy.LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        items(currentRoute.segments.size) { segIndex ->
-                            val segment = currentRoute.segments[segIndex]
+                        // Tarjeta de resumen de todo el día
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    NavigationState.selectedHistorySegment.value = null
+                                    NavigationState.selectedHistoryRoute.value = currentRoute
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = activeUiColor.copy(alpha = 0.15f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(48.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(activeUiColor.copy(alpha = 0.25f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Map, null, tint = activeUiColor, modifier = Modifier.size(24.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "Resumen de todo el día",
+                                            fontWeight = FontWeight.Bold, fontSize = 16.sp,
+                                            color = activeUiColor
+                                        )
+                                        Text(
+                                            "Ruta completa con todas las horas",
+                                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null, tint = activeUiColor)
+                                }
+                            }
+                        }
+
+                        // Lista de segmentos
+                        items(reversedSegments.size) { segIndex ->
+                            val segment = reversedSegments[segIndex]
                             Card(
                                 modifier = Modifier.fillMaxWidth().clickable {
                                     // Open this segment's route on the map
