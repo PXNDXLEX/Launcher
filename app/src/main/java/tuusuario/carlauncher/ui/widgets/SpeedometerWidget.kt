@@ -91,6 +91,10 @@ fun SpeedometerWidget() {
                         }
                         speed = correctedSpeed
                         NavigationState.currentSpeedKmH.value = correctedSpeed
+                        // Primer fix de GPS → completar la fase 3 de la pantalla de bienvenida
+                        if (!NavigationState.isGpsReady.value) {
+                            NavigationState.isGpsReady.value = true
+                        }
                     }
                 }
             }

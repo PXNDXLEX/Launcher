@@ -334,6 +334,8 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         mapView.mapboxMap.loadStyle(styleUri) { loadedStyle ->
             mapReady = true
             lastAppliedStyle = style
+            // Notificar a la pantalla de bienvenida que el mapa ya cargó
+            NavigationState.isMapStyleReady.value = true
 
             // Fuente + capas de ruta (casing + fill)
             loadedStyle.addSource(geoJsonSource(ROUTE_SOURCE_ID) {

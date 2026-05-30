@@ -8,6 +8,8 @@ import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,8 +29,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -78,6 +85,8 @@ import androidx.camera.view.PreviewView
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.roundToInt
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -105,7 +114,15 @@ object NavigationState {
     val currentLocation = mutableStateOf<android.location.Location?>(null)
     val selectedHistoryRoute = mutableStateOf<com.tuusuario.carlauncher.services.DailyRoute?>(null)
     val selectedDashcamRoute = mutableStateOf<List<com.tuusuario.carlauncher.services.RoutePoint>?>(null)
-    
+
+    // ── Flags de inicialización real para la pantalla de bienvenida ──────────
+    /** true en cuanto llega el primer fix de GPS con velocidad */
+    val isGpsReady = mutableStateOf(false)
+    /** true cuando el mapa Mapbox termina de cargar su primer estilo */
+    val isMapStyleReady = mutableStateOf(false)
+    /** true cuando AppSettings ya terminó de leer SharedPreferences */
+    val isSettingsLoaded = mutableStateOf(false)
+
     // ── ACTIVE NAVIGATION (persists across tab switches) ──
     // Usamos Point de Mapbox GeoJSON como tipo estándar de coordenada
     val activeDestination = mutableStateOf<Point?>(null)
@@ -151,7 +168,17 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     LaunchedEffect(Unit) {
         if (showWelcome) {
-            delay(2500)
+            // Esperar al menos 2 segundos para que la animación se aprecie
+            val startMs = System.currentTimeMillis()
+            // Luego esperar a que los 3 sistemas estén listos (o max 8s de timeout)
+            while (System.currentTimeMillis() - startMs < 8000) {
+                val elapsed = System.currentTimeMillis() - startMs
+                val allReady = NavigationState.isSettingsLoaded.value &&
+                               NavigationState.isMapStyleReady.value &&
+                               NavigationState.isGpsReady.value
+                if (elapsed >= 2000 && allReady) break
+                delay(100)
+            }
             showWelcome = false
         }
         while (true) {
@@ -327,21 +354,16 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
         AnimatedVisibility(
             visible = showWelcome,
-            enter = fadeIn(animationSpec = tween(500)),
-            exit = fadeOut(animationSpec = tween(1000)) + scaleOut(animationSpec = tween(1000), targetScale = 1.1f),
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(800)) + scaleOut(animationSpec = tween(800), targetScale = 1.08f),
             modifier = Modifier.fillMaxSize()
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = activeUiColor, modifier = Modifier.size(120.dp))
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text("Bienvenido a", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Light, letterSpacing = 2.sp)
-                    Text("CAR LAUNCHER", color = activeUiColor, fontSize = 42.sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp)
-                }
-            }
+            CinematicWelcomeScreen(
+                accentColor   = activeUiColor,
+                gpsReady      = NavigationState.isGpsReady.value,
+                mapReady      = NavigationState.isMapStyleReady.value,
+                settingsReady = NavigationState.isSettingsLoaded.value
+            )
         }
     }
 }
@@ -1317,3 +1339,349 @@ fun SystemStatusRow() {
         }
     }
 }
+
+// ── Pantalla de Bienvenida Cinemática ───────────────────────────────────────
+
+private data class WelcomeParticle(
+    val x: Float,          // posición horizontal (0-1 relativo al ancho)
+    val startY: Float,     // Y inicial (0-1 relativo al alto, empieza desde abajo)
+    val speed: Float,      // velocidad de subida (0.05 - 0.2 por segundo)
+    val size: Float,       // tamaño en dp
+    val alpha: Float,      // opacidad base
+    val twinkle: Float     // frecuencia de parpadeo
+)
+
+@Composable
+fun CinematicWelcomeScreen(
+    accentColor:   Color,
+    settingsReady: Boolean = false,
+    mapReady:      Boolean = false,
+    gpsReady:      Boolean = false
+) {
+    // Generar partículas estables (no se recrean en cada frame)
+    val particles = remember {
+        List(55) {
+            WelcomeParticle(
+                x       = Math.random().toFloat(),
+                startY  = Math.random().toFloat(),
+                speed   = (0.04f + Math.random().toFloat() * 0.12f),
+                size    = (2f + Math.random().toFloat() * 4f),
+                alpha   = (0.3f + Math.random().toFloat() * 0.6f),
+                twinkle = (3f + Math.random().toFloat() * 8f)
+            )
+        }
+    }
+
+    // Acumulador de tiempo para todas las animaciones visuales
+    var time by remember { mutableStateOf(0f) }
+
+    // ── Progreso REAL por fases ───────────────────────────────────────────────
+    // Fase 1 → Settings (0.00 – 0.33):  mínimo 0.5s de animación de llegada
+    // Fase 2 → Mapa     (0.33 – 0.66):  mínimo 0.5s adicional
+    // Fase 3 → GPS      (0.66 – 1.00):  mínimo 0.5s adicional
+    //
+    // Cada fase tiene un "suelo" de avance lento (~0.06/s) para que la barra
+    // nunca esté completamente estática, y un "techo" determinado por el flag real.
+    // Cuando el flag real llega, la barra acelera hasta el siguiente hito.
+
+    val phase1Target = if (settingsReady) 0.33f else 0.15f   // Settings
+    val phase2Target = if (mapReady)      0.66f else (if (settingsReady) 0.45f else 0.15f)
+    val phase3Target = if (gpsReady)      1.00f else (if (mapReady)      0.82f else phase2Target)
+
+    val realTarget = phase3Target
+
+    // Progreso animado: avanza suavemente hacia realTarget
+    var barProgress by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(Unit) {
+        var lastNanos = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { nanos ->
+                val dt = (nanos - lastNanos) / 1_000_000_000f
+                lastNanos = nanos
+                time = (time + dt).coerceAtMost(60f) // sin límite — espera GPS real
+
+                // Velocidad de avance de la barra:
+                // Rápida cuando el sistema ya está listo, lenta cuando espera
+                val speed = if (barProgress < realTarget) {
+                    if (realTarget - barProgress > 0.1f) 0.35f else 0.12f
+                } else 0f
+                barProgress = (barProgress + speed * dt).coerceAtMost(realTarget)
+            }
+        }
+    }
+
+    // ── Fase activa y texto de estado ─────────────────────────────────────────
+    data class PhaseInfo(val label: String, val done: Boolean, val progress: Float)
+
+    val phases = listOf(
+        PhaseInfo("AJUSTES",  settingsReady, if (settingsReady) 1f else (barProgress / 0.33f).coerceIn(0f, 1f)),
+        PhaseInfo("MAPA",     mapReady,      if (mapReady)      1f else ((barProgress - 0.33f) / 0.33f).coerceIn(0f, 1f)),
+        PhaseInfo("GPS",      gpsReady,      if (gpsReady)      1f else ((barProgress - 0.66f) / 0.34f).coerceIn(0f, 1f))
+    )
+
+    val allDone = settingsReady && mapReady && gpsReady
+    val activePhaseLabel = when {
+        allDone        -> "SISTEMA LISTO  ✓"
+        !settingsReady -> "CARGANDO AJUSTES..."
+        !mapReady      -> "CARGANDO MAPA..."
+        else           -> "ESPERANDO GPS..."
+    }
+
+    // Pulso de escaneo (scanner line que sube y baja sobre la barra)
+    val scannerPos = (sin(time * 2.5f).toFloat() * 0.5f + 0.5f)  // 0→1→0
+
+    // ── Texto typewriter ─────────────────────────────────────────────────────
+    val fullTitle  = "CAR LAUNCHER"
+    val fullSub    = "BIENVENIDO"
+    val titleChars = ((time - 1.2f).coerceAtLeast(0f) / 0.08f).toInt().coerceIn(0, fullTitle.length)
+    val subChars   = ((time - 0.6f).coerceAtLeast(0f) / 0.06f).toInt().coerceIn(0, fullSub.length)
+    val visibleTitle = fullTitle.substring(0, titleChars)
+    val visibleSub   = fullSub.substring(0, subChars)
+
+    val iconAlpha  = ((time - 0.3f) / 0.5f).coerceIn(0f, 1f)
+    val ringPulse  = 0.85f + sin(time * 4.5f).toFloat() * 0.15f
+
+    // ─────────────────────────────────────────────────────────────────────────
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+
+        // ── Capa 1: Partículas flotantes ──────────────────────────
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width; val h = size.height
+            particles.forEach { p ->
+                val rawY   = p.startY - (time * p.speed) % 1f
+                val yNorm  = if (rawY < 0f) rawY + 1f else rawY
+                val twinkA = (0.4f + sin(time * p.twinkle + p.x * 10f).toFloat() * 0.4f).coerceIn(0f, 1f)
+                drawCircle(
+                    color  = accentColor.copy(alpha = p.alpha * twinkA * iconAlpha),
+                    radius = p.size,
+                    center = Offset(p.x * w, yNorm * h)
+                )
+            }
+        }
+
+        // ── Capa 2: Speed-lines + anillos ──────────────────────────
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cx = size.width / 2f; val cy = size.height / 2f
+            val burst = ((time - 0.2f) / 0.7f).coerceIn(0f, 1f)
+
+            if (burst > 0f) {
+                rotate(degrees = time * 18f, pivot = Offset(cx, cy)) {
+                    for (i in 0 until 24) {
+                        val rad  = Math.toRadians((i.toFloat() / 24f * 360f).toDouble())
+                        val lA   = if (i % 3 == 0) 0.35f else 0.15f
+                        val ls   = 90f + (if (i % 2 == 0) 20f else 0f)
+                        val le   = ls + burst * (200f + (i % 5) * 40f)
+                        drawLine(
+                            color = accentColor.copy(alpha = lA * burst),
+                            start = Offset(cx + cos(rad).toFloat() * ls, cy + sin(rad).toFloat() * ls),
+                            end   = Offset(cx + cos(rad).toFloat() * le, cy + sin(rad).toFloat() * le),
+                            strokeWidth = if (i % 3 == 0) 2.5f else 1f, cap = StrokeCap.Round
+                        )
+                    }
+                }
+            }
+            if (burst > 0.3f) {
+                val r = 110f * ringPulse
+                drawCircle(accentColor.copy(alpha = 0.25f * burst), r,       Offset(cx,cy), style = Stroke(2f))
+                drawCircle(accentColor.copy(alpha = 0.10f * burst), r + 18f, Offset(cx,cy), style = Stroke(1f))
+            }
+            if (burst > 0.5f) {
+                val aA = ((burst - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                rotate(time * -35f, Offset(cx, cy)) {
+                    for (a in 0 until 4)
+                        drawArc(accentColor.copy(alpha = 0.45f * aA), a * 90f + 10f, 65f, false,
+                            Offset(cx-78f,cy-78f), androidx.compose.ui.geometry.Size(156f,156f),
+                            style = Stroke(3f, cap = StrokeCap.Round))
+                }
+                rotate(time * 25f, Offset(cx, cy)) {
+                    for (a in 0 until 3)
+                        drawArc(accentColor.copy(alpha = 0.25f * aA), a * 120f + 20f, 50f, false,
+                            Offset(cx-95f,cy-95f), androidx.compose.ui.geometry.Size(190f,190f),
+                            style = Stroke(1.5f, cap = StrokeCap.Round))
+                }
+            }
+            if (iconAlpha > 0f) {
+                drawCircle(
+                    brush  = Brush.radialGradient(
+                        listOf(accentColor.copy(0.35f * iconAlpha), accentColor.copy(0.10f * iconAlpha), Color.Transparent),
+                        Offset(cx,cy), 130f),
+                    radius = 130f, center = Offset(cx,cy))
+            }
+        }
+
+        // ── Capa 3: Contenido UI ──────────────────────────────────
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.DirectionsCar, null,
+                tint = accentColor.copy(alpha = iconAlpha), modifier = Modifier.size(100.dp))
+
+            Spacer(Modifier.height(28.dp))
+            Text(visibleSub, color = Color.White.copy(alpha = 0.55f * iconAlpha),
+                fontSize = 13.sp, fontWeight = FontWeight.Light, letterSpacing = 6.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(visibleTitle, color = accentColor.copy(alpha = iconAlpha.coerceAtLeast(0.01f)),
+                    fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp)
+                if (titleChars < fullTitle.length) {
+                    val cA = (0.5f + sin(time * 8f).toFloat() * 0.5f).coerceIn(0f, 1f)
+                    Text("|", color = accentColor.copy(alpha = cA), fontSize = 36.sp, fontWeight = FontWeight.Black)
+                }
+            }
+
+            Spacer(Modifier.height(40.dp))
+
+            // ── HUD de carga por fases ─────────────────────────────
+            val hudAlpha = ((time - 0.4f) / 0.4f).coerceIn(0f, 1f)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.alpha(hudAlpha)
+            ) {
+                // ── Tres mini-indicadores de fase ─────────────────
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 10.dp)
+                ) {
+                    phases.forEach { phase ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // Ícono de check o spinner
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(
+                                        if (phase.done) accentColor.copy(alpha = 0.2f)
+                                        else Color.White.copy(alpha = 0.05f),
+                                        CircleShape
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (phase.done) accentColor.copy(alpha = 0.8f)
+                                                else accentColor.copy(alpha = 0.3f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (phase.done) {
+                                    Text("✓", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                                } else {
+                                    // Mini arc giratorio mientras carga
+                                    Canvas(Modifier.size(16.dp)) {
+                                        val a = (sin(time * 4f + phases.indexOf(phase).toFloat()).toFloat() * 0.5f + 0.5f) * 0.6f + 0.2f
+                                        drawArc(
+                                            color = accentColor.copy(alpha = a),
+                                            startAngle = time * 180f,
+                                            sweepAngle = 220f,
+                                            useCenter = false,
+                                            style = Stroke(2f, cap = StrokeCap.Round)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = phase.label,
+                                fontSize = 8.sp,
+                                color = if (phase.done) accentColor.copy(alpha = 0.9f)
+                                        else Color.White.copy(alpha = 0.35f),
+                                fontWeight = if (phase.done) FontWeight.Bold else FontWeight.Normal,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                    }
+                }
+
+                // ── Etiqueta de estado activo ──────────────────────
+                Text(
+                    text = activePhaseLabel,
+                    color = if (allDone) accentColor else accentColor.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontWeight = if (allDone) FontWeight.Bold else FontWeight.Medium,
+                    letterSpacing = 3.sp
+                )
+                Spacer(Modifier.height(10.dp))
+
+                // ── Barra principal HUD con scanner ───────────────
+                Box(
+                    modifier = Modifier.width(240.dp).height(5.dp)
+                ) {
+                    // Track de fondo
+                    Box(
+                        Modifier.fillMaxSize()
+                            .background(accentColor.copy(alpha = 0.12f), RoundedCornerShape(3.dp))
+                    )
+                    // Relleno real
+                    Box(
+                        Modifier.fillMaxHeight().fillMaxWidth(barProgress)
+                            .background(
+                                Brush.horizontalGradient(listOf(
+                                    accentColor.copy(alpha = 0.5f),
+                                    accentColor,
+                                    Color.White.copy(alpha = 0.85f)
+                                )),
+                                RoundedCornerShape(3.dp)
+                            )
+                    )
+                    // Línea de escaneo ("scanner") que recorre el relleno
+                    if (barProgress > 0.02f) {
+                        Box(
+                            Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth((barProgress * scannerPos).coerceIn(0f, 1f))
+                                .padding(end = 0.dp)
+                        ) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .width(2.dp)
+                                    .fillMaxHeight(1.5f)
+                                    .background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(1.dp))
+                            )
+                        }
+                    }
+                    // Divisores de fases (en 33% y 66%)
+                    listOf(0.333f, 0.666f).forEach { mark ->
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .padding(start = (240 * mark).dp)
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(
+                                    if (barProgress >= mark) Color.White.copy(alpha = 0.5f)
+                                    else accentColor.copy(alpha = 0.25f)
+                                )
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+                // Porcentaje y texto de fases completadas
+                Row(
+                    modifier = Modifier.width(240.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "${(barProgress * 100).toInt()}%",
+                        color = accentColor.copy(alpha = 0.6f),
+                        fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp
+                    )
+                    val donePhasesCount = phases.count { it.done }
+                    Text(
+                        "$donePhasesCount / 3 SISTEMAS",
+                        color = Color.White.copy(alpha = 0.25f),
+                        fontSize = 9.sp, letterSpacing = 1.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Extensión para usar alpha directamente en Modifier desde el contexto de DashboardScreen
+private fun Modifier.alpha(value: Float): Modifier = this.then(
+    androidx.compose.ui.draw.alpha(value.coerceIn(0f, 1f))
+)
+

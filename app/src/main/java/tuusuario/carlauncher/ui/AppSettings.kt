@@ -87,6 +87,9 @@ object AppSettings {
         customVehicleIconPath.value = prefs?.getString("customVehicleIconPath", "") ?: ""
         
         isInitialized = true
+        // Notificar a la pantalla de bienvenida que los ajustes ya están listos
+        // (NavigationState importado late-bound para evitar dependencia circular)
+        try { NavigationState.isSettingsLoaded.value = true } catch (_: Exception) {}
     }
 
     private fun loadVehicleSpecificSettings(type: String) {
