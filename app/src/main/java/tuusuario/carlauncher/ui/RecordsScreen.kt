@@ -175,8 +175,10 @@ fun AllTimeChampionCard(record: SpeedRecord, accentColor: Color) {
     )
     val pulseFrac by infiniteTransition.animateFloat(
         initialValue = 0.7f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing,
-            repeatMode = RepeatMode.Reverse)),
+        animationSpec = infiniteRepeatable(
+            animation  = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
         label = "pulse"
     )
 
