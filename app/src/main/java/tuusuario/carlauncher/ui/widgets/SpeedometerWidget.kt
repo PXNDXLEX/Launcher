@@ -95,6 +95,9 @@ fun SpeedometerWidget() {
                         if (!NavigationState.isGpsReady.value) {
                             NavigationState.isGpsReady.value = true
                         }
+                        // Actualizar récord de velocidad máxima del día / histórico
+                        com.tuusuario.carlauncher.services.SpeedRecordTracker
+                            .onSpeedUpdate(correctedSpeed, location)
                     }
                 }
             }

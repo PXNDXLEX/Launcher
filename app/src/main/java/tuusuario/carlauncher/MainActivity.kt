@@ -76,6 +76,8 @@ class MainActivity : ComponentActivity() {
         // Limpiar rutas antiguas de la papelera
         com.tuusuario.carlauncher.services.RouteTracker.init(this)
         com.tuusuario.carlauncher.services.RouteTracker.cleanupOldTrash()
+        // Inicializar tracker de récords de velocidad
+        com.tuusuario.carlauncher.services.SpeedRecordTracker.init(this)
 
         setContent {
             // Ahora leemos el estado directamente de nuestro AppSettings permanente

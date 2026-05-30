@@ -214,6 +214,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                         IconButton(onClick = { currentScreen = "YOUTUBE" }) { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) }
                         IconButton(onClick = { currentScreen = "RUTAS" }) { Icon(Icons.Default.History, "Rutas", tint = if (currentScreen == "RUTAS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
                         IconButton(onClick = { currentScreen = "VIDEOS" }) { Icon(Icons.Default.VideoLibrary, "Videos", tint = if (currentScreen == "VIDEOS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
+                        IconButton(onClick = { currentScreen = "RECORDS" }) { Icon(Icons.Default.EmojiEvents, "Récords", tint = if (currentScreen == "RECORDS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
                         
                         Spacer(modifier = Modifier.height(16.dp))
                         IconButton(onClick = { showSettingsDialog = true }) { Icon(Icons.Default.Settings, "Ajustes") }
@@ -234,6 +235,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                     NavigationBarItem(selected = currentScreen == "YOUTUBE", onClick = { currentScreen = "YOUTUBE" }, icon = { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = currentScreen == "RUTAS", onClick = { currentScreen = "RUTAS" }, icon = { Icon(Icons.Default.History, "Rutas", tint = if (currentScreen == "RUTAS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = currentScreen == "VIDEOS", onClick = { currentScreen = "VIDEOS" }, icon = { Icon(Icons.Default.VideoLibrary, "Videos", tint = if (currentScreen == "VIDEOS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
+                    NavigationBarItem(selected = currentScreen == "RECORDS", onClick = { currentScreen = "RECORDS" }, icon = { Icon(Icons.Default.EmojiEvents, "Récords", tint = if (currentScreen == "RECORDS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
                     NavigationBarItem(selected = false, onClick = { showSettingsDialog = true }, icon = { Icon(Icons.Default.Settings, "Ajustes") })
                 }
             }
@@ -278,6 +280,19 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
+        // ── Overlay de récord de velocidad (aparece sobre todo el contenido) ──
+        val hasRecordAlert = com.tuusuario.carlauncher.services.SpeedRecordTracker.recordAlert.value != null
+        AnimatedVisibility(
+            visible  = hasRecordAlert,
+            enter    = slideInVertically(initialOffsetY = { -it }) + fadeIn(tween(300)),
+            exit     = slideOutVertically(targetOffsetY = { -it }) + fadeOut(tween(400)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = if (isLandscape) 12.dp else 8.dp)
+                .padding(horizontal = if (isLandscape) 96.dp else 0.dp)
+        ) {
+            RecordAlertOverlay()
+        }
 
         var offsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
@@ -1029,8 +1044,9 @@ fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent:
                     }
                 }
                 "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
-                "RUTAS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RouteHistoryScreen() }
-                "VIDEOS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { com.tuusuario.carlauncher.ui.widgets.DashcamGalleryScreen() }
+                "RUTAS"   -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RouteHistoryScreen() }
+                "VIDEOS"  -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { com.tuusuario.carlauncher.ui.widgets.DashcamGalleryScreen() }
+                "RECORDS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RecordsScreen() }
                 "DASHBOARD" -> {
                     if (isLandscape) {
                         Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
