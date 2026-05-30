@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.draw.alpha as modifierAlpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -1696,8 +1697,7 @@ fun CinematicWelcomeScreen(
     }
 }
 
-// Extensión para usar alpha directamente en Modifier desde el contexto de DashboardScreen
-private fun Modifier.alpha(value: Float): Modifier = this.then(
-    androidx.compose.ui.draw.alpha(value.coerceIn(0f, 1f))
-)
+// Extensión para controlar opacidad en Modifier desde el contexto de DashboardScreen
+private fun Modifier.alpha(value: Float): Modifier =
+    this.modifierAlpha(value.coerceIn(0f, 1f))
 
