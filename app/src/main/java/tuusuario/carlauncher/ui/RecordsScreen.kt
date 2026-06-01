@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,7 +108,7 @@ fun RecordsScreen() {
                     AllTimeChampionCard(
                         record = champion,
                         accentColor = accentColor,
-                        onClick = { openRouteForDate(champion.date, champion.time) }
+                        onClick = { openRouteForRecord(champion) }
                     )
                     Spacer(Modifier.height(4.dp))
                 }
@@ -125,7 +126,7 @@ fun RecordsScreen() {
                         isToday   = true,
                         isAllTime = today.date == allTime?.date && today.maxSpeedKmH == allTime.maxSpeedKmH,
                         accentColor = accentColor,
-                        onClick   = { openRouteForDate(today.date, today.time) }
+                        onClick   = { openRouteForRecord(today) }
                     )
                 }
             }
@@ -149,7 +150,7 @@ fun RecordsScreen() {
                         isToday   = false,
                         isAllTime = record.date == allTime?.date && record.maxSpeedKmH == allTime.maxSpeedKmH,
                         accentColor = accentColor,
-                        onClick   = { openRouteForDate(record.date, record.time) }
+                        onClick   = { openRouteForRecord(record) }
                     )
                 }
             }
@@ -159,7 +160,23 @@ fun RecordsScreen() {
     }
 }
 
-// ── Abre un fragmento de 30 segundos de la ruta alrededor de la marca ──────────
+// ── Abre la ruta en el mapa, marcando el punto exacto del récord ──────────────
+private fun openRouteForRecord(record: SpeedRecord) {
+    val route = RouteTracker.loadRoute(record.date)
+    if (route != null) {
+        val snippet = RouteTracker.extractWindowSegment(route, record.time, 30)
+        NavigationState.selectedHistorySegment.value = snippet
+        NavigationState.selectedHistoryRoute.value = route
+    }
+    // Pin exacto del récord (lat/lon del SpeedRecord)
+    if (record.lat != 0.0 && record.lon != 0.0) {
+        NavigationState.speedRecordPin.value = com.mapbox.geojson.Point.fromLngLat(record.lon, record.lat)
+    } else {
+        NavigationState.speedRecordPin.value = null
+    }
+}
+
+// Mantener función antigua para compatibilidad
 private fun openRouteForDate(date: String, timeStr: String) {
     val route = RouteTracker.loadRoute(date)
     if (route != null) {
@@ -167,6 +184,7 @@ private fun openRouteForDate(date: String, timeStr: String) {
         NavigationState.selectedHistorySegment.value = snippet
         NavigationState.selectedHistoryRoute.value = route
     }
+    NavigationState.speedRecordPin.value = null
 }
 
 // ── Tarjeta grande del campeón histórico ─────────────────────────────────────
@@ -300,6 +318,18 @@ fun AllTimeChampionCard(record: SpeedRecord, accentColor: Color, onClick: () -> 
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                    // Hint: toca para ver el punto exacto
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Map, null,
+                            modifier = Modifier.size(11.dp),
+                            tint = accentColor.copy(alpha = 0.5f))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Toca para ver el punto exacto en el mapa",
+                            fontSize = 9.sp,
+                            color = accentColor.copy(alpha = 0.5f),
+                            fontWeight = FontWeight.Medium)
+                    }
                 }
             }
         }
@@ -430,7 +460,7 @@ fun RecordCard(
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.Map, null,
                             modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
+                            tint = accentColor.copy(alpha = 0.4f))
                     }
                 }
             }
@@ -438,70 +468,221 @@ fun RecordCard(
     }
 }
 
-// ── Overlay de alerta de récord (se muestra encima del dashboard) ─────────────
+// ── Overlay de alerta de récord estilo LOGRO DE XBOX ──────────────────────────
 @Composable
 fun RecordAlertOverlay() {
     val alert = SpeedRecordTracker.recordAlert.value ?: return
     val accentColor = Color(AppSettings.uiColor.value)
-
     val isAllTime = alert.type == com.tuusuario.carlauncher.services.RecordAlertType.ALL_TIME_RECORD
 
-    val bgColor  = if (isAllTime)
-        Brush.horizontalGradient(listOf(Color(0xFFFF6B00), Color(0xFFFFAA00), Color(0xFFFF6B00)))
-    else
-        Brush.horizontalGradient(listOf(accentColor.copy(alpha=0.9f), accentColor, accentColor.copy(alpha=0.9f)))
+    // Colores del logro
+    val goldColor = Color(0xFFFFD700)
+    val darkBg = Color(0xFF0A0A0A)
+    val borderColor = if (isAllTime) goldColor else accentColor
 
-    // Auto-dismiss tras 5s
+    // Animaciones
+    val infiniteTransition = rememberInfiniteTransition(label = "xboxAchievement")
+    val shimmer by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
+        label = "shimmer"
+    )
+    val pulseBorder by infiniteTransition.animateFloat(
+        initialValue = 0.5f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseBorder"
+    )
+
+    // Barra de progreso de auto-dismiss
+    var dismissProgress by remember { mutableStateOf(1f) }
     LaunchedEffect(alert) {
-        kotlinx.coroutines.delay(5000)
+        val totalMs = 6000L
+        val startMs = System.currentTimeMillis()
+        while (true) {
+            val elapsed = System.currentTimeMillis() - startMs
+            dismissProgress = 1f - (elapsed.toFloat() / totalMs).coerceIn(0f, 1f)
+            if (elapsed >= totalMs) break
+            kotlinx.coroutines.delay(50)
+        }
         SpeedRecordTracker.dismissAlert()
     }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(bgColor)
-            .clickable { SpeedRecordTracker.dismissAlert() }
-            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
+        // Sombra/glow exterior
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            borderColor.copy(alpha = 0.3f * pulseBorder),
+                            borderColor.copy(alpha = 0.1f),
+                            borderColor.copy(alpha = 0.3f * pulseBorder)
+                        )
+                    )
+                )
+                .padding(2.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (isAllTime) "🏆" else "⚡", fontSize = 28.sp)
-                Spacer(Modifier.width(12.dp))
+            // Cuerpo principal del logro
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(darkBg.copy(alpha = 0.95f))
+                    .clickable { SpeedRecordTracker.dismissAlert() }
+            ) {
+                // Shimmer de fondo
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    val shimX = shimmer * size.width * 1.5f - size.width * 0.25f
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                borderColor.copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            startX = shimX - 80f,
+                            endX = shimX + 80f
+                        )
+                    )
+                }
+
                 Column {
-                    Text(
-                        if (isAllTime) "¡RÉCORD HISTÓRICO!" else "RÉCORD DEL DÍA",
-                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        color = Color.White, letterSpacing = 2.sp
+                    // ── Franja superior tipo Xbox ──
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        borderColor.copy(alpha = 0.8f),
+                                        borderColor,
+                                        borderColor.copy(alpha = 0.8f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
                     )
-                    Text(
-                        "${alert.speedKmH.toInt()} km/h",
-                        fontSize = 28.sp, fontWeight = FontWeight.Black, color = Color.White,
-                        lineHeight = 28.sp
-                    )
-                    if (alert.previousRecord > 0f) {
-                        Text(
-                            "Antes: ${alert.previousRecord.toInt()} km/h  (+${(alert.speedKmH - alert.previousRecord).toInt()} km/h)",
-                            fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f)
+
+                    // ── Contenido principal ──
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Icono del logro (circulo con trofeo)
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .background(
+                                    Brush.radialGradient(
+                                        listOf(
+                                            borderColor.copy(alpha = 0.25f),
+                                            darkBg
+                                        )
+                                    ),
+                                    CircleShape
+                                )
+                                .border(1.5.dp, borderColor.copy(alpha = 0.7f * pulseBorder), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (isAllTime) "🏆" else "⚡",
+                                fontSize = 24.sp
+                            )
+                        }
+
+                        Spacer(Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            // Etiqueta tipo "LOGRO DESBLOQUEADO"
+                            Text(
+                                if (isAllTime) "🎮 RÉCORD HISTÓRICO" else "🎮 RÉCORD DEL DÍA",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = borderColor,
+                                letterSpacing = 2.sp
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            // Velocidad grande
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(
+                                    "${alert.speedKmH.toInt()}",
+                                    fontSize = 34.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                    lineHeight = 34.sp
+                                )
+                                Text(
+                                    " km/h",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    modifier = Modifier.padding(bottom = 5.dp)
+                                )
+                            }
+                            if (alert.previousRecord > 0f) {
+                                Text(
+                                    "Antes: ${alert.previousRecord.toInt()} km/h  +${(alert.speedKmH - alert.previousRecord).toInt()} km/h",
+                                    fontSize = 10.sp,
+                                    color = borderColor.copy(alpha = 0.75f)
+                                )
+                            } else {
+                                Text(
+                                    "¡Primera marca del día!",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
+
+                        // Puntos "G" estilo Xbox
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                if (isAllTime) "100" else "50",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = borderColor
+                            )
+                            Text(
+                                "G",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = borderColor.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+
+                    // ── Barra de auto-dismiss (progreso) ──
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(Color.White.copy(alpha = 0.06f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(dismissProgress)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(borderColor.copy(alpha = 0.4f), borderColor)
+                                    )
+                                )
                         )
                     }
                 }
-            }
-            // X de cierre
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Close, null,
-                    tint = Color.White, modifier = Modifier.size(16.dp))
             }
         }
     }

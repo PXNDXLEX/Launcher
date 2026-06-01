@@ -27,15 +27,25 @@ enum class RecordAlertType { DAY_RECORD, ALL_TIME_RECORD }
 data class RecordAlert(
     val type: RecordAlertType,
     val speedKmH: Float,
-    val previousRecord: Float   // cuánto superó
+    val previousRecord: Float   // récord anterior que se superó
 )
 
 // ── Tracker ──────────────────────────────────────────────────────────────────
 
 object SpeedRecordTracker {
 
-    // Estado observable para la UI del banner
+    // Estado observable para la UI del banner.
+    // Solo se pone en valor cuando la velocidad baja a < 10 km/h.
     val recordAlert = mutableStateOf<RecordAlert?>(null)
+
+    // Alert pendiente: ya se rompió el récord mientras se iba rápido.
+    // Se actualiza cada vez que se rompe un récord nuevo (siempre el más alto).
+    // Se despacha a recordAlert cuando la velocidad baja a < 10 km/h.
+    private var pendingAlert: RecordAlert? = null
+
+    // Para evitar re-mostrar el mismo aviso si se sube y baja de 10 km/h
+    // varias veces sin haber roto un nuevo récord.
+    private var lastShownSpeedKmH: Float = 0f
 
     private var recordsFile: File? = null
     private val records = mutableMapOf<String, SpeedRecord>() // date → record
@@ -46,12 +56,6 @@ object SpeedRecordTracker {
 
     // Máximo histórico (en memoria)
     private var allTimeMaxKmH: Float = 0f
-
-    // Cooldown para no disparar el alert varias veces por el mismo pico
-    private var lastAlertSpeedKmH: Float = 0f
-    private var lastAlertTimeMs: Long = 0L
-    private val ALERT_COOLDOWN_MS = 8_000L    // no repetir en 8s
-    private val ALERT_DELTA_KMH  = 1.5f       // superar en al menos 1.5 km/h para re-alertar
 
     // ── Init ─────────────────────────────────────────────────────────────────
 
@@ -73,26 +77,44 @@ object SpeedRecordTracker {
     // ── Llamado en cada tick del velocímetro ─────────────────────────────────
 
     fun onSpeedUpdate(speedKmH: Float, location: Location?) {
-        if (speedKmH < 5f) return  // ignorar velocidades irrelevantes (parado/ruido GPS)
-
         val today = LocalDate.now().toString()
+
+        // Cambio de día: resetear máximo del día
         if (today != todayDate) {
-            // Cambio de día: resetear el máximo del día
             todayDate = today
             todayMaxKmH = 0f
         }
 
-        val isNewDayRecord   = speedKmH > todayMaxKmH
-        val isNewAllTime     = speedKmH > allTimeMaxKmH
+        // ── Zona de "detenido": velocidad muy baja o cero ──
+        if (speedKmH < 2f) {
+            dispatchPendingAlertIfNeeded()
+            return
+        }
+
+        // ── Zona de "lento" (< 10 km/h): mostrar alerta pendiente ──
+        if (speedKmH < 10f) {
+            dispatchPendingAlertIfNeeded()
+            // No seguimos procesando records a esta velocidad (ruido GPS / parado)
+            return
+        }
+
+        // ── Zona de conducción activa (>= 10 km/h) ──
+        // Ignorar velocidades muy bajas como ruido GPS
+        if (speedKmH < 5f) return
+
+        val isNewDayRecord = speedKmH > todayMaxKmH
+        val isNewAllTime   = speedKmH > allTimeMaxKmH
 
         if (isNewDayRecord) {
-            val prev = todayMaxKmH
+            val prevDay     = todayMaxKmH
+            val prevAllTime = allTimeMaxKmH
+
             todayMaxKmH = speedKmH
 
-            // Persistir
-            val now = LocalDateTime.now()
+            // Persistir en archivo
+            val now     = LocalDateTime.now()
             val timeStr = now.format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-            val label = if (location != null)
+            val label   = if (location != null)
                 "%.4f°, %.4f°".format(location.latitude, location.longitude)
             else ""
 
@@ -111,29 +133,60 @@ object SpeedRecordTracker {
                 allTimeMaxKmH = speedKmH
             }
 
-            // Disparar alert (con cooldown)
-            val nowMs = System.currentTimeMillis()
-            val speedDelta = speedKmH - lastAlertSpeedKmH
-            val timeSinceLast = nowMs - lastAlertTimeMs
-            if (timeSinceLast > ALERT_COOLDOWN_MS || speedDelta > ALERT_DELTA_KMH) {
-                val alertType = if (isNewAllTime && prev > 0f) RecordAlertType.ALL_TIME_RECORD
-                                else RecordAlertType.DAY_RECORD
-                // Solo alertar si ya existía un récord previo del día (no al primer fix)
-                if (prev > 0f || isNewAllTime) {
-                    recordAlert.value = RecordAlert(
-                        type           = alertType,
-                        speedKmH       = speedKmH,
-                        previousRecord = if (isNewAllTime) allTimeMaxKmH else prev
-                    )
-                    lastAlertSpeedKmH = speedKmH
-                    lastAlertTimeMs   = nowMs
-                }
+            // ── Siempre actualizar pendingAlert con el nuevo récord ──
+            // (sin cooldown — queremos guardar el más reciente siempre)
+            val alertType = if (isNewAllTime && prevAllTime > 0f)
+                RecordAlertType.ALL_TIME_RECORD
+            else
+                RecordAlertType.DAY_RECORD
+
+            val prevRecord = when {
+                isNewAllTime && prevAllTime > 0f -> prevAllTime
+                prevDay > 0f                    -> prevDay
+                else                            -> 0f
             }
+
+            pendingAlert = RecordAlert(
+                type           = alertType,
+                speedKmH       = speedKmH,
+                previousRecord = prevRecord
+            )
+        }
+    }
+
+    /**
+     * Muestra el pendingAlert en la UI solo si:
+     * 1. Hay un alert pendiente.
+     * 2. La velocidad del alert es distinta a la del último alert mostrado
+     *    (para no repetir el mismo popup si oscilamos alrededor de 10 km/h).
+     */
+    private fun dispatchPendingAlertIfNeeded() {
+        val pending = pendingAlert ?: return
+        if (pending.speedKmH != lastShownSpeedKmH) {
+            recordAlert.value = pending
+            lastShownSpeedKmH = pending.speedKmH
+            pendingAlert = null
         }
     }
 
     fun dismissAlert() {
         recordAlert.value = null
+        pendingAlert = null
+        lastShownSpeedKmH = 0f
+    }
+
+    /**
+     * Muestra una alerta de prueba SIN guardar datos.
+     * Solo para verificar que el logro de velocidad se ve y suena correctamente.
+     */
+    fun triggerTestAlert(isAllTime: Boolean = false) {
+        val fakeSpeed = if (isAllTime) 142f else 97f
+        val fakePrev  = if (isAllTime) 130f else 85f
+        recordAlert.value = RecordAlert(
+            type           = if (isAllTime) RecordAlertType.ALL_TIME_RECORD else RecordAlertType.DAY_RECORD,
+            speedKmH       = fakeSpeed,
+            previousRecord = fakePrev
+        )
     }
 
     // ── Consultas ─────────────────────────────────────────────────────────────

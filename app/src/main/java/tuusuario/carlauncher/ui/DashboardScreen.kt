@@ -3,6 +3,8 @@ package com.tuusuario.carlauncher.ui
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.media.RingtoneManager
+import android.media.MediaPlayer
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.*
@@ -135,6 +137,9 @@ object NavigationState {
     
     /** Selected segment for history viewing */
     val selectedHistorySegment = mutableStateOf<com.tuusuario.carlauncher.services.RouteSegment?>(null)
+
+    /** Pin exacto del récord de velocidad (para mostrarlo en el mapa al tocar un record) */
+    val speedRecordPin = mutableStateOf<Point?>(null)
     
     fun clearActiveRoute() {
         activeDestination.value = null
@@ -281,15 +286,30 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // ── Overlay de récord de velocidad (aparece sobre todo el contenido) ──
+        // ── Overlay de récord de velocidad estilo logro Xbox (parte inferior) ──
         val hasRecordAlert = com.tuusuario.carlauncher.services.SpeedRecordTracker.recordAlert.value != null
+
+        // Sonido al mostrar el logro
+        LaunchedEffect(hasRecordAlert) {
+            if (hasRecordAlert) {
+                try {
+                    val notifUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    val mp = MediaPlayer()
+                    mp.setDataSource(context, notifUri)
+                    mp.setOnPreparedListener { it.start() }
+                    mp.setOnCompletionListener { it.release() }
+                    mp.prepareAsync()
+                } catch (_: Exception) {}
+            }
+        }
+
         AnimatedVisibility(
             visible  = hasRecordAlert,
-            enter    = slideInVertically(initialOffsetY = { -it }) + fadeIn(tween(300)),
-            exit     = slideOutVertically(targetOffsetY = { -it }) + fadeOut(tween(400)),
+            enter    = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(400)),
+            exit     = slideOutVertically(targetOffsetY = { it }) + fadeOut(tween(300)),
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = if (isLandscape) 12.dp else 8.dp)
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (isLandscape) 12.dp else 8.dp)
                 .padding(horizontal = if (isLandscape) 96.dp else 0.dp)
         ) {
             RecordAlertOverlay()
@@ -675,6 +695,27 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                         
                     }
 
+                    // ── NOTIFICACIONES / PRUEBA ──
+                    SettingsGroupCard("Notificaciones") {
+                        SettingsRow(
+                            icon     = Icons.Default.Speed,
+                            title    = "Probar logro — Récord del día",
+                            subtitle = "Muestra la notificación de prueba (no guarda datos)",
+                            onClick  = {
+                                com.tuusuario.carlauncher.services.SpeedRecordTracker.triggerTestAlert(isAllTime = false)
+                            }
+                        )
+                        SettingsDivider()
+                        SettingsRow(
+                            icon     = Icons.Default.EmojiEvents,
+                            title    = "Probar logro — Récord histórico",
+                            subtitle = "Muestra la notificación dorada de prueba",
+                            onClick  = {
+                                com.tuusuario.carlauncher.services.SpeedRecordTracker.triggerTestAlert(isAllTime = true)
+                            }
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
@@ -882,34 +923,56 @@ fun RouteHistoryScreen() {
                                     // Open this segment's route on the map
                                     NavigationState.selectedHistorySegment.value = segment
                                     NavigationState.selectedHistoryRoute.value = currentRoute
+                                    NavigationState.speedRecordPin.value = null
                                 },
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    // Time icon with accent
+                                    // Icono
                                     Box(
-                                        modifier = Modifier.size(48.dp)
+                                        modifier = Modifier.size(44.dp)
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(activeUiColor.copy(alpha = 0.15f)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(Icons.Default.Timeline, null, tint = activeUiColor, modifier = Modifier.size(24.dp))
+                                        Icon(Icons.Default.Timeline, null, tint = activeUiColor, modifier = Modifier.size(22.dp))
                                     }
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    // Hora inicio — fin
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             "${segment.startTime} — ${segment.endTime}",
-                                            fontWeight = FontWeight.Bold, fontSize = 16.sp
+                                            fontWeight = FontWeight.Bold, fontSize = 15.sp
                                         )
                                         Text(
-                                            "${segment.points.size} puntos registrados",
-                                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            "${segment.points.size} pts",
+                                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
+                                    // Puntos alineados a la derecha (número grande)
+                                    Column(
+                                        horizontalAlignment = Alignment.End,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            "${segment.points.size}",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 22.sp,
+                                            color = activeUiColor
+                                        )
+                                        Text(
+                                            "puntos",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Icon(Icons.Default.ChevronRight, null, tint = activeUiColor.copy(alpha = 0.6f))
                                 }
                             }
@@ -1161,6 +1224,9 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
 
     val routeColorHex = if (historyRoute != null) "#4CAF50" else "#FF9800"
 
+    // Pin del récord de velocidad (dorado) si hay uno seleccionado
+    val speedRecordPinPoint = NavigationState.speedRecordPin.value
+
     val routeTitle = when {
         historySegment != null -> "Segmento ${historySegment.startTime}\u2014${historySegment.endTime} \u00b7 ${historySegment.points.size} puntos"
         historyRoute   != null -> {
@@ -1175,7 +1241,10 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
     val mapView = remember { MapView(context) }
 
     androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            NavigationState.speedRecordPin.value = null
+            onDismiss()
+        },
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Card(
@@ -1209,20 +1278,39 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                                     lineJoin(LineJoin.ROUND)
                                 })
 
-                                // Marcadores inicio/fin
+                                // Marcadores inicio (verde) y fin (rojo) diferenciados
                                 if (routePoints.isNotEmpty()) {
                                     val pm = annotations.createPointAnnotationManager()
-                                    val pinBmp = com.tuusuario.carlauncher.ui.map.drawCustomPin(
-                                        android.graphics.Color.parseColor(routeColorHex)
+
+                                    // PIN INICIO — verde
+                                    val startPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(
+                                        android.graphics.Color.parseColor("#2ECC71")
                                     )
-                                    pm.create(PointAnnotationOptions().withPoint(routePoints.first()).withIconImage(pinBmp))
+                                    pm.create(PointAnnotationOptions().withPoint(routePoints.first()).withIconImage(startPin))
+
+                                    // PIN FIN — rojo (solo si hay al menos 2 puntos)
                                     if (routePoints.size > 1) {
-                                        pm.create(PointAnnotationOptions().withPoint(routePoints.last()).withIconImage(pinBmp))
+                                        val endPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(
+                                            android.graphics.Color.parseColor("#E74C3C")
+                                        )
+                                        pm.create(PointAnnotationOptions().withPoint(routePoints.last()).withIconImage(endPin))
+                                    }
+
+                                    // PIN RÉCORD DE VELOCIDAD — dorado (si existe)
+                                    speedRecordPinPoint?.let { recPin ->
+                                        val goldPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(
+                                            android.graphics.Color.parseColor("#FFD700")
+                                        )
+                                        pm.create(PointAnnotationOptions().withPoint(recPin).withIconImage(goldPin))
                                     }
 
                                     // Ajustar cámara a la ruta
-                                    val lngValues = routePoints.map { it.longitude() }
-                                    val latValues = routePoints.map { it.latitude() }
+                                    val allPoints = if (speedRecordPinPoint != null)
+                                        routePoints + speedRecordPinPoint
+                                    else
+                                        routePoints
+                                    val lngValues = allPoints.map { it.longitude() }
+                                    val latValues = allPoints.map { it.latitude() }
                                     val centerLng = (lngValues.min() + lngValues.max()) / 2.0
                                     val centerLat = (latValues.min() + latValues.max()) / 2.0
                                     mapboxMap.setCamera(cameraOptions {
@@ -1237,22 +1325,54 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                 )
 
                 // Header overlay
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                        .align(Alignment.TopCenter),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .align(Alignment.TopCenter)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(routeTitle, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(routeTitle, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                        IconButton(onClick = {
+                            NavigationState.speedRecordPin.value = null
+                            onDismiss()
+                        }) {
+                            Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onSurface)
+                        }
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onSurface)
+                    // Leyenda de marcadores
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(10.dp).background(Color(0xFF2ECC71), androidx.compose.foundation.shape.CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Inicio", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(10.dp).background(Color(0xFFE74C3C), androidx.compose.foundation.shape.CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Fin", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (speedRecordPinPoint != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(10.dp).background(Color(0xFFFFD700), androidx.compose.foundation.shape.CircleShape))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Récord de velocidad", fontSize = 11.sp, color = Color(0xFFFFD700))
+                            }
+                        }
                     }
                 }
             }

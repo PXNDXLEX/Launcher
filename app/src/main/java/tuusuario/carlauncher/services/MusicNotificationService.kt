@@ -112,13 +112,10 @@ class MusicNotificationService : NotificationListenerService() {
                     GlobalState.popupMessage.value = text
                     GlobalState.showPopup.value = true
                     
-                    // Cancelar la notificación del sistema para que NO aparezca duplicada
-                    // Solo se mostrará en la UI propia de la app
-                    try {
-                        cancelNotification(sbn.key)
-                    } catch (_: Exception) {}
+                    // NO cancelamos la notificación del sistema — el usuario quiere verla
+                    // en la barra de tareas cuando se detiene (WhatsApp, etc.)
                     
-                    // Auto-ocultar notificación después de 2.5 segundos
+                    // Auto-ocultar popup interno después de 2.5 segundos
                     CoroutineScope(Dispatchers.Main).launch {
                         delay(2500)
                         GlobalState.showPopup.value = false
