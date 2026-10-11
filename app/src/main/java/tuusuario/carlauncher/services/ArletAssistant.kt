@@ -21,6 +21,13 @@ import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
 import com.tuusuario.carlauncher.ui.map.FavoritesManager
 import com.tuusuario.carlauncher.ui.map.PlaceResult
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.RecognitionListener as VoskRecognitionListener
+import org.vosk.android.SpeechService
+import org.vosk.android.StorageService
+import java.io.IOException
 import java.text.Normalizer
 import java.util.Locale
 import java.util.UUID
@@ -29,10 +36,11 @@ import java.util.UUID
  * Asistente de Voz Arlet
  *
  * Controla:
+ * - Detección manos libres offline continua mediante Vosk ("Arlet, [comando]") sin bips de sistema
+ * - Activación manual instantánea por botón
  * - Grabación de Dashcam (start/stop)
  * - Control de Música (pausa, play, siguiente, anterior)
  * - Navegación a lugares guardados con desambiguación inteligente
- * - Activación por voz ("Arlet, [comando]") o por botón
  * - Respuestas rápidas con voz femenina en español
  */
 object ArletAssistant : TextToSpeech.OnInitListener {
@@ -53,9 +61,17 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     val showOverlay = mutableStateOf(false)
     val isAwaitingDisambiguation = mutableStateOf(false)
     val disambiguationOptions = mutableStateListOf<PlaceResult>()
+    val isVoskModelReady = mutableStateOf(false)
 
-    // Control de hilos y SpeechRecognizer
+    // Control de hilos
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Vosk Offline Speech Engine (Silencioso, continuo, sin bips ni internet)
+    private var voskModel: Model? = null
+    private var voskSpeechService: SpeechService? = null
+    private var isManualPushToTalk = false
+
+    // Fallback Android SpeechRecognizer (solo si Vosk no está disponible o para toque manual)
     private var speechRecognizer: SpeechRecognizer? = null
 
     // Text To Speech
@@ -68,6 +84,33 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         if (tts == null) {
             tts = TextToSpeech(appContext.applicationContext, this)
+        }
+
+        initVosk(appContext)
+    }
+
+    private fun initVosk(appContext: Context) {
+        try {
+            StorageService.unpack(
+                appContext,
+                "model-es",
+                "model",
+                { model: Model? ->
+                    voskModel = model
+                    isVoskModelReady.value = true
+                    Log.i(TAG, "Vosk Model español cargado exitosamente en almacenamiento interno")
+                    if (hasMicrophonePermission() && AppSettings.arletVoiceWakeEnabled.value) {
+                        startContinuousListening()
+                    }
+                },
+                { exception: IOException ->
+                    Log.w(TAG, "Modelo Vosk offline no encontrado en assets o error al desempaquetar", exception)
+                    isVoskModelReady.value = false
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error iniciando StorageService de Vosk", e)
+            isVoskModelReady.value = false
         }
     }
 
@@ -115,15 +158,37 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Métodos compatibles con el ciclo de vida de la app.
-     * En Android no se realiza bucle continuo en segundo plano para evitar sonidos y saturación.
+     * Inicia la escucha continua manos libres usando el motor offline Vosk.
+     * CERO bips de sistema, CERO tiempo de espera, 100% silencioso y en segundo plano.
      */
     fun startContinuousListening() {
-        // Modo Push-To-Talk bajo demanda
+        if (!hasMicrophonePermission()) {
+            Log.w(TAG, "No hay permiso de microfono para escucha continua")
+            return
+        }
+        val model = voskModel ?: return
+        if (voskSpeechService != null) return
+
+        mainHandler.post {
+            try {
+                val recognizer = Recognizer(model, 16000.0f)
+                voskSpeechService = SpeechService(recognizer, 16000.0f)
+                voskSpeechService?.startListening(voskListener)
+                Log.i(TAG, "Escucha continua manos libres (Vosk) iniciada: di 'Arlet' para activar comandos")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error al iniciar Vosk SpeechService", e)
+            }
+        }
     }
 
     fun stopContinuousListening() {
-        closeOverlay()
+        mainHandler.post {
+            try {
+                voskSpeechService?.stop()
+                voskSpeechService?.shutdown()
+                voskSpeechService = null
+            } catch (_: Exception) {}
+        }
     }
 
     fun hasMicrophonePermission(): Boolean {
@@ -135,8 +200,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Activación al presionar el botón de micrófono en pantalla.
-     * Inicia una sesión limpia de SpeechRecognizer sin errores de BUSY.
+     * Activación manual mediante el botón del micrófono en pantalla.
      */
     fun triggerManualListening() {
         if (!hasMicrophonePermission()) {
@@ -158,6 +222,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         isSpeaking.value = false
         mainHandler.removeCallbacksAndMessages(null)
 
+        isManualPushToTalk = true
         showOverlay.value = true
         assistantResponse.value = "Te escucho..."
         lastSpokenQuery.value = ""
@@ -165,23 +230,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         isAwaitingDisambiguation.value = false
         disambiguationOptions.clear()
 
-        startRecognitionSession()
+        // Si Vosk está disponible, usarlo
+        if (voskSpeechService != null) {
+            voskSpeechService?.setPause(false)
+        } else if (voskModel != null) {
+            startContinuousListening()
+        } else {
+            // Fallback a Android SpeechRecognizer
+            startAndroidRecognitionSession()
+        }
     }
 
     /**
-     * Inicia la escucha para resolver la desambiguación de lugares guardados
+     * Crea un cliente SpeechRecognizer como respaldo si Vosk no está disponible aún
      */
-    private fun startActiveListening() {
-        if (!hasMicrophonePermission()) return
-        if (isSpeaking.value) return
-        startRecognitionSession()
-    }
-
-    /**
-     * Crea un cliente SpeechRecognizer nuevo y limpio en el Looper principal.
-     * Recrearlo garantiza que nunca quede en estado ERROR_RECOGNIZER_BUSY.
-     */
-    private fun startRecognitionSession() {
+    private fun startAndroidRecognitionSession() {
         mainHandler.post {
             val ctx = context ?: return@post
 
@@ -227,17 +290,12 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         disambiguationOptions.clear()
         isListening.value = false
         isSpeaking.value = false
+        isManualPushToTalk = false
         audioRms.value = 0f
         mainHandler.removeCallbacksAndMessages(null)
-        mainHandler.post {
-            try {
-                speechRecognizer?.cancel()
-                speechRecognizer?.destroy()
-            } catch (_: Exception) {}
-            speechRecognizer = null
-            try {
-                tts?.stop()
-            } catch (_: Exception) {}
+        try { tts?.stop() } catch (_: Exception) {}
+        if (AppSettings.arletVoiceWakeEnabled.value) {
+            voskSpeechService?.setPause(false)
         }
     }
 
@@ -248,20 +306,22 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         assistantResponse.value = text
         showOverlay.value = true
         isSpeaking.value = true
+        isListening.value = false
+        audioRms.value = 0f
 
-        // Apagar el micrófono mientras Arlet habla para que no capture su propio eco
+        // Pausar escucha mientras Arlet habla para que no capture su propio eco
+        voskSpeechService?.setPause(true)
         mainHandler.post {
             try {
                 speechRecognizer?.stopListening()
                 speechRecognizer?.cancel()
             } catch (_: Exception) {}
-            isListening.value = false
-            audioRms.value = 0f
         }
 
         if (!isTtsInitialized || tts == null) {
             Log.w(TAG, "TTS no listo para hablar")
             isSpeaking.value = false
+            voskSpeechService?.setPause(false)
             onDone?.invoke()
             return
         }
@@ -274,14 +334,17 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     mainHandler.post {
                         isSpeaking.value = false
                         onDone?.invoke()
+                        // Reanudar escucha en Vosk
+                        voskSpeechService?.setPause(false)
                         if (isAwaitingDisambiguation.value) {
-                            // Esperar a que el usuario elija destino por voz
-                            mainHandler.postDelayed({ startActiveListening() }, 500)
+                            isListening.value = true
                         } else {
                             // Cerrar overlay suavemente tras terminar de hablar
                             mainHandler.postDelayed({
                                 if (!isAwaitingDisambiguation.value && !isSpeaking.value) {
                                     showOverlay.value = false
+                                    isListening.value = false
+                                    isManualPushToTalk = false
                                 }
                             }, 3200)
                         }
@@ -292,6 +355,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 if (id == utteranceId) {
                     mainHandler.post {
                         isSpeaking.value = false
+                        voskSpeechService?.setPause(false)
                         onDone?.invoke()
                     }
                 }
@@ -303,85 +367,123 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
-    // ── Listener de Reconocimiento de Voz ────────────────────────────────────
+    // ── Listener de Vosk (Motor Offline Manos Libres) ────────────────────────
+
+    private val voskListener = object : VoskRecognitionListener {
+        override fun onPartialResult(hypothesis: String) {
+            val partial = try {
+                JSONObject(hypothesis).optString("partial", "").trim()
+            } catch (_: Exception) { "" }
+
+            if (partial.isNotBlank()) {
+                val norm = normalize(partial)
+                val hasWakeWord = norm.contains("arlet") || norm.contains("arleth") ||
+                                 norm.contains("arlete") || norm.contains("harlet")
+
+                if (hasWakeWord || showOverlay.value || isManualPushToTalk) {
+                    showOverlay.value = true
+                    isListening.value = true
+                    lastSpokenQuery.value = partial
+                    if (assistantResponse.value.isBlank() || assistantResponse.value == "Listo") {
+                        assistantResponse.value = "Te escucho..."
+                    }
+                }
+            }
+        }
+
+        override fun onResult(hypothesis: String) {
+            val text = try {
+                JSONObject(hypothesis).optString("text", "").trim()
+            } catch (_: Exception) { "" }
+
+            if (text.isNotBlank()) {
+                Log.i(TAG, "Vosk onResult: '$text'")
+                val norm = normalize(text)
+                val hasWakeWord = norm.contains("arlet") || norm.contains("arleth") ||
+                                 norm.contains("arlete") || norm.contains("harlet")
+
+                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk) {
+                    handleSpeechInput(text)
+                }
+            }
+        }
+
+        override fun onFinalResult(hypothesis: String) {
+            val text = try {
+                JSONObject(hypothesis).optString("text", "").trim()
+            } catch (_: Exception) { "" }
+
+            if (text.isNotBlank()) {
+                val norm = normalize(text)
+                val hasWakeWord = norm.contains("arlet") || norm.contains("arleth") ||
+                                 norm.contains("arlete") || norm.contains("harlet")
+
+                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk) {
+                    handleSpeechInput(text)
+                }
+            }
+        }
+
+        override fun onError(exception: Exception) {
+            Log.w(TAG, "Vosk error: ${exception.message}")
+        }
+
+        override fun onTimeout() {}
+    }
+
+    // ── Fallback Listener de Android SpeechRecognizer ────────────────────────
 
     private val arletRecognitionListener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) {
-            isListening.value = true
-        }
-
-        override fun onBeginningOfSpeech() {
-            isListening.value = true
-        }
-
+        override fun onReadyForSpeech(params: Bundle?) { isListening.value = true }
+        override fun onBeginningOfSpeech() { isListening.value = true }
         override fun onRmsChanged(rmsdB: Float) {
             val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
             audioRms.value = normalized
         }
-
         override fun onBufferReceived(buffer: ByteArray?) {}
-
-        override fun onEndOfSpeech() {
-            isListening.value = false
-            audioRms.value = 0f
-        }
-
+        override fun onEndOfSpeech() { isListening.value = false; audioRms.value = 0f }
         override fun onError(error: Int) {
             isListening.value = false
             audioRms.value = 0f
-            Log.w(TAG, "SpeechRecognizer onError: $error")
-
-            val isSilence = error == SpeechRecognizer.ERROR_NO_MATCH ||
-                            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-
+            val isSilence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
             if (isSilence) {
                 if (isAwaitingDisambiguation.value) {
                     assistantResponse.value = "Toca tu destino en pantalla o di 'la primera'."
                 } else {
                     assistantResponse.value = "No te escuché bien. Toca el micrófono para hablar."
                 }
-            } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                assistantResponse.value = "Permiso de micrófono no concedido."
-            } else if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
-                assistantResponse.value = "Error de red con el servicio de voz."
             } else {
-                assistantResponse.value = "No pude entenderte. Intenta de nuevo."
+                assistantResponse.value = "Intenta de nuevo."
             }
-
-            // Cerrar automáticamente tras mostrar el mensaje si no hay otra acción
             mainHandler.postDelayed({
                 if (!isSpeaking.value && !isAwaitingDisambiguation.value) {
                     showOverlay.value = false
+                    isManualPushToTalk = false
                 }
             }, 2600)
         }
-
         override fun onResults(results: Bundle?) {
             isListening.value = false
             audioRms.value = 0f
             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             val spokenText = matches?.firstOrNull()
-
             if (!spokenText.isNullOrBlank()) {
                 handleSpeechInput(spokenText)
             } else {
-                assistantResponse.value = "No te escuché bien. Toca el micrófono para hablar."
+                assistantResponse.value = "No te escuché bien."
                 mainHandler.postDelayed({
                     if (!isSpeaking.value && !isAwaitingDisambiguation.value) {
                         showOverlay.value = false
+                        isManualPushToTalk = false
                     }
                 }, 2500)
             }
         }
-
         override fun onPartialResults(partialResults: Bundle?) {
             val partials = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             val partial = partials?.firstOrNull()
-            if (!partial.isNullOrBlank()) {
-                lastSpokenQuery.value = partial
-            }
+            if (!partial.isNullOrBlank()) lastSpokenQuery.value = partial
         }
-
         override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
@@ -695,6 +797,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         stopContinuousListening()
         mainHandler.removeCallbacksAndMessages(null)
         mainHandler.post {
+            try {
+                voskModel?.close()
+                voskModel = null
+            } catch (_: Exception) {}
             try {
                 speechRecognizer?.destroy()
                 speechRecognizer = null

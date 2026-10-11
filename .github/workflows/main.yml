@@ -18,7 +18,20 @@ jobs:
         
     - name: Reparar Motor Gradle
       run: gradle wrapper --gradle-version 8.7
-        
+
+    - name: Descargar Modelo Vosk Español
+      run: |
+        mkdir -p app/src/main/assets
+        if [ ! -d "app/src/main/assets/model-es" ]; then
+          echo "Descargando modelo Vosk offline español..."
+          curl -L https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip -o model-es.zip
+          unzip -q model-es.zip
+          mv vosk-model-small-es-0.42 app/src/main/assets/model-es
+          rm model-es.zip
+          uuidgen > app/src/main/assets/model-es/uuid
+          echo "Modelo Vosk descargado y preparado con exito"
+        fi
+
     - name: Compilar APK
       env:
         MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}

@@ -81,4 +81,7 @@ dependencies {
     // VectorDrawableCompat para renderizar SVGs/AVDs tintados en el mapa
     implementation("androidx.vectordrawable:vectordrawable:1.1.0")
 
+    // Vosk Offline Speech Recognition (Detección continua de hotword 'Arlet' y comandos offline sin bips)
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
 }

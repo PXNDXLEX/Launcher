@@ -715,12 +715,18 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
 
                     // ── ASISTENTE DE VOZ ARLET ──
                     SettingsGroupCard("Asistente de Voz Arlet") {
-                        SettingsRow(
+                        SettingsRowSwitch(
                             icon = Icons.Default.RecordVoiceOver,
-                            title = "Comandos de Voz Arlet",
-                            subtitle = "Toca el botón de micrófono en pantalla para hablar directamente con Arlet",
-                            onClick = {
-                                ArletAssistant.triggerManualListening()
+                            title = "Activación por Voz Manos Libres (\"Arlet\")",
+                            subtitle = "Escuchar continuamente y activar comandos por voz sin tocar la pantalla",
+                            checked = AppSettings.arletVoiceWakeEnabled.value,
+                            onCheckedChange = { enabled ->
+                                AppSettings.setArletVoiceWakeEnabled(enabled)
+                                if (enabled) {
+                                    ArletAssistant.startContinuousListening()
+                                } else {
+                                    ArletAssistant.stopContinuousListening()
+                                }
                             }
                         )
                         SettingsDivider()
@@ -729,7 +735,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                             title = "Probar Voz y Comandos",
                             subtitle = "Escuchar ejemplo de voz y comandos disponibles",
                             onClick = {
-                                ArletAssistant.speak("Hola, soy Arlet. Puedes pulsar mi botón para pedirme comenzar a grabar con la cámara, pausar la música, pasar de canción o iniciar una ruta a tus lugares guardados.")
+                                ArletAssistant.speak("Hola, soy Arlet. Puedes decir 'Arlet comienza a grabar', 'Arlet pausa la música' o tocar mi botón en pantalla.")
                             }
                         )
                     }

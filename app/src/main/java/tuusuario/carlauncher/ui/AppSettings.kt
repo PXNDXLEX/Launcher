@@ -19,7 +19,7 @@ object AppSettings {
     val batterySaverMode = mutableStateOf(false)
     val dashcamCameraIndex = mutableStateOf(0)
     // Asistente de voz Arlet
-    val arletVoiceWakeEnabled = mutableStateOf(false)
+    val arletVoiceWakeEnabled = mutableStateOf(true)
     // Modo simulación GPS — no se persiste (solo para testing)
     val isGpsSimulationMode = mutableStateOf(false)
     
@@ -87,7 +87,7 @@ object AppSettings {
         customSpeedoBgPath.value = prefs?.getString("customSpeedoBgPath", "") ?: ""
         customSpeedoBgOpacity.value = prefs?.getFloat("customSpeedoBgOpacity", 0.5f) ?: 0.5f
         customVehicleIconPath.value = prefs?.getString("customVehicleIconPath", "") ?: ""
-        arletVoiceWakeEnabled.value = prefs?.getBoolean("arletVoiceWakeEnabled", false) ?: false
+        arletVoiceWakeEnabled.value = prefs?.getBoolean("arletVoiceWakeEnabled", true) ?: true
         
         isInitialized = true
         // Notificar a la pantalla de bienvenida que los ajustes ya están listos
