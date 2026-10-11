@@ -186,7 +186,7 @@ fun ArletOverlay(
     AnimatedVisibility(
         visible = showOverlay,
         enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { -it }),
-        exit = fadeOut(tween(180)) + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { -it }),
         modifier = modifier
     ) {
         Column(
