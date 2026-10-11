@@ -263,8 +263,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         }
 
         // ── BOTONES RÁPIDOS ARLET & DASHCAM ──
-        // En landscape: arriba a la derecha (separado del widget de música que está abajo)
-        // En portrait: arriba a la derecha como siempre
+        // Dashcam arriba, Arlet debajo
         val isRec = com.tuusuario.carlauncher.services.DashcamManager.isRecording.value
         Box(
             modifier = Modifier
@@ -272,14 +271,11 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 .padding(start = if (isLandscape) 96.dp else 0.dp, top = 16.dp, end = 16.dp),
             contentAlignment = Alignment.TopEnd
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Botón micrófono Asistente de Voz Arlet
-                ArletMicButton(activeColor = activeUiColor)
-
-                // Botón Dashcam
+                // Botón Dashcam (arriba)
                 Surface(
                     shape = CircleShape,
                     color = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
@@ -306,6 +302,9 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                         Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
                     }
                 }
+
+                // Botón micrófono Asistente de Voz Arlet (debajo)
+                ArletMicButton(activeColor = activeUiColor)
             }
         }
 
