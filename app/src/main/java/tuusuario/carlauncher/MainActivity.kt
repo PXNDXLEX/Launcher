@@ -106,9 +106,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (AppSettings.arletVoiceWakeEnabled.value) {
-            com.tuusuario.carlauncher.services.ArletAssistant.startContinuousListening()
-        }
     }
 
     override fun onPause() {
@@ -159,11 +156,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         cameraGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        val audioWasGranted = audioGranted
         audioGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        if (!audioWasGranted && audioGranted && AppSettings.arletVoiceWakeEnabled.value) {
-            com.tuusuario.carlauncher.services.ArletAssistant.startContinuousListening()
-        }
         mediaGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
         else true

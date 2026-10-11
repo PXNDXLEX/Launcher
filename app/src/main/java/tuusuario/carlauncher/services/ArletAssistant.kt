@@ -54,22 +54,9 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     val isAwaitingDisambiguation = mutableStateOf(false)
     val disambiguationOptions = mutableStateListOf<PlaceResult>()
 
-    // Indicador si la escucha actual fue disparada manualmente por el botón del micrófono
-    private var isManualPushToTalk = false
-
-    // Control de hilos y reinicio
+    // Control de hilos y SpeechRecognizer
     private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
-    private var recognizerIntent: Intent? = null
-    private var isContinuousRunning = false
-
-    // Estado interno para el modo continuo (invisible, no afecta UI)
-    private var isBackgroundListeningActive = false
-
-    // Backoff progresivo para errores repetidos
-    private var consecutiveErrors = 0
-    private const val BASE_RESTART_DELAY_MS = 1500L
-    private const val MAX_RESTART_DELAY_MS = 8000L
 
     // Text To Speech
     private var tts: TextToSpeech? = null
@@ -81,13 +68,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         if (tts == null) {
             tts = TextToSpeech(appContext.applicationContext, this)
-        }
-
-        setupRecognizer()
-        
-        // Si el usuario tiene la escucha de voz activada en ajustes, iniciamos el modo oreja
-        if (AppSettings.arletVoiceWakeEnabled.value) {
-            startContinuousListening()
         }
     }
 
@@ -134,67 +114,16 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
     }
 
-    private fun setupRecognizer() {
-        mainHandler.post {
-            try {
-                val ctx = context ?: return@post
-                if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
-                    Log.w(TAG, "SpeechRecognizer no disponible en este dispositivo")
-                    return@post
-                }
-
-                speechRecognizer?.destroy()
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(ctx).apply {
-                    setRecognitionListener(arletRecognitionListener)
-                }
-
-                recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es")
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra("android.speech.extra.PREFER_OFFLINE", true)
-                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error configurando SpeechRecognizer", e)
-            }
-        }
-    }
-
     /**
-     * Inicia la escucha continua de fondo para detectar "Arlet".
-     * Este modo es INVISIBLE — no muestra feedback visual al usuario.
-     * Solo el reconocimiento del wake word activa el overlay.
+     * Métodos compatibles con el ciclo de vida de la app.
+     * En Android no se realiza bucle continuo en segundo plano para evitar sonidos y saturación.
      */
     fun startContinuousListening() {
-        if (isSpeaking.value) return
-        isContinuousRunning = true
-        consecutiveErrors = 0
-        mainHandler.post {
-            startBackgroundListening()
-        }
+        // Modo Push-To-Talk bajo demanda
     }
 
-    /**
-     * Detiene la escucha continua
-     */
     fun stopContinuousListening() {
-        isContinuousRunning = false
-        isBackgroundListeningActive = false
-        mainHandler.removeCallbacksAndMessages(null)
-        mainHandler.post {
-            try {
-                speechRecognizer?.stopListening()
-                speechRecognizer?.cancel()
-            } catch (_: Exception) {}
-            // Solo apagar isListening si no hay interacción manual activa
-            if (!isManualPushToTalk) {
-                isListening.value = false
-                audioRms.value = 0f
-            }
-        }
+        closeOverlay()
     }
 
     fun hasMicrophonePermission(): Boolean {
@@ -206,8 +135,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Activación manual mediante el botón del micrófono en pantalla.
-     * Este modo SÍ muestra feedback visual y el overlay.
+     * Activación al presionar el botón de micrófono en pantalla.
+     * Inicia una sesión limpia de SpeechRecognizer sin errores de BUSY.
      */
     fun triggerManualListening() {
         if (!hasMicrophonePermission()) {
@@ -224,21 +153,71 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             return
         }
 
-        isManualPushToTalk = true
+        // Detener voz previa si estaba hablando
+        try { tts?.stop() } catch (_: Exception) {}
+        isSpeaking.value = false
+        mainHandler.removeCallbacksAndMessages(null)
+
         showOverlay.value = true
         assistantResponse.value = "Te escucho..."
         lastSpokenQuery.value = ""
+        isListening.value = true
         isAwaitingDisambiguation.value = false
         disambiguationOptions.clear()
 
+        startRecognitionSession()
+    }
+
+    /**
+     * Inicia la escucha para resolver la desambiguación de lugares guardados
+     */
+    private fun startActiveListening() {
+        if (!hasMicrophonePermission()) return
+        if (isSpeaking.value) return
+        startRecognitionSession()
+    }
+
+    /**
+     * Crea un cliente SpeechRecognizer nuevo y limpio en el Looper principal.
+     * Recrearlo garantiza que nunca quede en estado ERROR_RECOGNIZER_BUSY.
+     */
+    private fun startRecognitionSession() {
         mainHandler.post {
+            val ctx = context ?: return@post
+
             try {
                 speechRecognizer?.cancel()
+                speechRecognizer?.destroy()
             } catch (_: Exception) {}
-            // Pequeña pausa antes de escuchar para evitar capturar ruido del tap
-            mainHandler.postDelayed({
-                startActiveListening()
-            }, 150)
+            speechRecognizer = null
+
+            try {
+                if (!SpeechRecognizer.isRecognitionAvailable(ctx)) {
+                    assistantResponse.value = "Reconocimiento de voz no disponible."
+                    isListening.value = false
+                    return@post
+                }
+
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(ctx).apply {
+                    setRecognitionListener(arletRecognitionListener)
+                }
+
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es")
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
+                }
+
+                speechRecognizer?.startListening(intent)
+                isListening.value = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Error iniciando sesión de SpeechRecognizer", e)
+                isListening.value = false
+                assistantResponse.value = "Error al abrir el micrófono. Toca de nuevo."
+            }
         }
     }
 
@@ -246,83 +225,20 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         showOverlay.value = false
         isAwaitingDisambiguation.value = false
         disambiguationOptions.clear()
-        isManualPushToTalk = false
         isListening.value = false
+        isSpeaking.value = false
         audioRms.value = 0f
-        if (AppSettings.arletVoiceWakeEnabled.value && !isSpeaking.value) {
-            mainHandler.postDelayed({
-                if (isContinuousRunning && !isSpeaking.value) {
-                    startBackgroundListening()
-                }
-            }, 500)
+        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.post {
+            try {
+                speechRecognizer?.cancel()
+                speechRecognizer?.destroy()
+            } catch (_: Exception) {}
+            speechRecognizer = null
+            try {
+                tts?.stop()
+            } catch (_: Exception) {}
         }
-    }
-
-    /**
-     * Escucha de fondo para wake word — INVISIBLE en la UI.
-     * No actualiza isListening, no muestra overlay.
-     */
-    private fun startBackgroundListening() {
-        if (!hasMicrophonePermission()) {
-            Log.w(TAG, "Permiso RECORD_AUDIO no concedido. No se inicia escucha de fondo.")
-            return
-        }
-        if (isManualPushToTalk || isSpeaking.value) return
-
-        val recognizer = speechRecognizer ?: return
-        val intent = recognizerIntent ?: return
-
-        try {
-            isBackgroundListeningActive = true
-            recognizer.startListening(intent)
-            // NO actualizamos isListening — es invisible
-            Log.d(TAG, "Escucha de fondo iniciada (invisible)")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error al iniciar escucha de fondo", e)
-            isBackgroundListeningActive = false
-            scheduleBackgroundRestart()
-        }
-    }
-
-    /**
-     * Escucha activa (manual o post-wake-word) — SÍ muestra feedback visual.
-     */
-    private fun startActiveListening() {
-        if (!hasMicrophonePermission()) {
-            Log.w(TAG, "Permiso RECORD_AUDIO no concedido aún. No se inicia la escucha.")
-            isListening.value = false
-            return
-        }
-
-        val recognizer = speechRecognizer ?: return
-        val intent = recognizerIntent ?: return
-        if (isSpeaking.value) return
-
-        try {
-            isBackgroundListeningActive = false
-            recognizer.startListening(intent)
-            isListening.value = true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error en startListening activo", e)
-            isListening.value = false
-            if (isManualPushToTalk) {
-                assistantResponse.value = "Error al iniciar el micrófono. Intenta de nuevo."
-            }
-        }
-    }
-
-    /**
-     * Programa un reinicio de la escucha de fondo con backoff progresivo.
-     */
-    private fun scheduleBackgroundRestart() {
-        if (!isContinuousRunning || isSpeaking.value || isManualPushToTalk) return
-        val delay = (BASE_RESTART_DELAY_MS * (1 + consecutiveErrors)).coerceAtMost(MAX_RESTART_DELAY_MS)
-        Log.d(TAG, "Reinicio de fondo programado en ${delay}ms (errores consecutivos: $consecutiveErrors)")
-        mainHandler.postDelayed({
-            if (isContinuousRunning && !isSpeaking.value && !isManualPushToTalk) {
-                startBackgroundListening()
-            }
-        }, delay)
     }
 
     /**
@@ -333,14 +249,13 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         showOverlay.value = true
         isSpeaking.value = true
 
-        // Pausar el micrófono para evitar que Arlet se escuche a sí misma
+        // Apagar el micrófono mientras Arlet habla para que no capture su propio eco
         mainHandler.post {
             try {
                 speechRecognizer?.stopListening()
                 speechRecognizer?.cancel()
             } catch (_: Exception) {}
             isListening.value = false
-            isBackgroundListeningActive = false
             audioRms.value = 0f
         }
 
@@ -348,9 +263,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             Log.w(TAG, "TTS no listo para hablar")
             isSpeaking.value = false
             onDone?.invoke()
-            if (isContinuousRunning) {
-                mainHandler.postDelayed({ startBackgroundListening() }, 1000)
-            }
             return
         }
 
@@ -362,28 +274,16 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     mainHandler.post {
                         isSpeaking.value = false
                         onDone?.invoke()
-                        // Reanudar escucha tras hablar
                         if (isAwaitingDisambiguation.value) {
-                            // Escucha activa para que el usuario elija destino
-                            mainHandler.postDelayed({ startActiveListening() }, 800)
-                        } else if (isManualPushToTalk) {
-                            // Ocultar overlay tras respuesta manual
+                            // Esperar a que el usuario elija destino por voz
+                            mainHandler.postDelayed({ startActiveListening() }, 500)
+                        } else {
+                            // Cerrar overlay suavemente tras terminar de hablar
                             mainHandler.postDelayed({
                                 if (!isAwaitingDisambiguation.value && !isSpeaking.value) {
                                     showOverlay.value = false
-                                    isManualPushToTalk = false
-                                    isListening.value = false
-                                    audioRms.value = 0f
-                                    // Reanudar escucha de fondo
-                                    if (isContinuousRunning) {
-                                        mainHandler.postDelayed({ startBackgroundListening() }, 1000)
-                                    }
                                 }
-                            }, 3500)
-                        } else if (isContinuousRunning) {
-                            // Esperar un poco más antes de reiniciar la escucha de fondo
-                            // para no capturar el eco de la propia voz de Arlet
-                            mainHandler.postDelayed({ startBackgroundListening() }, 1500)
+                            }, 3200)
                         }
                     }
                 }
@@ -393,9 +293,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     mainHandler.post {
                         isSpeaking.value = false
                         onDone?.invoke()
-                        if (isContinuousRunning && !isManualPushToTalk) {
-                            mainHandler.postDelayed({ startBackgroundListening() }, 1500)
-                        }
                     }
                 }
             }
@@ -410,146 +307,78 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     private val arletRecognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
-            // Solo mostrar feedback si es escucha activa (manual o post-wake)
-            if (isManualPushToTalk || isAwaitingDisambiguation.value) {
-                isListening.value = true
-            }
+            isListening.value = true
         }
 
-        override fun onBeginningOfSpeech() {}
+        override fun onBeginningOfSpeech() {
+            isListening.value = true
+        }
 
         override fun onRmsChanged(rmsdB: Float) {
-            // Solo actualizar ondas visuales si estamos en modo activo visible
-            if (isManualPushToTalk || isAwaitingDisambiguation.value || showOverlay.value) {
-                val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
-                audioRms.value = normalized
-            }
+            val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+            audioRms.value = normalized
         }
 
         override fun onBufferReceived(buffer: ByteArray?) {}
 
         override fun onEndOfSpeech() {
-            if (isManualPushToTalk || isAwaitingDisambiguation.value) {
-                isListening.value = false
-                audioRms.value = 0f
-            }
+            isListening.value = false
+            audioRms.value = 0f
         }
 
         override fun onError(error: Int) {
-            audioRms.value = 0f
-
-            val isNormalSilence = error == SpeechRecognizer.ERROR_NO_MATCH || 
-                                  error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-
-            if (isBackgroundListeningActive && !isManualPushToTalk) {
-                // Modo fondo: simplemente reprogramar sin afectar UI
-                isBackgroundListeningActive = false
-                if (isNormalSilence) {
-                    consecutiveErrors = 0  // Silencio no es un error real
-                } else {
-                    consecutiveErrors++
-                    Log.w(TAG, "Error en SpeechRecognizer de fondo: $error (consecutivos: $consecutiveErrors)")
-                    if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
-                        try { speechRecognizer?.cancel() } catch (_: Exception) {}
-                    }
-                }
-                scheduleBackgroundRestart()
-                return
-            }
-
-            // Modo activo (manual o desambiguación)
             isListening.value = false
+            audioRms.value = 0f
+            Log.w(TAG, "SpeechRecognizer onError: $error")
 
-            if (isNormalSilence) {
+            val isSilence = error == SpeechRecognizer.ERROR_NO_MATCH ||
+                            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+
+            if (isSilence) {
                 if (isAwaitingDisambiguation.value) {
-                    // Reintentar escucha activa para que elija destino
-                    mainHandler.postDelayed({ startActiveListening() }, 800)
-                } else if (isManualPushToTalk) {
-                    // Silencio en modo manual → cerrar tras un momento
-                    assistantResponse.value = "No escuché nada. Toca el micrófono para intentar de nuevo."
-                    mainHandler.postDelayed({
-                        if (!isAwaitingDisambiguation.value && !isSpeaking.value) {
-                            showOverlay.value = false
-                            isManualPushToTalk = false
-                            if (isContinuousRunning) {
-                                mainHandler.postDelayed({ startBackgroundListening() }, 500)
-                            }
-                        }
-                    }, 3000)
+                    assistantResponse.value = "Toca tu destino en pantalla o di 'la primera'."
+                } else {
+                    assistantResponse.value = "No te escuché bien. Toca el micrófono para hablar."
                 }
+            } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                assistantResponse.value = "Permiso de micrófono no concedido."
+            } else if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
+                assistantResponse.value = "Error de red con el servicio de voz."
             } else {
-                Log.w(TAG, "Error en SpeechRecognizer activo: $error")
-                if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
-                    try { speechRecognizer?.cancel() } catch (_: Exception) {}
-                }
-                if (isManualPushToTalk) {
-                    assistantResponse.value = "Error con el micrófono. Intenta de nuevo."
-                    mainHandler.postDelayed({
-                        showOverlay.value = false
-                        isManualPushToTalk = false
-                        if (isContinuousRunning) {
-                            mainHandler.postDelayed({ startBackgroundListening() }, 1000)
-                        }
-                    }, 2500)
-                }
+                assistantResponse.value = "No pude entenderte. Intenta de nuevo."
             }
+
+            // Cerrar automáticamente tras mostrar el mensaje si no hay otra acción
+            mainHandler.postDelayed({
+                if (!isSpeaking.value && !isAwaitingDisambiguation.value) {
+                    showOverlay.value = false
+                }
+            }, 2600)
         }
 
         override fun onResults(results: Bundle?) {
+            isListening.value = false
+            audioRms.value = 0f
             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-            if (!matches.isNullOrEmpty()) {
-                val spokenText = matches[0]
-                consecutiveErrors = 0  // Reconocimiento exitoso
+            val spokenText = matches?.firstOrNull()
 
-                if (isBackgroundListeningActive && !isManualPushToTalk) {
-                    // En modo fondo: solo actuar si contiene el wake word
-                    isBackgroundListeningActive = false
-                    val norm = normalize(spokenText)
-                    val hasWakeWord = norm.contains("arlet") ||
-                                     norm.contains("arleth") ||
-                                     norm.contains("arlete") ||
-                                     norm.contains("harlet")
-
-                    if (hasWakeWord) {
-                        Log.i(TAG, "Wake word detectado en modo fondo: '$spokenText'")
-                        handleSpeechInput(spokenText)
-                    } else {
-                        // No era para nosotros, reiniciar escucha de fondo
-                        scheduleBackgroundRestart()
-                    }
-                } else {
-                    // Modo activo (manual o desambiguación)
-                    handleSpeechInput(spokenText)
-                }
+            if (!spokenText.isNullOrBlank()) {
+                handleSpeechInput(spokenText)
             } else {
-                if (isBackgroundListeningActive && !isManualPushToTalk) {
-                    isBackgroundListeningActive = false
-                    scheduleBackgroundRestart()
-                } else if (isContinuousRunning && !isSpeaking.value && !isManualPushToTalk) {
-                    mainHandler.postDelayed({ startBackgroundListening() }, BASE_RESTART_DELAY_MS)
-                }
+                assistantResponse.value = "No te escuché bien. Toca el micrófono para hablar."
+                mainHandler.postDelayed({
+                    if (!isSpeaking.value && !isAwaitingDisambiguation.value) {
+                        showOverlay.value = false
+                    }
+                }, 2500)
             }
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
             val partials = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-            if (!partials.isNullOrEmpty()) {
-                val partial = partials[0]
-
-                if (isManualPushToTalk || isAwaitingDisambiguation.value) {
-                    // Modo activo: mostrar lo que va diciendo
-                    lastSpokenQuery.value = partial
-                } else if (isBackgroundListeningActive) {
-                    // Modo fondo: solo mostrar overlay si detectamos wake word
-                    val norm = normalize(partial)
-                    if (norm.contains("arlet") || norm.contains("arleth") || norm.contains("arlete") || norm.contains("harlet")) {
-                        showOverlay.value = true
-                        lastSpokenQuery.value = partial
-                        assistantResponse.value = "Te escucho..."
-                        // Marcar como escucha activa ahora
-                        isListening.value = true
-                    }
-                }
+            val partial = partials?.firstOrNull()
+            if (!partial.isNullOrBlank()) {
+                lastSpokenQuery.value = partial
             }
         }
 
@@ -573,22 +402,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             return
         }
 
-        // 2. Comprobar si el texto contiene la palabra clave "Arlet" o si fue activación manual por botón
-        val hasWakeWord = normalized.contains("arlet") ||
-                          normalized.contains("arleth") ||
-                          normalized.contains("arlete") ||
-                          normalized.contains("harlet")
-
-        if (!hasWakeWord && !isManualPushToTalk) {
-            // No nos estaban hablando a nosotros; ignorar y seguir escuchando
-            showOverlay.value = false
-            if (isContinuousRunning && !isSpeaking.value) {
-                mainHandler.postDelayed({ startBackgroundListening() }, BASE_RESTART_DELAY_MS)
-            }
-            return
-        }
-
-        // Limpiar "arlet" del comando
+        // Limpiar "arlet" si el usuario incluyó el nombre de la asistente
         var command = normalized
             .replace("arlet", "")
             .replace("arleth", "")
@@ -857,7 +671,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         speak("Iniciando ruta hacia ${place.name}") {
             mainHandler.postDelayed({
                 showOverlay.value = false
-                isManualPushToTalk = false
             }, 3000)
         }
     }

@@ -103,46 +103,21 @@ fun ArletMicButton(
                     brush = Brush.sweepGradient(listOf(arletColor, Color(0xFF9C27B0), arletColor)),
                     shape = CircleShape
                 )
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            if (isListening) {
-                                ArletAssistant.closeOverlay()
-                            } else {
-                                val hasMic = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO
-                                ) == PackageManager.PERMISSION_GRANTED
+                .clickable {
+                    if (isListening || isSpeaking) {
+                        ArletAssistant.closeOverlay()
+                    } else {
+                        val hasMic = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
 
-                                if (hasMic) {
-                                    ArletAssistant.triggerManualListening()
-                                } else {
-                                    micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            }
-                        },
-                        onLongPress = {
-                            val hasMic = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-
-                            if (!hasMic) {
-                                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            } else {
-                                // Alternar activación continua por voz
-                                val current = AppSettings.arletVoiceWakeEnabled.value
-                                AppSettings.setArletVoiceWakeEnabled(!current)
-                                if (!current) {
-                                    ArletAssistant.startContinuousListening()
-                                    ArletAssistant.speak("Activación por voz de Arlet habilitada")
-                                } else {
-                                    ArletAssistant.stopContinuousListening()
-                                    ArletAssistant.speak("Activación por voz pausada. Usa el botón para hablar.")
-                                }
-                            }
+                        if (hasMic) {
+                            ArletAssistant.triggerManualListening()
+                        } else {
+                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
-                    )
+                    }
                 }
         ) {
             Box(contentAlignment = Alignment.Center) {
