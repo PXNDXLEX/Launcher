@@ -116,42 +116,61 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val localeEs = Locale("es", "ES")
-            val langResult = tts?.setLanguage(localeEs)
-            if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts?.setLanguage(Locale("es"))
+            // Configurar Español Latinoamericano Neutro
+            val latamLocale = Locale("es", "419")
+            val res419 = tts?.setLanguage(latamLocale)
+            if (res419 == TextToSpeech.LANG_MISSING_DATA || res419 == TextToSpeech.LANG_NOT_SUPPORTED) {
+                val mxLocale = Locale("es", "MX")
+                val resMx = tts?.setLanguage(mxLocale)
+                if (resMx == TextToSpeech.LANG_MISSING_DATA || resMx == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    val usLocale = Locale("es", "US")
+                    val resUs = tts?.setLanguage(usLocale)
+                    if (resUs == TextToSpeech.LANG_MISSING_DATA || resUs == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        tts?.setLanguage(Locale("es"))
+                    }
+                }
             }
 
-            // Buscar y asignar una voz femenina en español disponible en el sistema
+            // Buscar voz femenina de español neutro / latinoamericano en el motor TTS
             try {
                 val voices = tts?.voices
-                val femaleVoice = voices?.firstOrNull { voice ->
-                    voice.locale.language == "es" &&
-                    !voice.isNetworkConnectionRequired &&
-                    (voice.name.contains("female", ignoreCase = true) ||
-                     voice.name.contains("fem", ignoreCase = true) ||
-                     voice.name.contains("es-es-x-eed-network", ignoreCase = true) ||
-                     voice.name.contains("es-es-x-ana", ignoreCase = true) ||
-                     voice.features.contains("gender=female"))
+                val latamFemaleVoice = voices?.firstOrNull { voice ->
+                    val lang = voice.locale.language
+                    val country = voice.locale.country.uppercase(Locale.ROOT)
+                    val name = voice.name.lowercase(Locale.ROOT)
+                    val isEs = lang == "es"
+                    val isLatam = country == "419" || country == "MX" || country == "US" || country == "CO" ||
+                                  name.contains("419") || name.contains("mx") || name.contains("us") || name.contains("latam")
+                    val isFemale = name.contains("female") || name.contains("fem") || name.contains("sfd") || voice.features.contains("gender=female")
+                    isEs && isLatam && isFemale && !voice.isNetworkConnectionRequired
                 } ?: voices?.firstOrNull { voice ->
-                    voice.locale.language == "es" &&
-                    (voice.name.contains("female", ignoreCase = true) ||
-                     voice.name.contains("fem", ignoreCase = true) ||
-                     voice.features.contains("gender=female"))
+                    val lang = voice.locale.language
+                    val country = voice.locale.country.uppercase(Locale.ROOT)
+                    val name = voice.name.lowercase(Locale.ROOT)
+                    val isEs = lang == "es"
+                    val isLatam = country == "419" || country == "MX" || country == "US" || country == "CO" ||
+                                  name.contains("419") || name.contains("mx") || name.contains("us") || name.contains("latam")
+                    val isFemale = name.contains("female") || name.contains("fem") || name.contains("sfd") || voice.features.contains("gender=female")
+                    isEs && isLatam && isFemale
+                } ?: voices?.firstOrNull { voice ->
+                    val lang = voice.locale.language
+                    val name = voice.name.lowercase(Locale.ROOT)
+                    lang == "es" && (name.contains("female") || name.contains("fem") || voice.features.contains("gender=female"))
                 }
 
-                if (femaleVoice != null) {
-                    tts?.voice = femaleVoice
+                if (latamFemaleVoice != null) {
+                    tts?.voice = latamFemaleVoice
+                    Log.i(TAG, "Voz femenina latino neutro asignada: ${latamFemaleVoice.name} (${latamFemaleVoice.locale})")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "No se pudo consultar lista de voces TTS: ${e.message}")
             }
 
-            // Timbre agudo femenino y velocidad fluida para el coche
-            tts?.setPitch(1.22f)
-            tts?.setSpeechRate(1.06f)
+            // Tono y velocidad naturales (1.0f) para evitar efecto robótico
+            tts?.setPitch(1.0f)
+            tts?.setSpeechRate(1.0f)
             isTtsInitialized = true
-            Log.i(TAG, "TextToSpeech femenino inicializado correctamente")
+            Log.i(TAG, "TextToSpeech latino neutro inicializado correctamente")
         } else {
             Log.e(TAG, "Fallo al inicializar TextToSpeech: status=$status")
         }
@@ -267,8 +286,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-419")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es-419")
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
@@ -369,6 +388,81 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     // ── Listener de Vosk (Motor Offline Manos Libres) ────────────────────────
 
+    private var lastHandledTime = 0L
+    private var lastHandledText = ""
+
+    private val silenceWatchdog = Runnable {
+        val query = lastSpokenQuery.value.trim()
+        if (query.isNotBlank() && (showOverlay.value || isListening.value)) {
+            Log.i(TAG, "Watchdog de silencio activado tras pausa del usuario: '$query'")
+            handleSpeechInput(query)
+        }
+    }
+
+    private fun containsWakeWord(norm: String): Boolean {
+        val triggers = listOf(
+            "arlet", "arleth", "arlete", "harlet", "arled",
+            "arlette", "arlety", "aleta", "aletta", "atlet", "adlet", "arle"
+        )
+        val words = norm.split(" ")
+        return words.any { triggers.contains(it) } ||
+               triggers.any { norm.contains(it) } ||
+               norm.startsWith("ar le") || norm.contains("oye arlet") || norm.contains("hola arlet")
+    }
+
+    private fun stripWakeWord(norm: String): String {
+        var command = norm
+        val triggers = listOf(
+            "oye arlet", "hola arlet", "arlet", "arleth", "arlete",
+            "harlet", "arled", "arlette", "arlety", "aleta", "aletta",
+            "atlet", "adlet", "ar le", "arle"
+        )
+        for (t in triggers) {
+            command = command.replace(t, " ")
+        }
+        return command
+            .replace("por favor", " ")
+            .replace("puedes", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun isActionableCommand(norm: String): Boolean {
+        val c = stripWakeWord(norm)
+        if (c.isBlank()) return false
+
+        // Cámara / Dashcam
+        if (c.contains("graba") || c.contains("grabar") || c.contains("grabacion") ||
+            c.contains("dashcam") || c.contains("camara") || c.contains("video")) return true
+        if (c.contains("deten") || c.contains("para") || c.contains("cancela") || c.contains("apaga")) return true
+
+        // Música
+        if (c.contains("pausa") || c.contains("pausar") || c.contains("reproduce") ||
+            c.contains("reproducir") || c.contains("play") || c.contains("siguiente") ||
+            c.contains("cancion") || c.contains("anterior") || c.contains("adelanta") ||
+            c.contains("retrocede") || c.contains("musica")) return true
+
+        // Navegación
+        if (c.contains("inicia ruta") || c.contains("iniciar ruta") || c.contains("ruta a") ||
+            c.contains("ruta hacia") || c.contains("ir a") || c.contains("ir al") ||
+            c.contains("llevame") || c.contains("navega") || c.contains("conduce a") ||
+            c.contains("destino")) return true
+
+        // Desambiguación si está esperando
+        if (isAwaitingDisambiguation.value) {
+            if (c.contains("primero") || c.contains("primera") || c.contains("segundo") ||
+                c.contains("segunda") || c.contains("tercero") || c.contains("tercera") ||
+                c.contains("uno") || c.contains("dos") || c.contains("tres")) return true
+        }
+
+        // Saludos y preguntas
+        if (c.contains("hola") || c.contains("buenos dias") || c.contains("buenas tardes") ||
+            c.contains("quien eres") || c.contains("como te llamas") || c.contains("ayuda") ||
+            c.contains("que puedes hacer") || c.contains("comandos") || c.contains("gracias")) return true
+
+        return false
+    }
+
     private val voskListener = object : VoskRecognitionListener {
         override fun onPartialResult(hypothesis: String) {
             val partial = try {
@@ -377,16 +471,27 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
             if (partial.isNotBlank()) {
                 val norm = normalize(partial)
-                val hasWakeWord = norm.contains("arlet") || norm.contains("arleth") ||
-                                 norm.contains("arlete") || norm.contains("harlet")
+                val hasWakeWord = containsWakeWord(norm)
+                val isAlreadyActive = showOverlay.value || isManualPushToTalk || isAwaitingDisambiguation.value
 
-                if (hasWakeWord || showOverlay.value || isManualPushToTalk) {
+                if (hasWakeWord || isAlreadyActive) {
                     showOverlay.value = true
                     isListening.value = true
                     lastSpokenQuery.value = partial
                     if (assistantResponse.value.isBlank() || assistantResponse.value == "Listo") {
                         assistantResponse.value = "Te escucho..."
                     }
+
+                    // Si ya se identificó un comando claro, ejecutarlo DE INMEDIATO sin requerir silencio prolongado
+                    if (isActionableCommand(norm)) {
+                        mainHandler.removeCallbacks(silenceWatchdog)
+                        handleSpeechInput(partial)
+                        return
+                    }
+
+                    // Watchdog: Si el usuario para de hablar durante 900ms, procesar lo capturado
+                    mainHandler.removeCallbacks(silenceWatchdog)
+                    mainHandler.postDelayed(silenceWatchdog, 900)
                 }
             }
         }
@@ -399,10 +504,9 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             if (text.isNotBlank()) {
                 Log.i(TAG, "Vosk onResult: '$text'")
                 val norm = normalize(text)
-                val hasWakeWord = norm.contains("arlet") || norm.contains("arleth") ||
-                                 norm.contains("arlete") || norm.contains("harlet")
+                val hasWakeWord = containsWakeWord(norm)
 
-                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk) {
+                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk || showOverlay.value) {
                     handleSpeechInput(text)
                 }
             }
@@ -415,10 +519,9 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
             if (text.isNotBlank()) {
                 val norm = normalize(text)
-                val hasWakeWord = norm.contains("arlet") || norm.contains("arleth") ||
-                                 norm.contains("arlete") || norm.contains("harlet")
+                val hasWakeWord = containsWakeWord(norm)
 
-                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk) {
+                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk || showOverlay.value) {
                     handleSpeechInput(text)
                 }
             }
@@ -491,6 +594,14 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     private fun handleSpeechInput(rawText: String) {
         val normalized = normalize(rawText)
+        val now = System.currentTimeMillis()
+        if (now - lastHandledTime < 1800 && normalized == lastHandledText) {
+            return
+        }
+        lastHandledTime = now
+        lastHandledText = normalized
+        mainHandler.removeCallbacks(silenceWatchdog)
+
         Log.i(TAG, "Audio capturado: '$rawText' -> Normalizado: '$normalized'")
 
         lastSpokenQuery.value = rawText
@@ -504,16 +615,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             return
         }
 
-        // Limpiar "arlet" si el usuario incluyó el nombre de la asistente
-        var command = normalized
-            .replace("arlet", "")
-            .replace("arleth", "")
-            .replace("arlete", "")
-            .replace("harlet", "")
-            .trim()
-
-        // Eliminar posibles palabras de enlace ("por favor", "puedes", etc.)
-        command = command.removePrefix("por favor").removePrefix("puedes").trim()
+        // Limpiar "arlet" y variantes fonéticas
+        var command = stripWakeWord(normalized)
 
         if (command.isBlank() || command == "oye" || command == "hola") {
             speak("Dime, ¿en qué te puedo ayudar?")

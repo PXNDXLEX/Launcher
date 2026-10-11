@@ -172,235 +172,159 @@ fun ArletOverlay(
         }
     }
 
+    val infiniteTransition = rememberInfiniteTransition(label = "arlet_mini_pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+
     AnimatedVisibility(
         visible = showOverlay,
-        enter = fadeIn(tween(250)) + slideInVertically(initialOffsetY = { -it / 2 }),
-        exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { -it / 2 }),
+        enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut(tween(180)) + slideInVertically(initialOffsetY = { -it }),
         modifier = modifier
     ) {
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .wrapContentHeight()
-                .border(
-                    width = 1.5.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(Color(0xFFFF007F), Color(0xFF9C27B0), Color(0xFF00E5FF))
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.wrapContentSize()
         ) {
-            Column(
+            // Cápsula Principal Minimalista
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xF0121318),
+                shadowElevation = 8.dp,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
+                    .wrapContentHeight()
+                    .widthIn(min = 160.dp, max = 360.dp)
+                    .border(
+                        width = 1.dp,
+                        color = if (isSpeaking) activeColor else if (isListening) Color(0xFFFF007F).copy(alpha = pulseAlpha) else Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(22.dp)
+                    )
             ) {
-                // Cabecera: Icono Arlet + Ondas de audio + Botón cerrar
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // Indicador circular mínimo
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isSpeaking) activeColor.copy(alpha = 0.25f)
+                                else if (isListening) Color(0xFFFF007F).copy(alpha = 0.25f)
+                                else Color.White.copy(alpha = 0.15f)
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        // Badge con icono de Arlet
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Brush.linearGradient(listOf(Color(0xFFFF007F), Color(0xFF9C27B0)))),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.RecordVoiceOver,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = if (isSpeaking) Icons.Default.VolumeUp else Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = if (isSpeaking) activeColor else if (isListening) Color(0xFFFF007F) else Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
 
-                        Column {
+                    // Contenido textual condensado
+                    Column(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        if (!hasMicPermission) {
                             Text(
-                                text = "ARLET",
-                                fontWeight = FontWeight.Black,
-                                fontSize = 15.sp,
-                                letterSpacing = 1.sp,
-                                color = Color(0xFFFF007F)
-                            )
-                            Text(
-                                text = if (isSpeaking) "Hablando..." else if (isListening) "Escuchando..." else "Listo",
+                                text = "Toca para activar micrófono",
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                                modifier = Modifier.clickable { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                            )
+                        } else if (responseText.isNotBlank()) {
+                            Text(
+                                text = responseText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else if (queryText.isNotBlank()) {
+                            Text(
+                                text = queryText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Normal,
+                                color = Color.White.copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            Text(
+                                text = "Arlet te escucha...",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = activeColor,
+                                maxLines = 1
                             )
                         }
                     }
 
-                    // Visualizador de ondas de audio
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        for (i in 0..4) {
-                            val barHeight = remember(rms, i) {
-                                val factor = if (isListening || isSpeaking) (0.2f + rms * (0.8f + (i % 3) * 0.2f)) else 0.2f
-                                (18.dp * factor.coerceIn(0.15f, 1f))
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .width(4.dp)
-                                    .height(barHeight)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(
-                                        if (isSpeaking) Color(0xFF00E5FF) else if (isListening) Color(0xFFFF007F) else Color.Gray.copy(alpha = 0.4f)
-                                    )
-                            )
-                        }
-                    }
-
-                    // Botón para cerrar
+                    // Botón para cerrar sutil
                     IconButton(
                         onClick = { ArletAssistant.closeOverlay() },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(18.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Cerrar",
-                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp)
+                            tint = Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Aviso si falta el permiso de micrófono
-                if (!hasMicPermission) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Arlet necesita permiso para acceder al micrófono y escuchar tus órdenes.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007F))
+            // Destinos en caso de desambiguación (Chips compactos)
+            if (isAwaitingDisambiguation && disambiguationList.isNotEmpty()) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    itemsIndexed(disambiguationList) { index, place ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xF21E1F26),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier
+                                .clickable { ArletAssistant.selectDestination(place) }
+                                .border(1.dp, activeColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(Icons.Default.Mic, null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Permitir Micrófono", fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
-
-                // Transcripción de lo que el usuario dijo
-                if (queryText.isNotBlank()) {
-                    Text(
-                        text = "Tú: \"$queryText\"",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-
-                // Respuesta de Arlet
-                if (responseText.isNotBlank()) {
-                    Text(
-                        text = responseText,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                // ── MODO DESAMBIGUACIÓN (Tarjetas de destinos) ──────────────
-                if (isAwaitingDisambiguation && disambiguationList.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Toca tu destino o di 'la primera' / 'la segunda':",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        itemsIndexed(disambiguationList) { index, place ->
-                            Card(
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
-                                ),
-                                modifier = Modifier
-                                    .width(220.dp)
-                                    .clickable {
-                                        ArletAssistant.selectDestination(place)
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    // Número ordinal
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(activeColor.copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "${index + 1}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = activeColor
-                                        )
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = place.name,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = place.address,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-
-                                    Icon(
-                                        imageVector = Icons.Default.Directions,
-                                        contentDescription = "Ir",
-                                        tint = activeColor,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                                Text(
+                                    text = "${index + 1}.",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = activeColor
+                                )
+                                Text(
+                                    text = place.name,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
