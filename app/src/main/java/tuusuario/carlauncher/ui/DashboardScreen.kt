@@ -740,6 +740,17 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                         )
                     }
 
+                    // ── DASHCAM / CÁMARA ──
+                    SettingsGroupCard("Dashcam / Cámara") {
+                        SettingsRowSwitch(
+                            icon = Icons.Default.Videocam,
+                            title = "Grabar Audio en Dashcam",
+                            subtitle = "Si se activa, el micrófono se reserva para el video y Arlet no podrá escuchar tus comandos mientras graba. (Recomendado: Desactivado)",
+                            checked = AppSettings.dashcamRecordAudio.value,
+                            onCheckedChange = { AppSettings.setDashcamRecordAudio(it) }
+                        )
+                    }
+
                     // ── SISTEMA ──
                     SettingsGroupCard("Sistema") {
                         SettingsRowSwitch(

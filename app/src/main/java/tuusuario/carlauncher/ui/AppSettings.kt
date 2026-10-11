@@ -18,6 +18,7 @@ object AppSettings {
     val mapStyle = mutableStateOf("DARK") // LIGHT, DARK, NEON, SATELLITE
     val batterySaverMode = mutableStateOf(false)
     val dashcamCameraIndex = mutableStateOf(0)
+    val dashcamRecordAudio = mutableStateOf(false)
     // Asistente de voz Arlet
     val arletVoiceWakeEnabled = mutableStateOf(true)
     // Modo simulación GPS — no se persiste (solo para testing)
@@ -80,6 +81,7 @@ object AppSettings {
 
         batterySaverMode.value = prefs?.getBoolean("batterySaverMode", false) ?: false
         dashcamCameraIndex.value = prefs?.getInt("dashcamCameraIndex", 0) ?: 0
+        dashcamRecordAudio.value = prefs?.getBoolean("dashcamRecordAudio", false) ?: false
         customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
         customSpeedoNeedle.value = prefs?.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
         customSpeedoThickness.value = prefs?.getFloat("customSpeedoThickness", 0.08f) ?: 0.08f
@@ -170,6 +172,11 @@ object AppSettings {
     fun setDashcamCameraIndex(index: Int) {
         dashcamCameraIndex.value = index
         prefs?.edit()?.putInt("dashcamCameraIndex", index)?.apply()
+    }
+
+    fun setDashcamRecordAudio(enabled: Boolean) {
+        dashcamRecordAudio.value = enabled
+        prefs?.edit()?.putBoolean("dashcamRecordAudio", enabled)?.apply()
     }
 
     fun setGpsSimulationMode(enabled: Boolean) {

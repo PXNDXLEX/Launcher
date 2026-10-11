@@ -223,10 +223,19 @@ object DashcamManager {
                 val videoFile = File(getVideosDir(), "VID_${videoId}.mp4")
                 val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
-                recording = videoCapture!!.output
+                val pending = videoCapture!!.output
                     .prepareRecording(context, outputOptions)
-                    .withAudioEnabled()
-                    .start(ContextCompat.getMainExecutor(context)) { event ->
+
+                recording = (if (AppSettings.dashcamRecordAudio.value) {
+                    try {
+                        pending.withAudioEnabled()
+                    } catch (e: Exception) {
+                        Log.w("Dashcam", "No se pudo habilitar audio en dashcam", e)
+                        pending
+                    }
+                } else {
+                    pending
+                }).start(ContextCompat.getMainExecutor(context)) { event ->
                         when (event) {
                             is VideoRecordEvent.Start -> {
                                 isRecording.value = true
