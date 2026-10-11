@@ -73,7 +73,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     // Vosk Offline Speech Engine (Silencioso, continuo, sin bips ni internet)
     private var voskModel: Model? = null
     private var voskSpeechService: SpeechService? = null
-    private var currentRecognizer: Recognizer? = null
     private var isManualPushToTalk = false
 
     // Fallback Android SpeechRecognizer (solo si Vosk no está disponible o para toque manual)
@@ -203,7 +202,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         mainHandler.post {
             try {
                 val recognizer = Recognizer(model, 16000.0f)
-                currentRecognizer = recognizer
                 voskSpeechService = SpeechService(recognizer, 16000.0f)
                 voskSpeechService?.startListening(voskListener)
                 Log.i(TAG, "Escucha continua manos libres (Vosk) iniciada: di 'Arlet' para activar comandos")
@@ -219,8 +217,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 voskSpeechService?.stop()
                 voskSpeechService?.shutdown()
                 voskSpeechService = null
-                try { currentRecognizer?.close() } catch (_: Exception) {}
-                currentRecognizer = null
             } catch (_: Exception) {}
         }
     }
@@ -329,7 +325,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         audioRms.value = 0f
         mainHandler.removeCallbacksAndMessages(null)
         try { tts?.stop() } catch (_: Exception) {}
-        currentRecognizer?.reset()
         if (AppSettings.arletVoiceWakeEnabled.value) {
             voskSpeechService?.setPause(false)
         }
@@ -363,7 +358,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 isListening.value = false
                 isManualPushToTalk = false
                 mainHandler.postDelayed({
-                    currentRecognizer?.reset()
                     if (AppSettings.arletVoiceWakeEnabled.value) {
                         voskSpeechService?.setPause(false)
                     }
@@ -385,7 +379,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     isListening.value = false
                     isManualPushToTalk = false
                     mainHandler.postDelayed({
-                        currentRecognizer?.reset()
                         if (AppSettings.arletVoiceWakeEnabled.value) {
                             voskSpeechService?.setPause(false)
                         }
@@ -414,13 +407,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
                             // Esperar 500ms para disipar cualquier eco de los altavoces antes de reanudar escucha offline
                             mainHandler.postDelayed({
-                                currentRecognizer?.reset()
                                 if (AppSettings.arletVoiceWakeEnabled.value) {
                                     voskSpeechService?.setPause(false)
                                 }
                             }, 500)
                         } else {
-                            currentRecognizer?.reset()
                             voskSpeechService?.setPause(false)
                             isListening.value = true
                         }
@@ -438,7 +429,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                             isListening.value = false
                             isManualPushToTalk = false
                             mainHandler.postDelayed({
-                                currentRecognizer?.reset()
                                 if (AppSettings.arletVoiceWakeEnabled.value) {
                                     voskSpeechService?.setPause(false)
                                 }
@@ -466,7 +456,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     isListening.value = false
                     isManualPushToTalk = false
                     mainHandler.postDelayed({
-                        currentRecognizer?.reset()
                         if (AppSettings.arletVoiceWakeEnabled.value) {
                             voskSpeechService?.setPause(false)
                         }
@@ -721,7 +710,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         isListening.value = false
         audioRms.value = 0f
         voskSpeechService?.setPause(true)
-        currentRecognizer?.reset()
 
         Log.i(TAG, "Audio capturado: '$rawText' -> Normalizado: '$normalized'")
 
