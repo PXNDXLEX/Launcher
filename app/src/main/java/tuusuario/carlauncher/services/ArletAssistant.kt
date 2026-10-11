@@ -67,8 +67,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     val disambiguationOptions = mutableStateListOf<PlaceResult>()
     val isVoskModelReady = mutableStateOf(false)
 
-    // Control de hilos
+    // Control de hilos y prevención de eco
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var speechMutedUntil = 0L
+    private var lastActionExecutedTime = 0L
 
     // Vosk Offline Speech Engine (Silencioso, continuo, sin bips ni internet)
     private var voskModel: Model? = null
@@ -325,8 +327,14 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         audioRms.value = 0f
         mainHandler.removeCallbacksAndMessages(null)
         try { tts?.stop() } catch (_: Exception) {}
+        speechMutedUntil = System.currentTimeMillis() + 600L
+        voskSpeechService?.reset()
         if (AppSettings.arletVoiceWakeEnabled.value) {
-            voskSpeechService?.setPause(false)
+            mainHandler.postDelayed({
+                if (!isSpeaking.value) {
+                    voskSpeechService?.setPause(false)
+                }
+            }, 600)
         }
     }
 
@@ -339,9 +347,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         isSpeaking.value = true
         isListening.value = false
         audioRms.value = 0f
+        speechMutedUntil = Long.MAX_VALUE // Silencio absoluto de reconocimiento durante habla
 
-        // Pausar escucha mientras Arlet habla para que no capture su propio eco
+        // Pausar y resetear Vosk de forma segura a través del método de servicio
         voskSpeechService?.setPause(true)
+        voskSpeechService?.reset()
         mainHandler.post {
             try {
                 speechRecognizer?.stopListening()
@@ -352,6 +362,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         if (!isTtsInitialized || tts == null) {
             Log.w(TAG, "TTS no listo para hablar")
             isSpeaking.value = false
+            speechMutedUntil = System.currentTimeMillis() + 1500L
+            voskSpeechService?.reset()
             onDone?.invoke()
             if (!isAwaitingDisambiguation.value) {
                 showOverlay.value = false
@@ -359,9 +371,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 isManualPushToTalk = false
                 mainHandler.postDelayed({
                     if (AppSettings.arletVoiceWakeEnabled.value) {
+                        voskSpeechService?.reset()
                         voskSpeechService?.setPause(false)
                     }
-                }, 500)
+                }, 1500)
             }
             return
         }
@@ -373,6 +386,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             if (isSpeaking.value) {
                 Log.w(TAG, "Timeout de seguridad TTS: liberando asistente")
                 isSpeaking.value = false
+                speechMutedUntil = System.currentTimeMillis() + 1500L
+                voskSpeechService?.reset()
                 onDone?.invoke()
                 if (!isAwaitingDisambiguation.value) {
                     showOverlay.value = false
@@ -380,9 +395,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     isManualPushToTalk = false
                     mainHandler.postDelayed({
                         if (AppSettings.arletVoiceWakeEnabled.value) {
+                            voskSpeechService?.reset()
                             voskSpeechService?.setPause(false)
                         }
-                    }, 500)
+                    }, 1500)
                 }
             }
         }
@@ -395,6 +411,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     mainHandler.removeCallbacks(safetyTimeout)
                     mainHandler.post {
                         isSpeaking.value = false
+                        speechMutedUntil = System.currentTimeMillis() + 1500L
+                        voskSpeechService?.reset()
                         onDone?.invoke()
 
                         if (!isAwaitingDisambiguation.value) {
@@ -405,15 +423,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                             assistantResponse.value = ""
                             lastSpokenQuery.value = ""
 
-                            // Esperar 500ms para disipar cualquier eco de los altavoces antes de reanudar escucha offline
+                            // Esperar 1.5s para disipar cualquier eco de los altavoces antes de reanudar escucha offline
                             mainHandler.postDelayed({
                                 if (AppSettings.arletVoiceWakeEnabled.value) {
+                                    voskSpeechService?.reset()
                                     voskSpeechService?.setPause(false)
                                 }
-                            }, 500)
+                            }, 1500)
                         } else {
-                            voskSpeechService?.setPause(false)
-                            isListening.value = true
+                            mainHandler.postDelayed({
+                                if (isAwaitingDisambiguation.value) {
+                                    voskSpeechService?.reset()
+                                    voskSpeechService?.setPause(false)
+                                    isListening.value = true
+                                }
+                            }, 1000)
                         }
                     }
                 }
@@ -423,6 +447,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     mainHandler.removeCallbacks(safetyTimeout)
                     mainHandler.post {
                         isSpeaking.value = false
+                        speechMutedUntil = System.currentTimeMillis() + 1500L
+                        voskSpeechService?.reset()
                         onDone?.invoke()
                         if (!isAwaitingDisambiguation.value) {
                             showOverlay.value = false
@@ -430,9 +456,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                             isManualPushToTalk = false
                             mainHandler.postDelayed({
                                 if (AppSettings.arletVoiceWakeEnabled.value) {
+                                    voskSpeechService?.reset()
                                     voskSpeechService?.setPause(false)
                                 }
-                            }, 500)
+                            }, 1500)
                         }
                     }
                 }
@@ -450,6 +477,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             mainHandler.removeCallbacks(safetyTimeout)
             mainHandler.post {
                 isSpeaking.value = false
+                speechMutedUntil = System.currentTimeMillis() + 1500L
+                voskSpeechService?.reset()
                 onDone?.invoke()
                 if (!isAwaitingDisambiguation.value) {
                     showOverlay.value = false
@@ -457,9 +486,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     isManualPushToTalk = false
                     mainHandler.postDelayed({
                         if (AppSettings.arletVoiceWakeEnabled.value) {
+                            voskSpeechService?.reset()
                             voskSpeechService?.setPause(false)
                         }
-                    }, 500)
+                    }, 1500)
                 }
             }
         }
@@ -473,32 +503,41 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private val silenceWatchdog = Runnable {
         val query = lastSpokenQuery.value.trim()
         if (query.isNotBlank() && (showOverlay.value || isListening.value)) {
-            Log.i(TAG, "Watchdog de silencio activado tras pausa del usuario: '$query'")
-            handleSpeechInput(query)
+            val now = System.currentTimeMillis()
+            if (!isSpeaking.value && now >= speechMutedUntil) {
+                Log.i(TAG, "Watchdog de silencio activado tras pausa del usuario: '$query'")
+                handleSpeechInput(query)
+            }
         }
     }
 
+    private val wakeWordTokens = setOf(
+        "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
+        "arlette", "arlety", "aleta", "aletta", "atlet", "adlet",
+        "darlet"
+    )
+
     private fun containsWakeWord(norm: String): Boolean {
-        val triggers = listOf(
-            "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
-            "arlette", "arlety", "aleta", "aletta", "alete", "atlet",
-            "adlet", "arle", "harle", "arlex", "alex", "alec",
-            "aler", "alred", "ardel", "darlet", "valet", "ar le", "ar let", "ar led"
-        )
-        val words = norm.split(" ")
-        return words.any { triggers.contains(it) } ||
-               triggers.any { norm.contains(it) } ||
-               norm.startsWith("ar le") || norm.contains("oye arlet") || norm.contains("hola arlet")
+        val trimmed = norm.trim()
+        if (trimmed.startsWith("arlet") || trimmed.startsWith("harlet") ||
+            trimmed.startsWith("ar le") || trimmed.startsWith("oye arlet") ||
+            trimmed.startsWith("hola arlet") || trimmed.startsWith("hey arlet") ||
+            trimmed.startsWith("ok arlet")) {
+            return true
+        }
+
+        val words = trimmed.split(Regex("\\s+"))
+        return words.any { wakeWordTokens.contains(it) } ||
+               (words.size >= 2 && words[0] == "ar" && (words[1] == "le" || words[1] == "let" || words[1] == "led"))
     }
 
     private fun stripWakeWord(norm: String): String {
         var command = norm
         val triggers = listOf(
             "oye arlet", "hola arlet", "hey arlet", "ok arlet",
+            "ar let", "ar le", "ar led",
             "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
-            "arlette", "arlety", "aleta", "aletta", "alete", "atlet",
-            "adlet", "ar le", "ar let", "ar led", "arle", "harle",
-            "arlex", "alex", "alec", "aler", "darlet", "valet"
+            "arlette", "arlety", "aleta", "aletta", "atlet", "adlet", "darlet"
         )
         for (t in triggers) {
             command = command.replace(t, " ")
@@ -515,15 +554,35 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         if (c.isBlank()) return false
 
         // Cámara / Dashcam
-        if (c.contains("graba") || c.contains("grabar") || c.contains("grabacion") ||
-            c.contains("dashcam") || c.contains("camara") || c.contains("video")) return true
-        if (c.contains("deten") || c.contains("para") || c.contains("cancela") || c.contains("apaga")) return true
+        if (c.contains("graba video") || c.contains("grabar video") ||
+            c.contains("comienza a grabar") || c.contains("comenzar a grabar") ||
+            c.contains("inicia la grabacion") || c.contains("iniciar la grabacion") ||
+            c.contains("inicia grabacion") || c.contains("iniciar grabacion") ||
+            c.contains("graba la camara") || c.contains("grabar con la camara") ||
+            c.contains("grabar dashcam") || c.contains("graba dashcam") ||
+            c == "graba" || c == "grabar") return true
+
+        if (c.contains("deten la grabacion") || c.contains("detener grabacion") ||
+            c.contains("para la grabacion") || c.contains("parar grabacion") ||
+            c.contains("deja de grabar") || c.contains("cancela la grabacion") ||
+            c.contains("deten el video") || c.contains("para el video") ||
+            c.contains("apaga la camara") || c.contains("apagar la camara")) return true
 
         // Música
-        if (c.contains("pausa") || c.contains("pausar") || c.contains("reproduce") ||
-            c.contains("reproducir") || c.contains("play") || c.contains("siguiente") ||
-            c.contains("cancion") || c.contains("anterior") || c.contains("adelanta") ||
-            c.contains("retrocede") || c.contains("musica")) return true
+        if (c.contains("pon pausa") || c.contains("pausa la musica") || c.contains("pausar la musica") ||
+            c.contains("para la musica") || c.contains("deten la musica") ||
+            c == "pausa" || c == "pausar") return true
+
+        if (c.contains("reproduce") || c.contains("reproducir") || c.contains("continua la musica") ||
+            c.contains("pon musica") || c.contains("sigue la musica") || c == "play") return true
+
+        if (c.contains("siguiente cancion") || c.contains("pasa la cancion") || c.contains("cambia la cancion") ||
+            c.contains("siguiente pista") || c.contains("proxima cancion") || c.contains("otra cancion") ||
+            c.contains("adelanta la cancion") || c == "siguiente" || c == "adelanta") return true
+
+        if (c.contains("cancion anterior") || c.contains("pista anterior") ||
+            c.contains("retrocede la cancion") || c.contains("vuelve la cancion") ||
+            c == "anterior" || c == "retrocede") return true
 
         // Navegación
         if (c.contains("inicia ruta") || c.contains("iniciar ruta") || c.contains("inicia la ruta") ||
@@ -553,6 +612,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     private val voskListener = object : VoskRecognitionListener {
         override fun onPartialResult(hypothesis: String) {
+            val now = System.currentTimeMillis()
+            if (isSpeaking.value || now < speechMutedUntil) {
+                return
+            }
+
             val partial = try {
                 JSONObject(hypothesis).optString("partial", "").trim()
             } catch (_: Exception) { "" }
@@ -574,7 +638,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     assistantResponse.value = "Te escucho..."
                 }
 
-                // Si ya se identificó un comando claro, ejecutarlo DE INMEDIATO
+                // Si ya se identificó un comando claro, procesarlo
                 if (isActionableCommand(norm)) {
                     mainHandler.removeCallbacks(silenceWatchdog)
                     handleSpeechInput(partial)
@@ -588,6 +652,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         override fun onResult(hypothesis: String) {
+            val now = System.currentTimeMillis()
+            if (isSpeaking.value || now < speechMutedUntil) {
+                return
+            }
+
             val text = try {
                 JSONObject(hypothesis).optString("text", "").trim()
             } catch (_: Exception) { "" }
@@ -605,6 +674,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         override fun onFinalResult(hypothesis: String) {
+            val now = System.currentTimeMillis()
+            if (isSpeaking.value || now < speechMutedUntil) {
+                return
+            }
+
             val text = try {
                 JSONObject(hypothesis).optString("text", "").trim()
             } catch (_: Exception) { "" }
@@ -686,9 +760,20 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     // ── Motor de Intenciones y Comandos ──────────────────────────────────────
 
     private fun handleSpeechInput(rawText: String) {
-        val normalized = normalize(rawText)
         val now = System.currentTimeMillis()
-        if (now - lastHandledTime < 1800 && normalized == lastHandledText) {
+        if (isSpeaking.value || now < speechMutedUntil) {
+            Log.d(TAG, "Ignorando audio: Arlet hablando o en silencio post-voz")
+            return
+        }
+
+        // Enfriamiento de 2.5s entre ejecuciones de acciones para evitar doble disparo (partial + final)
+        if (now - lastActionExecutedTime < 2500L) {
+            Log.d(TAG, "Ignorando orden dentro del periodo de enfriamiento ($now - $lastActionExecutedTime)")
+            return
+        }
+
+        val normalized = normalize(rawText)
+        if (now - lastHandledTime < 2000L && normalized == lastHandledText) {
             return
         }
 
@@ -706,10 +791,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         mainHandler.removeCallbacks(silenceWatchdog)
         isManualPushToTalk = false
 
-        // Inmediatamente apagar escucha y pausar Vosk para que no se escuche a sí misma ni procese nada mientras ejecuta la orden
+        // Inmediatamente apagar escucha, silenciar y pausar Vosk
         isListening.value = false
         audioRms.value = 0f
         voskSpeechService?.setPause(true)
+        voskSpeechService?.reset()
 
         Log.i(TAG, "Audio capturado: '$rawText' -> Normalizado: '$normalized'")
 
@@ -718,6 +804,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         // 1. Caso: Esperando desambiguación de destino ("el primero", "el segundo", o nombre)
         if (isAwaitingDisambiguation.value && disambiguationOptions.isNotEmpty()) {
+            lastActionExecutedTime = now
             handleDisambiguationChoice(normalized)
             return
         }
@@ -726,6 +813,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         var command = stripWakeWord(normalized)
 
         if (command.isBlank() || command == "oye" || command == "hola") {
+            lastActionExecutedTime = now
             speak("Dime, ¿en qué te puedo ayudar?")
             return
         }
@@ -745,51 +833,58 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                          command.contains("video"))
 
         if (isCamStart) {
+            lastActionExecutedTime = now
             handleStartRecording()
             return
         }
 
         if (isCamStop) {
+            lastActionExecutedTime = now
             handleStopRecording()
             return
         }
 
         // ── COMANDOS DE MÚSICA ──────────────────────────────────────────────
-        val isMusicPause = command.contains("pausa") || command.contains("pausar") ||
-                           command.contains("pon pausa") ||
-                           ((command.contains("para") || command.contains("deten")) && (command.contains("musica") || command.contains("cancion")))
+        val isMusicPause = command.contains("pon pausa") || command.contains("pausa la musica") ||
+                           command.contains("pausar la musica") || command.contains("para la musica") ||
+                           command.contains("deten la musica") || command == "pausa" || command == "pausar"
 
         val isMusicPlay = command.contains("reproduce") || command.contains("reproducir") ||
-                          command.contains("play") || command.contains("continua la musica") ||
-                          command.contains("pon musica") || command.contains("sigue la musica")
+                          command.contains("continua la musica") || command.contains("pon musica") ||
+                          command.contains("sigue la musica") || command == "play"
 
-        val isMusicNext = command.contains("siguiente") || command.contains("pasa la cancion") ||
-                          command.contains("pasa de cancion") || command.contains("adelanta") ||
-                          command.contains("cambia de cancion") || command.contains("cambia la cancion") ||
-                          command.contains("proxima") || command.contains("otra cancion")
+        val isMusicNext = command.contains("siguiente cancion") || command.contains("pasa la cancion") ||
+                          command.contains("cambia la cancion") || command.contains("siguiente pista") ||
+                          command.contains("proxima cancion") || command.contains("otra cancion") ||
+                          command.contains("adelanta la cancion") || command == "siguiente" || command == "adelanta"
 
-        val isMusicPrev = command.contains("anterior") || command.contains("cancion anterior") ||
-                          command.contains("retrocede") || command.contains("vuelve")
+        val isMusicPrev = command.contains("cancion anterior") || command.contains("pista anterior") ||
+                          command.contains("retrocede la cancion") || command.contains("vuelve la cancion") ||
+                          command == "anterior" || command == "retrocede"
 
         if (isMusicPause) {
+            lastActionExecutedTime = now
             GlobalState.mediaController?.transportControls?.pause()
             speak("Música pausada")
             return
         }
 
         if (isMusicPlay) {
+            lastActionExecutedTime = now
             GlobalState.mediaController?.transportControls?.play()
             speak("Reproduciendo música")
             return
         }
 
         if (isMusicNext) {
+            lastActionExecutedTime = now
             GlobalState.skipToNext()
             speak("Siguiente canción")
             return
         }
 
         if (isMusicPrev) {
+            lastActionExecutedTime = now
             GlobalState.skipToPrevious()
             speak("Canción anterior")
             return
@@ -837,32 +932,38 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         if (destinationQuery != null && destinationQuery.isNotBlank()) {
+            lastActionExecutedTime = now
             handleNavigationToSavedPlace(destinationQuery)
             return
         }
 
         // ── SALUDOS / AYUDA ─────────────────────────────────────────────────
         if (command.contains("hola") || command.contains("buenos dias") || command.contains("buenas tardes")) {
+            lastActionExecutedTime = now
             speak("¡Hola! Estoy lista para el camino. ¿A dónde vamos o qué deseas hacer?")
             return
         }
 
         if (command.contains("quien eres") || command.contains("como te llamas")) {
+            lastActionExecutedTime = now
             speak("Soy Arlet, tu copiloto virtual para este viaje.")
             return
         }
 
         if (command.contains("ayuda") || command.contains("que puedes hacer") || command.contains("comandos")) {
+            lastActionExecutedTime = now
             speak("Puedo iniciar la grabación de la cámara, controlar la música y guiarte a tus lugares favoritos.")
             return
         }
 
         if (command.contains("gracias")) {
+            lastActionExecutedTime = now
             speak("¡De nada! Maneja con cuidado.")
             return
         }
 
         // Comando no reconocido
+        lastActionExecutedTime = now
         speak("No entendí esa orden. Puedes pedirme grabar con la cámara, controlar la música o trazar una ruta.")
     }
 
