@@ -21,6 +21,10 @@ import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
 import com.tuusuario.carlauncher.ui.map.FavoritesManager
 import com.tuusuario.carlauncher.ui.map.PlaceResult
+import com.tuusuario.carlauncher.ui.map.searchPlaces
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
@@ -69,6 +73,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     // Vosk Offline Speech Engine (Silencioso, continuo, sin bips ni internet)
     private var voskModel: Model? = null
     private var voskSpeechService: SpeechService? = null
+    private var currentRecognizer: Recognizer? = null
     private var isManualPushToTalk = false
 
     // Fallback Android SpeechRecognizer (solo si Vosk no está disponible o para toque manual)
@@ -116,51 +121,57 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            // Configurar Español Latinoamericano Neutro
-            val latamLocale = Locale("es", "419")
-            val res419 = tts?.setLanguage(latamLocale)
-            if (res419 == TextToSpeech.LANG_MISSING_DATA || res419 == TextToSpeech.LANG_NOT_SUPPORTED) {
-                val mxLocale = Locale("es", "MX")
-                val resMx = tts?.setLanguage(mxLocale)
-                if (resMx == TextToSpeech.LANG_MISSING_DATA || resMx == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    val usLocale = Locale("es", "US")
-                    val resUs = tts?.setLanguage(usLocale)
-                    if (resUs == TextToSpeech.LANG_MISSING_DATA || resUs == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        tts?.setLanguage(Locale("es"))
-                    }
+            val candidates = listOf(
+                Locale("es", "MX"),
+                Locale("es", "US"),
+                Locale("es", "ES"),
+                Locale("es")
+            )
+            var langConfigured = false
+            for (candidate in candidates) {
+                val res = tts?.setLanguage(candidate)
+                if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    langConfigured = true
+                    Log.i(TAG, "Idioma TTS configurado exitosamente: $candidate")
+                    break
                 }
             }
+            if (!langConfigured) {
+                tts?.setLanguage(Locale.getDefault())
+            }
 
-            // Buscar voz femenina de español neutro / latinoamericano en el motor TTS
+            // Buscar y asignar una voz femenina en español disponible en el sistema
             try {
                 val voices = tts?.voices
-                val latamFemaleVoice = voices?.firstOrNull { voice ->
-                    val lang = voice.locale.language
-                    val country = voice.locale.country.uppercase(Locale.ROOT)
-                    val name = voice.name.lowercase(Locale.ROOT)
-                    val isEs = lang == "es"
-                    val isLatam = country == "419" || country == "MX" || country == "US" || country == "CO" ||
-                                  name.contains("419") || name.contains("mx") || name.contains("us") || name.contains("latam")
-                    val isFemale = name.contains("female") || name.contains("fem") || name.contains("sfd") || voice.features.contains("gender=female")
-                    isEs && isLatam && isFemale && !voice.isNetworkConnectionRequired
-                } ?: voices?.firstOrNull { voice ->
-                    val lang = voice.locale.language
-                    val country = voice.locale.country.uppercase(Locale.ROOT)
-                    val name = voice.name.lowercase(Locale.ROOT)
-                    val isEs = lang == "es"
-                    val isLatam = country == "419" || country == "MX" || country == "US" || country == "CO" ||
-                                  name.contains("419") || name.contains("mx") || name.contains("us") || name.contains("latam")
-                    val isFemale = name.contains("female") || name.contains("fem") || name.contains("sfd") || voice.features.contains("gender=female")
-                    isEs && isLatam && isFemale
-                } ?: voices?.firstOrNull { voice ->
-                    val lang = voice.locale.language
-                    val name = voice.name.lowercase(Locale.ROOT)
-                    lang == "es" && (name.contains("female") || name.contains("fem") || voice.features.contains("gender=female"))
-                }
+                if (!voices.isNullOrEmpty()) {
+                    val candidateVoice = voices.firstOrNull { voice ->
+                        val lang = voice.locale.language
+                        val country = voice.locale.country.uppercase(Locale.ROOT)
+                        val name = voice.name.lowercase(Locale.ROOT)
+                        val isNotInstalled = voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+                        val isFemale = name.contains("female") || name.contains("fem") || name.contains("sfd") || voice.features?.contains("gender=female") == true
+                        val isLatam = country == "MX" || country == "US" || country == "CO" || name.contains("mx") || name.contains("us")
+                        lang == "es" && isLatam && isFemale && !isNotInstalled && !voice.isNetworkConnectionRequired
+                    } ?: voices.firstOrNull { voice ->
+                        val lang = voice.locale.language
+                        val name = voice.name.lowercase(Locale.ROOT)
+                        val isNotInstalled = voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+                        val isFemale = name.contains("female") || name.contains("fem") || name.contains("sfd") || voice.features?.contains("gender=female") == true
+                        lang == "es" && isFemale && !isNotInstalled
+                    } ?: voices.firstOrNull { voice ->
+                        val lang = voice.locale.language
+                        val isNotInstalled = voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+                        lang == "es" && !isNotInstalled
+                    }
 
-                if (latamFemaleVoice != null) {
-                    tts?.voice = latamFemaleVoice
-                    Log.i(TAG, "Voz femenina latino neutro asignada: ${latamFemaleVoice.name} (${latamFemaleVoice.locale})")
+                    if (candidateVoice != null) {
+                        try {
+                            tts?.voice = candidateVoice
+                            Log.i(TAG, "Voz femenina TTS asignada: ${candidateVoice.name} (${candidateVoice.locale})")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "No se pudo asignar voz específica, usando por defecto: ${e.message}")
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "No se pudo consultar lista de voces TTS: ${e.message}")
@@ -170,9 +181,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
             isTtsInitialized = true
-            Log.i(TAG, "TextToSpeech latino neutro inicializado correctamente")
+            Log.i(TAG, "TextToSpeech inicializado correctamente")
         } else {
             Log.e(TAG, "Fallo al inicializar TextToSpeech: status=$status")
+            isTtsInitialized = false
         }
     }
 
@@ -191,6 +203,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         mainHandler.post {
             try {
                 val recognizer = Recognizer(model, 16000.0f)
+                currentRecognizer = recognizer
                 voskSpeechService = SpeechService(recognizer, 16000.0f)
                 voskSpeechService?.startListening(voskListener)
                 Log.i(TAG, "Escucha continua manos libres (Vosk) iniciada: di 'Arlet' para activar comandos")
@@ -206,6 +219,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 voskSpeechService?.stop()
                 voskSpeechService?.shutdown()
                 voskSpeechService = null
+                try { currentRecognizer?.close() } catch (_: Exception) {}
+                currentRecognizer = null
             } catch (_: Exception) {}
         }
     }
@@ -284,10 +299,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     setRecognitionListener(arletRecognitionListener)
                 }
 
+                val langTag = if (Locale.getDefault().language == "es") Locale.getDefault().toLanguageTag() else "es-MX"
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-419")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es-419")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, langTag)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
@@ -313,6 +329,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         audioRms.value = 0f
         mainHandler.removeCallbacksAndMessages(null)
         try { tts?.stop() } catch (_: Exception) {}
+        currentRecognizer?.reset()
         if (AppSettings.arletVoiceWakeEnabled.value) {
             voskSpeechService?.setPause(false)
         }
@@ -340,50 +357,123 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         if (!isTtsInitialized || tts == null) {
             Log.w(TAG, "TTS no listo para hablar")
             isSpeaking.value = false
-            voskSpeechService?.setPause(false)
             onDone?.invoke()
+            if (!isAwaitingDisambiguation.value) {
+                showOverlay.value = false
+                isListening.value = false
+                isManualPushToTalk = false
+                mainHandler.postDelayed({
+                    currentRecognizer?.reset()
+                    if (AppSettings.arletVoiceWakeEnabled.value) {
+                        voskSpeechService?.setPause(false)
+                    }
+                }, 500)
+            }
             return
         }
 
         val utteranceId = UUID.randomUUID().toString()
+
+        // Temporizador de seguridad: si TTS se congela o tarda más de 4s, liberar el asistente
+        val safetyTimeout = Runnable {
+            if (isSpeaking.value) {
+                Log.w(TAG, "Timeout de seguridad TTS: liberando asistente")
+                isSpeaking.value = false
+                onDone?.invoke()
+                if (!isAwaitingDisambiguation.value) {
+                    showOverlay.value = false
+                    isListening.value = false
+                    isManualPushToTalk = false
+                    mainHandler.postDelayed({
+                        currentRecognizer?.reset()
+                        if (AppSettings.arletVoiceWakeEnabled.value) {
+                            voskSpeechService?.setPause(false)
+                        }
+                    }, 500)
+                }
+            }
+        }
+        mainHandler.postDelayed(safetyTimeout, 4000)
+
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
             override fun onDone(id: String?) {
                 if (id == utteranceId) {
+                    mainHandler.removeCallbacks(safetyTimeout)
                     mainHandler.post {
                         isSpeaking.value = false
                         onDone?.invoke()
-                        // Reanudar escucha en Vosk
-                        voskSpeechService?.setPause(false)
-                        if (isAwaitingDisambiguation.value) {
-                            isListening.value = true
-                        } else {
-                            // Cerrar overlay suavemente tras terminar de hablar
+
+                        if (!isAwaitingDisambiguation.value) {
+                            // Cerrar overlay y apagar el micrófono de inmediato al terminar la orden
+                            showOverlay.value = false
+                            isListening.value = false
+                            isManualPushToTalk = false
+                            assistantResponse.value = ""
+                            lastSpokenQuery.value = ""
+
+                            // Esperar 500ms para disipar cualquier eco de los altavoces antes de reanudar escucha offline
                             mainHandler.postDelayed({
-                                if (!isAwaitingDisambiguation.value && !isSpeaking.value) {
-                                    showOverlay.value = false
-                                    isListening.value = false
-                                    isManualPushToTalk = false
+                                currentRecognizer?.reset()
+                                if (AppSettings.arletVoiceWakeEnabled.value) {
+                                    voskSpeechService?.setPause(false)
                                 }
-                            }, 3200)
+                            }, 500)
+                        } else {
+                            currentRecognizer?.reset()
+                            voskSpeechService?.setPause(false)
+                            isListening.value = true
                         }
                     }
                 }
             }
             override fun onError(id: String?) {
                 if (id == utteranceId) {
+                    mainHandler.removeCallbacks(safetyTimeout)
                     mainHandler.post {
                         isSpeaking.value = false
-                        voskSpeechService?.setPause(false)
                         onDone?.invoke()
+                        if (!isAwaitingDisambiguation.value) {
+                            showOverlay.value = false
+                            isListening.value = false
+                            isManualPushToTalk = false
+                            mainHandler.postDelayed({
+                                currentRecognizer?.reset()
+                                if (AppSettings.arletVoiceWakeEnabled.value) {
+                                    voskSpeechService?.setPause(false)
+                                }
+                            }, 500)
+                        }
                     }
                 }
+            }
+            override fun onError(id: String?, errorCode: Int) {
+                onError(id)
             }
         })
 
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        val res = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        if (res != TextToSpeech.SUCCESS) {
+            Log.w(TAG, "tts.speak devolvio error ($res)")
+            mainHandler.removeCallbacks(safetyTimeout)
+            mainHandler.post {
+                isSpeaking.value = false
+                onDone?.invoke()
+                if (!isAwaitingDisambiguation.value) {
+                    showOverlay.value = false
+                    isListening.value = false
+                    isManualPushToTalk = false
+                    mainHandler.postDelayed({
+                        currentRecognizer?.reset()
+                        if (AppSettings.arletVoiceWakeEnabled.value) {
+                            voskSpeechService?.setPause(false)
+                        }
+                    }, 500)
+                }
+            }
+        }
     }
 
     // ── Listener de Vosk (Motor Offline Manos Libres) ────────────────────────
@@ -401,8 +491,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     private fun containsWakeWord(norm: String): Boolean {
         val triggers = listOf(
-            "arlet", "arleth", "arlete", "harlet", "arled",
-            "arlette", "arlety", "aleta", "aletta", "atlet", "adlet", "arle"
+            "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
+            "arlette", "arlety", "aleta", "aletta", "alete", "atlet",
+            "adlet", "arle", "harle", "arlex", "alex", "alec",
+            "aler", "alred", "ardel", "darlet", "valet", "ar le", "ar let", "ar led"
         )
         val words = norm.split(" ")
         return words.any { triggers.contains(it) } ||
@@ -413,9 +505,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private fun stripWakeWord(norm: String): String {
         var command = norm
         val triggers = listOf(
-            "oye arlet", "hola arlet", "arlet", "arleth", "arlete",
-            "harlet", "arled", "arlette", "arlety", "aleta", "aletta",
-            "atlet", "adlet", "ar le", "arle"
+            "oye arlet", "hola arlet", "hey arlet", "ok arlet",
+            "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
+            "arlette", "arlety", "aleta", "aletta", "alete", "atlet",
+            "adlet", "ar le", "ar let", "ar led", "arle", "harle",
+            "arlex", "alex", "alec", "aler", "darlet", "valet"
         )
         for (t in triggers) {
             command = command.replace(t, " ")
@@ -443,10 +537,15 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             c.contains("retrocede") || c.contains("musica")) return true
 
         // Navegación
-        if (c.contains("inicia ruta") || c.contains("iniciar ruta") || c.contains("ruta a") ||
-            c.contains("ruta hacia") || c.contains("ir a") || c.contains("ir al") ||
-            c.contains("llevame") || c.contains("navega") || c.contains("conduce a") ||
-            c.contains("destino")) return true
+        if (c.contains("inicia ruta") || c.contains("iniciar ruta") || c.contains("inicia la ruta") ||
+            c.contains("iniciar la ruta") || c.contains("traza la ruta") || c.contains("trazar la ruta") ||
+            c.contains("traza ruta") || c.contains("trazar ruta") || c.contains("ruta para") ||
+            c.contains("ruta hacia") || c.contains("ruta a") || c.contains("vamos para") ||
+            c.contains("vamos hacia") || c.contains("vamos a") || c.contains("ir para") ||
+            c.contains("ir a") || c.contains("ir al") || c.contains("llevame") ||
+            c.contains("guiame") || c.contains("navega") || c.contains("conduce") ||
+            c.contains("pon la ruta") || c.contains("pon ruta") || c.contains("como llego") ||
+            c.contains("destino") || c.contains("rumbo a")) return true
 
         // Desambiguación si está esperando
         if (isAwaitingDisambiguation.value) {
@@ -472,27 +571,30 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             if (partial.isNotBlank()) {
                 val norm = normalize(partial)
                 val hasWakeWord = containsWakeWord(norm)
-                val isAlreadyActive = showOverlay.value || isManualPushToTalk || isAwaitingDisambiguation.value
+                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
 
-                if (hasWakeWord || isAlreadyActive) {
-                    showOverlay.value = true
-                    isListening.value = true
-                    lastSpokenQuery.value = partial
-                    if (assistantResponse.value.isBlank() || assistantResponse.value == "Listo") {
-                        assistantResponse.value = "Te escucho..."
-                    }
-
-                    // Si ya se identificó un comando claro, ejecutarlo DE INMEDIATO sin requerir silencio prolongado
-                    if (isActionableCommand(norm)) {
-                        mainHandler.removeCallbacks(silenceWatchdog)
-                        handleSpeechInput(partial)
-                        return
-                    }
-
-                    // Watchdog: Si el usuario para de hablar durante 900ms, procesar lo capturado
-                    mainHandler.removeCallbacks(silenceWatchdog)
-                    mainHandler.postDelayed(silenceWatchdog, 900)
+                // SOLO responder si se dijo "Arlet" O si el usuario presionó el botón de hablar en pantalla
+                if (!hasWakeWord && !allowWithoutWakeWord) {
+                    return
                 }
+
+                showOverlay.value = true
+                isListening.value = true
+                lastSpokenQuery.value = partial
+                if (assistantResponse.value.isBlank() || assistantResponse.value == "Listo") {
+                    assistantResponse.value = "Te escucho..."
+                }
+
+                // Si ya se identificó un comando claro, ejecutarlo DE INMEDIATO
+                if (isActionableCommand(norm)) {
+                    mainHandler.removeCallbacks(silenceWatchdog)
+                    handleSpeechInput(partial)
+                    return
+                }
+
+                // Watchdog: Si el usuario para de hablar durante 900ms, procesar lo capturado
+                mainHandler.removeCallbacks(silenceWatchdog)
+                mainHandler.postDelayed(silenceWatchdog, 900)
             }
         }
 
@@ -505,8 +607,9 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 Log.i(TAG, "Vosk onResult: '$text'")
                 val norm = normalize(text)
                 val hasWakeWord = containsWakeWord(norm)
+                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
 
-                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk || showOverlay.value) {
+                if (hasWakeWord || allowWithoutWakeWord) {
                     handleSpeechInput(text)
                 }
             }
@@ -520,8 +623,9 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             if (text.isNotBlank()) {
                 val norm = normalize(text)
                 val hasWakeWord = containsWakeWord(norm)
+                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
 
-                if (hasWakeWord || isAwaitingDisambiguation.value || isManualPushToTalk || showOverlay.value) {
+                if (hasWakeWord || allowWithoutWakeWord) {
                     handleSpeechInput(text)
                 }
             }
@@ -598,16 +702,31 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         if (now - lastHandledTime < 1800 && normalized == lastHandledText) {
             return
         }
+
+        val hasWakeWord = containsWakeWord(normalized)
+        val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
+
+        // Garantía estricta: No procesar órdenes si no se nombró a Arlet y no es toque manual ni desambiguación
+        if (!hasWakeWord && !allowWithoutWakeWord) {
+            Log.i(TAG, "Ignorando orden sin nombre de invocación Arlet: '$rawText'")
+            return
+        }
+
         lastHandledTime = now
         lastHandledText = normalized
         mainHandler.removeCallbacks(silenceWatchdog)
+        isManualPushToTalk = false
+
+        // Inmediatamente apagar escucha y pausar Vosk para que no se escuche a sí misma ni procese nada mientras ejecuta la orden
+        isListening.value = false
+        audioRms.value = 0f
+        voskSpeechService?.setPause(true)
+        currentRecognizer?.reset()
 
         Log.i(TAG, "Audio capturado: '$rawText' -> Normalizado: '$normalized'")
 
         lastSpokenQuery.value = rawText
         showOverlay.value = true
-        isListening.value = false
-        audioRms.value = 0f
 
         // 1. Caso: Esperando desambiguación de destino ("el primero", "el segundo", o nombre)
         if (isAwaitingDisambiguation.value && disambiguationOptions.isNotEmpty()) {
@@ -658,7 +777,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         val isMusicNext = command.contains("siguiente") || command.contains("pasa la cancion") ||
                           command.contains("pasa de cancion") || command.contains("adelanta") ||
-                          command.contains("otra cancion")
+                          command.contains("cambia de cancion") || command.contains("cambia la cancion") ||
+                          command.contains("proxima") || command.contains("otra cancion")
 
         val isMusicPrev = command.contains("anterior") || command.contains("cancion anterior") ||
                           command.contains("retrocede") || command.contains("vuelve")
@@ -687,12 +807,37 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             return
         }
 
-        // ── COMANDOS DE NAVEGACIÓN A LUGARES GUARDADOS ───────────────────────
+        // ── COMANDOS DE NAVEGACIÓN A LUGARES GUARDADOS O MAPA ────────────────
         val navTriggers = listOf(
-            "inicia ruta a", "iniciar ruta a", "inicia la ruta a", "iniciar la ruta a",
-            "ruta a", "ruta hacia", "ir a", "ir al", "ir hacia",
-            "llevame a", "llevame al", "llevame hacia",
-            "navega a", "navegar a", "conduce a", "destino"
+            // Traza / Trazar ruta
+            "traza la ruta para", "traza la ruta hacia", "traza la ruta a", "traza la ruta al",
+            "traza ruta para", "traza ruta hacia", "traza ruta a", "traza ruta al",
+            "trazar la ruta para", "trazar la ruta hacia", "trazar la ruta a", "trazar la ruta al",
+            "trazar ruta para", "trazar ruta hacia", "trazar ruta a", "trazar ruta al",
+            // Inicia / Iniciar ruta
+            "inicia la ruta para", "inicia la ruta hacia", "inicia la ruta a", "inicia la ruta al",
+            "inicia ruta para", "inicia ruta hacia", "inicia ruta a", "inicia ruta al",
+            "iniciar la ruta para", "iniciar la ruta hacia", "iniciar la ruta a", "iniciar la ruta al",
+            "iniciar ruta para", "iniciar ruta hacia", "iniciar ruta a", "iniciar ruta al",
+            // Pon / Poner ruta
+            "pon la ruta para", "pon la ruta hacia", "pon la ruta a", "pon la ruta al",
+            "pon ruta para", "pon ruta hacia", "pon ruta a", "pon ruta al",
+            // Vamos
+            "vamos para", "vamos hacia", "vamos a la", "vamos al", "vamos a",
+            // Llévame / Guíame / Conduce / Navega
+            "llevame para", "llevame hacia", "llevame al", "llevame a la", "llevame a",
+            "guiame para", "guiame hacia", "guiame al", "guiame a la", "guiame a",
+            "conduce para", "conduce hacia", "conduce a la", "conduce al", "conduce a",
+            "navega para", "navega hacia", "navega a la", "navega al", "navega a",
+            "navegar para", "navegar hacia", "navegar a",
+            // Ir / Cómo llego
+            "ir para", "ir hacia", "ir al", "ir a la", "ir a",
+            "como llego a la", "como llego al", "como llego a",
+            "como llegar a", "como voy para", "como voy a",
+            // Destino / Dirección / Rumbo
+            "rumbo a", "rumbo hacia", "rumbo para",
+            "direccion a", "direccion hacia", "direccion para",
+            "destino a", "destino"
         )
 
         var destinationQuery: String? = null
@@ -730,7 +875,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         // Comando no reconocido
-        speak("No entendí esa orden. Puedes pedirme grabar con la cámara, controlar la música o ir a un lugar guardado.")
+        speak("No entendí esa orden. Puedes pedirme grabar con la cámara, controlar la música o trazar una ruta.")
     }
 
     // ── Acciones de Cámara ──────────────────────────────────────────────────
@@ -765,25 +910,30 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private fun handleNavigationToSavedPlace(query: String) {
         val ctx = context ?: return
 
-        // Limpiar artículos determinantes ("el", "la", "mi", "los", "las", etc.)
-        var cleanTarget = query
-        val stopWords = listOf("el ", "la ", "mi ", "mis ", "los ", "las ", "un ", "una ", "hacia ")
+        // Limpiar preposiciones y artículos determinantes
+        var cleanTarget = query.trim()
+        val stopWords = listOf(
+            "para la ", "para el ", "para los ", "para las ", "para ",
+            "hacia la ", "hacia el ", "hacia los ", "hacia las ", "hacia ",
+            "a la ", "a las ", "al ", "a los ", "a ",
+            "el ", "la ", "los ", "las ", "mi ", "mis ", "un ", "una "
+        )
         for (sw in stopWords) {
             if (cleanTarget.startsWith(sw)) {
                 cleanTarget = cleanTarget.removePrefix(sw).trim()
             }
         }
 
-        val favManager = FavoritesManager(ctx)
-        val allFavorites = favManager.getFavorites()
-
-        if (allFavorites.isEmpty()) {
-            speak("No tienes ningún lugar guardado en favoritos todavía.")
+        if (cleanTarget.isBlank()) {
+            speak("¿A qué destino deseas ir?")
             return
         }
 
-        // Buscar coincidencias
+        val favManager = FavoritesManager(ctx)
+        val allFavorites = favManager.getFavorites()
         val targetNorm = normalize(cleanTarget)
+
+        // 1. Buscar en favoritos guardados
         val matches = allFavorites.filter { fav ->
             val favNorm = normalize(fav.name)
             val addrNorm = normalize(fav.address)
@@ -796,14 +946,11 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         when {
-            matches.isEmpty() -> {
-                speak("No encontré ningún lugar guardado que coincida con $cleanTarget")
-            }
             matches.size == 1 -> {
                 val selected = matches.first()
                 selectDestination(selected)
             }
-            else -> {
+            matches.size > 1 -> {
                 // Hay múltiples destinos coincidentes -> Iniciar modo de desambiguación
                 disambiguationOptions.clear()
                 disambiguationOptions.addAll(matches)
@@ -815,6 +962,30 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 } else {
                     val nombres = matches.take(3).joinToString(", ") { it.name }
                     speak("Encontré varias opciones: $nombres. ¿Cuál prefieres?")
+                }
+            }
+            else -> {
+                // 2. Si no está en favoritos, buscar en el mapa en línea
+                speak("Buscando ruta para $cleanTarget...")
+                CoroutineScope(Dispatchers.Main).launch {
+                    try {
+                        val searchResults = searchPlaces(cleanTarget, null)
+                        if (searchResults.isEmpty()) {
+                            speak("No encontré ningún lugar que coincida con $cleanTarget")
+                        } else if (searchResults.size == 1) {
+                            selectDestination(searchResults.first())
+                        } else {
+                            val topResults = searchResults.take(3)
+                            disambiguationOptions.clear()
+                            disambiguationOptions.addAll(topResults)
+                            isAwaitingDisambiguation.value = true
+                            showOverlay.value = true
+                            speak("Encontré varias opciones en el mapa. Selecciona una en pantalla o di 'la primera'.")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error buscando en mapa", e)
+                        speak("No encontré ningún lugar guardado que coincida con $cleanTarget")
+                    }
                 }
             }
         }
