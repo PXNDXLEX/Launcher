@@ -56,6 +56,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.tuusuario.carlauncher.services.GlobalState
+import com.tuusuario.carlauncher.services.ArletAssistant
+import com.tuusuario.carlauncher.ui.widgets.ArletMicButton
+import com.tuusuario.carlauncher.ui.widgets.ArletOverlay
 import com.tuusuario.carlauncher.ui.map.NavigationMap
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
@@ -141,6 +144,13 @@ object NavigationState {
     /** Pin exacto del récord de velocidad (para mostrarlo en el mapa al tocar un record) */
     val speedRecordPin = mutableStateOf<Point?>(null)
     
+    val pendingRouteTrigger = mutableStateOf(0L)
+    
+    fun startRoute(dest: Point) {
+        activeDestination.value = dest
+        pendingRouteTrigger.value = System.currentTimeMillis()
+    }
+
     fun clearActiveRoute() {
         activeDestination.value = null
         activeRoutePoints.clear()
@@ -171,6 +181,11 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     var showWelcome by rememberSaveable { mutableStateOf(true) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+
+    LaunchedEffect(lifecycleOwner) {
+        ArletAssistant.init(context, lifecycleOwner)
+    }
 
     LaunchedEffect(Unit) {
         if (showWelcome) {
@@ -247,10 +262,9 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
-        // ── BOTÓN DASHCAM ──
+        // ── BOTONES RÁPIDOS ARLET & DASHCAM ──
         // En landscape: arriba a la derecha (separado del widget de música que está abajo)
         // En portrait: arriba a la derecha como siempre
-        val lifecycleOwner = LocalLifecycleOwner.current
         val isRec = com.tuusuario.carlauncher.services.DashcamManager.isRecording.value
         Box(
             modifier = Modifier
@@ -258,32 +272,51 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 .padding(start = if (isLandscape) 96.dp else 0.dp, top = 16.dp, end = 16.dp),
             contentAlignment = Alignment.TopEnd
         ) {
-            Surface(
-                shape = CircleShape,
-                color = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (isRec) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant,
-                shadowElevation = 6.dp,
-                modifier = Modifier
-                    .size(56.dp)
-                    .pointerInput(isRec) {
-                        detectTapGestures(
-                            onTap = {
-                                if (isRec) {
-                                    com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
-                                } else {
-                                    com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
-                                }
-                            },
-                            onLongPress = {
-                                com.tuusuario.carlauncher.services.DashcamManager.cycleCamera(context, lifecycleOwner)
-                            }
-                        )
-                    }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
+                // Botón micrófono Asistente de Voz Arlet
+                ArletMicButton(activeColor = activeUiColor)
+
+                // Botón Dashcam
+                Surface(
+                    shape = CircleShape,
+                    color = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (isRec) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .pointerInput(isRec) {
+                            detectTapGestures(
+                                onTap = {
+                                    if (isRec) {
+                                        com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
+                                    } else {
+                                        com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
+                                    }
+                                },
+                                onLongPress = {
+                                    com.tuusuario.carlauncher.services.DashcamManager.cycleCamera(context, lifecycleOwner)
+                                }
+                            )
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
+                    }
                 }
             }
+        }
+
+        // ── OVERLAY HUD ASISTENTE ARLET (Parte superior central) ──
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 16.dp, start = if (isLandscape) 96.dp else 16.dp, end = if (isLandscape) 140.dp else 16.dp),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            ArletOverlay(activeColor = activeUiColor)
         }
 
         // ── Overlay de récord de velocidad estilo logro Xbox (parte inferior) ──
@@ -679,6 +712,33 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                             onClick = { expandedSection = if (expandedSection == "offline_maps") "" else "offline_maps" }
                         ) { OfflineMapDownloader(context, coroutineScope) }
                         SettingsDivider()
+                    }
+
+                    // ── ASISTENTE DE VOZ ARLET ──
+                    SettingsGroupCard("Asistente de Voz Arlet") {
+                        SettingsRowSwitch(
+                            icon = Icons.Default.RecordVoiceOver,
+                            title = "Detección por Voz (\"Arlet\")",
+                            subtitle = "Activar comandos diciendo \"Arlet\" mientras la app está abierta",
+                            checked = AppSettings.arletVoiceWakeEnabled.value,
+                            onCheckedChange = { enabled ->
+                                AppSettings.setArletVoiceWakeEnabled(enabled)
+                                if (enabled) {
+                                    ArletAssistant.startContinuousListening()
+                                } else {
+                                    ArletAssistant.stopContinuousListening()
+                                }
+                            }
+                        )
+                        SettingsDivider()
+                        SettingsRow(
+                            icon = Icons.Default.HelpOutline,
+                            title = "Probar Voz y Comandos",
+                            subtitle = "Escuchar ejemplo de voz y comandos disponibles",
+                            onClick = {
+                                ArletAssistant.speak("Hola, soy Arlet. Puedes pedirme comenzar a grabar con la cámara, pausar la música, pasar de canción o iniciar una ruta a tus lugares guardados.")
+                            }
+                        )
                     }
 
                     // ── SISTEMA ──

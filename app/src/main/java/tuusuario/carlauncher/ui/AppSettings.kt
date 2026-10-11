@@ -18,6 +18,8 @@ object AppSettings {
     val mapStyle = mutableStateOf("DARK") // LIGHT, DARK, NEON, SATELLITE
     val batterySaverMode = mutableStateOf(false)
     val dashcamCameraIndex = mutableStateOf(0)
+    // Asistente de voz Arlet
+    val arletVoiceWakeEnabled = mutableStateOf(true)
     // Modo simulación GPS — no se persiste (solo para testing)
     val isGpsSimulationMode = mutableStateOf(false)
     
@@ -85,6 +87,7 @@ object AppSettings {
         customSpeedoBgPath.value = prefs?.getString("customSpeedoBgPath", "") ?: ""
         customSpeedoBgOpacity.value = prefs?.getFloat("customSpeedoBgOpacity", 0.5f) ?: 0.5f
         customVehicleIconPath.value = prefs?.getString("customVehicleIconPath", "") ?: ""
+        arletVoiceWakeEnabled.value = prefs?.getBoolean("arletVoiceWakeEnabled", true) ?: true
         
         isInitialized = true
         // Notificar a la pantalla de bienvenida que los ajustes ya están listos
@@ -207,5 +210,10 @@ object AppSettings {
     fun setCustomVehicleIconPath(path: String) {
         customVehicleIconPath.value = path
         prefs?.edit()?.putString("customVehicleIconPath", path)?.apply()
+    }
+
+    fun setArletVoiceWakeEnabled(enabled: Boolean) {
+        arletVoiceWakeEnabled.value = enabled
+        prefs?.edit()?.putBoolean("arletVoiceWakeEnabled", enabled)?.apply()
     }
 }

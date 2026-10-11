@@ -54,8 +54,14 @@ import java.io.File
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        var instance: MainActivity? = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = this
         
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -96,6 +102,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (AppSettings.arletVoiceWakeEnabled.value) {
+            com.tuusuario.carlauncher.services.ArletAssistant.startContinuousListening()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.tuusuario.carlauncher.services.ArletAssistant.stopContinuousListening()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        com.tuusuario.carlauncher.services.ArletAssistant.destroy()
+        if (instance == this) instance = null
     }
 }
 

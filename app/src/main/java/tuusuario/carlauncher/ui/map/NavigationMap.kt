@@ -1213,6 +1213,25 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         updateDashcamOnMap()
     }
 
+    // ── Reaccionar a solicitud externa de ruta (ej. Asistente Arlet) ─────────
+    LaunchedEffect(NavigationState.pendingRouteTrigger.value) {
+        val trigger = NavigationState.pendingRouteTrigger.value
+        val dest = NavigationState.activeDestination.value
+        val loc = NavigationState.currentLocation.value
+        if (trigger > 0L && dest != null && loc != null) {
+            selectedDestination = dest
+            destAnnotation?.let { pointAnnotMgr?.delete(it) }
+            val pm = pointAnnotMgr ?: mapView.annotations.createPointAnnotationManager().also { pointAnnotMgr = it }
+            val iconBmp = drawCustomPin(uiColor)
+            destAnnotation = pm.create(PointAnnotationOptions().withPoint(dest).withIconImage(iconBmp))
+            
+            calculateRoute(
+                Point.fromLngLat(loc.longitude, loc.latitude),
+                Point.fromLngLat(dest.longitude(), dest.latitude())
+            )
+        }
+    }
+
     // ── Reaccionar a cambios de tipo de vehículo/escala/color ────────────
     LaunchedEffect(vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value) {
         if (!mapReady) return@LaunchedEffect
