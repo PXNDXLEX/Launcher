@@ -26,6 +26,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.tuusuario.carlauncher.services.ArletAssistant
 import com.tuusuario.carlauncher.ui.AppSettings
 
@@ -37,9 +44,24 @@ fun ArletMicButton(
     modifier: Modifier = Modifier,
     activeColor: Color = Color(AppSettings.uiColor.value)
 ) {
+    val context = LocalContext.current
     val isListening by ArletAssistant.isListening
     val isSpeaking by ArletAssistant.isSpeaking
     val rms by ArletAssistant.audioRms
+
+    val micLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            ArletAssistant.triggerManualListening()
+        } else {
+            Toast.makeText(
+                context,
+                "Se requiere permiso de micrófono para activar a Arlet",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     // Animación de pulso cuando está escuchando o hablando
     val infiniteTransition = rememberInfiniteTransition(label = "arlet_pulse")
@@ -87,19 +109,37 @@ fun ArletMicButton(
                             if (isListening) {
                                 ArletAssistant.closeOverlay()
                             } else {
-                                ArletAssistant.triggerManualListening()
+                                val hasMic = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                                if (hasMic) {
+                                    ArletAssistant.triggerManualListening()
+                                } else {
+                                    micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
                             }
                         },
                         onLongPress = {
-                            // Alternar activación continua por voz
-                            val current = AppSettings.arletVoiceWakeEnabled.value
-                            AppSettings.setArletVoiceWakeEnabled(!current)
-                            if (!current) {
-                                ArletAssistant.startContinuousListening()
-                                ArletAssistant.speak("Activación por voz de Arlet habilitada")
+                            val hasMic = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+
+                            if (!hasMic) {
+                                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             } else {
-                                ArletAssistant.stopContinuousListening()
-                                ArletAssistant.speak("Activación por voz pausada. Usa el botón para hablar.")
+                                // Alternar activación continua por voz
+                                val current = AppSettings.arletVoiceWakeEnabled.value
+                                AppSettings.setArletVoiceWakeEnabled(!current)
+                                if (!current) {
+                                    ArletAssistant.startContinuousListening()
+                                    ArletAssistant.speak("Activación por voz de Arlet habilitada")
+                                } else {
+                                    ArletAssistant.stopContinuousListening()
+                                    ArletAssistant.speak("Activación por voz pausada. Usa el botón para hablar.")
+                                }
                             }
                         }
                     )
@@ -135,6 +175,27 @@ fun ArletOverlay(
     val responseText by ArletAssistant.assistantResponse
     val isAwaitingDisambiguation by ArletAssistant.isAwaitingDisambiguation
     val disambiguationList = ArletAssistant.disambiguationOptions
+
+    val context = LocalContext.current
+    var hasMicPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val micLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasMicPermission = isGranted
+        if (isGranted) {
+            ArletAssistant.triggerManualListening()
+        } else {
+            Toast.makeText(context, "Permiso de micrófono denegado", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     AnimatedVisibility(
         visible = showOverlay,
@@ -243,6 +304,32 @@ fun ArletOverlay(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // Aviso si falta el permiso de micrófono
+                if (!hasMicPermission) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Arlet necesita permiso para acceder al micrófono y escuchar tus órdenes.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007F))
+                            ) {
+                                Icon(Icons.Default.Mic, null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Permitir Micrófono", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
 
                 // Transcripción de lo que el usuario dijo
                 if (queryText.isNotBlank()) {

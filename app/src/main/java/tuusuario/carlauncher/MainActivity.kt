@@ -159,7 +159,11 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         cameraGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        val audioWasGranted = audioGranted
         audioGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (!audioWasGranted && audioGranted && AppSettings.arletVoiceWakeEnabled.value) {
+            com.tuusuario.carlauncher.services.ArletAssistant.startContinuousListening()
+        }
         mediaGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
         else true
@@ -192,7 +196,7 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
             Text("Configuración de Launcher", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(24.dp))
             if (!locationGranted || !cameraGranted || !audioGranted || !mediaGranted) {
-                Text("1. Necesitamos acceso al GPS, Cámara/Micrófono y Archivos de Video (Dashcam).", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                Text("1. Necesitamos acceso al GPS, Cámara, Micrófono (para el Asistente Arlet y Dashcam) y Archivos de Video.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = {
                     val perms = mutableListOf(

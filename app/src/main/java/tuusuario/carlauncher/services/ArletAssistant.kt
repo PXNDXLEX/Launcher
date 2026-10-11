@@ -180,10 +180,32 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
     }
 
+    fun hasMicrophonePermission(): Boolean {
+        val ctx = context ?: return false
+        return androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
     /**
      * Activación manual mediante el botón del micrófono en pantalla
      */
     fun triggerManualListening() {
+        if (!hasMicrophonePermission()) {
+            val act = com.tuusuario.carlauncher.MainActivity.instance
+            if (act != null) {
+                androidx.core.app.ActivityCompat.requestPermissions(
+                    act,
+                    arrayOf(android.Manifest.permission.RECORD_AUDIO),
+                    2001
+                )
+            }
+            assistantResponse.value = "Se necesita permiso de micrófono para usar a Arlet."
+            showOverlay.value = true
+            return
+        }
+
         isManualPushToTalk = true
         showOverlay.value = true
         assistantResponse.value = "Te escucho..."
@@ -210,6 +232,12 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     }
 
     private fun startListeningInternal() {
+        if (!hasMicrophonePermission()) {
+            Log.w(TAG, "Permiso RECORD_AUDIO no concedido aún. No se inicia la escucha.")
+            isListening.value = false
+            return
+        }
+
         val recognizer = speechRecognizer ?: return
         val intent = recognizerIntent ?: return
         if (isSpeaking.value) return
