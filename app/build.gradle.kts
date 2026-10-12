@@ -42,6 +42,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    androidResources {
+        noCompress.addAll(listOf("bin", "fst", "mdl", "txt", "conf", "stats", "dubm", "ie", "mat", "int"))
+    }
 }
 
 dependencies {

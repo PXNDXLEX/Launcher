@@ -28,7 +28,8 @@ jobs:
           unzip -q model-es.zip
           mv vosk-model-small-es-0.42 app/src/main/assets/model-es
           rm model-es.zip
-          uuidgen > app/src/main/assets/model-es/uuid
+          git rev-parse HEAD | tr -d '\r\n' > app/src/main/assets/model-es/uuid
+          ls -la app/src/main/assets/model-es/ivector
           echo "Modelo Vosk descargado y preparado con exito"
         fi
 

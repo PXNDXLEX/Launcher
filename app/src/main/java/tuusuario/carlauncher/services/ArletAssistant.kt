@@ -30,7 +30,8 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener as VoskRecognitionListener
 import org.vosk.android.SpeechService
-import org.vosk.android.StorageService
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.Normalizer
 import java.util.Locale
@@ -76,6 +77,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     // Vosk Offline Speech Engine (Silencioso, continuo, sin bips ni internet)
     private var voskModel: Model? = null
     private var voskSpeechService: SpeechService? = null
+    private var isVoskModelInitializing = false
     private var isManualPushToTalk = false
 
     // Fallback Android SpeechRecognizer (solo si Vosk no está disponible o para toque manual)
@@ -93,31 +95,146 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             tts = TextToSpeech(appContext.applicationContext, this)
         }
 
-        initVosk(appContext)
+        if (voskModel == null && !isVoskModelInitializing) {
+            initVosk(appContext)
+        }
     }
 
     private fun initVosk(appContext: Context) {
-        try {
-            StorageService.unpack(
-                appContext,
-                "model-es",
-                "model",
-                { model: Model? ->
+        isVoskModelInitializing = true
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val model = unpackAndLoadModel(appContext)
+                if (model != null) {
                     voskModel = model
                     isVoskModelReady.value = true
-                    Log.i(TAG, "Vosk Model español cargado exitosamente en almacenamiento interno")
-                    if (hasMicrophonePermission() && AppSettings.arletVoiceWakeEnabled.value) {
-                        startContinuousListening()
+                    Log.i(TAG, "Vosk Model español cargado y verificado exitosamente")
+                    mainHandler.post {
+                        if (hasMicrophonePermission() && AppSettings.arletVoiceWakeEnabled.value) {
+                            startContinuousListening()
+                        }
                     }
-                },
-                { exception: IOException ->
-                    Log.w(TAG, "Modelo Vosk offline no encontrado en assets o error al desempaquetar", exception)
+                } else {
+                    Log.w(TAG, "No se pudo cargar o verificar el modelo Vosk español")
                     isVoskModelReady.value = false
                 }
-            )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error iniciando Vosk Model", e)
+                isVoskModelReady.value = false
+            } finally {
+                isVoskModelInitializing = false
+            }
+        }
+    }
+
+    private fun isModelDirValid(dir: File, expectedUuid: String): Boolean {
+        if (!dir.exists() || !dir.isDirectory) return false
+        val uuidFile = File(dir, "uuid")
+        if (!uuidFile.exists() || (expectedUuid.isNotBlank() && uuidFile.readText().trim() != expectedUuid)) {
+            Log.d(TAG, "Validación modelo: uuid no coincide o ausente")
+            return false
+        }
+        val cmvnFile = File(dir, "ivector/global_cmvn.stats")
+        if (!cmvnFile.exists() || cmvnFile.length() < 500L) {
+            Log.w(TAG, "Validación modelo: global_cmvn.stats inválido o corrupto")
+            return false
+        }
+        val finalMdl = File(dir, "am/final.mdl")
+        if (!finalMdl.exists() || finalMdl.length() < 10_000_000L) {
+            Log.w(TAG, "Validación modelo: am/final.mdl incompleto")
+            return false
+        }
+        val finalIe = File(dir, "ivector/final.ie")
+        if (!finalIe.exists() || finalIe.length() < 5_000_000L) {
+            Log.w(TAG, "Validación modelo: ivector/final.ie incompleto")
+            return false
+        }
+        val graphHclr = File(dir, "graph/HCLr.fst")
+        val graphGr = File(dir, "graph/Gr.fst")
+        if (!graphHclr.exists() && !graphGr.exists()) {
+            Log.w(TAG, "Validación modelo: graph fst ausente")
+            return false
+        }
+        return true
+    }
+
+    private fun unpackAndLoadModel(appContext: Context): Model? {
+        val targetDir = File(appContext.filesDir, "vosk-model-es")
+
+        // Limpiar directorio legacy en external storage si existía de versiones previas con datos corruptos
+        try {
+            val legacyExternalDir = File(appContext.getExternalFilesDir(null), "model")
+            if (legacyExternalDir.exists()) {
+                legacyExternalDir.deleteRecursively()
+                Log.i(TAG, "Directorio legacy corrupto eliminado de externalFilesDir")
+            }
+        } catch (_: Exception) {}
+
+        val assetUuid = try {
+            appContext.assets.open("model-es/uuid").bufferedReader().use { it.readText().trim() }
+        } catch (_: Exception) { "" }
+
+        if (isModelDirValid(targetDir, assetUuid)) {
+            Log.i(TAG, "Modelo Vosk en memoria interna validado al 100%. Cargando...")
+            return try {
+                Model(targetDir.absolutePath)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error cargando Model desde targetDir existente, re-extrayendo...", e)
+                targetDir.deleteRecursively()
+                unpackFreshModel(appContext, targetDir, assetUuid)
+            }
+        }
+
+        return unpackFreshModel(appContext, targetDir, assetUuid)
+    }
+
+    private fun unpackFreshModel(appContext: Context, targetDir: File, assetUuid: String): Model? {
+        Log.i(TAG, "Extrayendo modelo Vosk desde assets a almacenamiento interno...")
+        val tmpDir = File(appContext.filesDir, "vosk-model-es.tmp")
+        try {
+            if (tmpDir.exists()) tmpDir.deleteRecursively()
+            if (targetDir.exists()) targetDir.deleteRecursively()
+            tmpDir.mkdirs()
+
+            copyAssetRecursive(appContext, "model-es", tmpDir)
+
+            if (!isModelDirValid(tmpDir, assetUuid)) {
+                Log.e(TAG, "La extracción en tmpDir no pasó la verificación de integridad")
+                tmpDir.deleteRecursively()
+                return null
+            }
+
+            if (!tmpDir.renameTo(targetDir)) {
+                tmpDir.copyRecursively(targetDir, overwrite = true)
+                tmpDir.deleteRecursively()
+            }
+
+            Log.i(TAG, "Modelo Vosk extraído y validado exitosamente en ${targetDir.absolutePath}")
+            return Model(targetDir.absolutePath)
         } catch (e: Exception) {
-            Log.e(TAG, "Error iniciando StorageService de Vosk", e)
-            isVoskModelReady.value = false
+            Log.e(TAG, "Error durante la extracción del modelo Vosk", e)
+            try { tmpDir.deleteRecursively() } catch (_: Exception) {}
+            try { targetDir.deleteRecursively() } catch (_: Exception) {}
+            return null
+        }
+    }
+
+    private fun copyAssetRecursive(context: Context, assetPath: String, destDir: File) {
+        val list = context.assets.list(assetPath) ?: return
+        destDir.mkdirs()
+        for (item in list) {
+            val childAssetPath = "$assetPath/$item"
+            val childDest = File(destDir, item)
+            val subList = context.assets.list(childAssetPath)
+            if (subList != null && subList.isNotEmpty()) {
+                copyAssetRecursive(context, childAssetPath, childDest)
+            } else {
+                context.assets.open(childAssetPath).use { input ->
+                    FileOutputStream(childDest).use { output ->
+                        input.copyTo(output, bufferSize = 64 * 1024)
+                    }
+                }
+            }
         }
     }
 
@@ -207,9 +324,15 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 val recognizer = Recognizer(model, 16000.0f)
                 voskSpeechService = SpeechService(recognizer, 16000.0f)
                 voskSpeechService?.startListening(voskListener)
-                Log.i(TAG, "Escucha continua manos libres (Vosk) iniciada: di 'Arlet' para activar comandos")
-            } catch (e: Exception) {
+                Log.i(TAG, "Escucha continua manos libres (Vosk) iniciada: di 'Arlet' o 'Ok Arlet' para activar comandos")
+            } catch (e: Throwable) {
                 Log.e(TAG, "Error al iniciar Vosk SpeechService", e)
+                try {
+                    val targetDir = File(context?.filesDir, "vosk-model-es")
+                    targetDir.deleteRecursively()
+                } catch (_: Exception) {}
+                voskModel = null
+                isVoskModelReady.value = false
             }
         }
     }
@@ -544,13 +667,23 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         val trimmed = norm.trim()
         if (trimmed.isEmpty()) return false
 
-        // Frases o inicios directos
+        // Frases o inicios directos con Ok Arlet / Arlet / Oye Arlet / Hola Arlet / Hey Arlet
         if (trimmed.startsWith("arlet") || trimmed.startsWith("harlet") ||
             trimmed.startsWith("arle") || trimmed.startsWith("ar le") ||
             trimmed.startsWith("arles") || trimmed.startsWith("arley") ||
+            trimmed.startsWith("ok arlet") || trimmed.startsWith("ok arle") ||
+            trimmed.startsWith("ok arles") || trimmed.startsWith("ok arley") ||
+            trimmed.startsWith("okay arlet") || trimmed.startsWith("okay arle") ||
+            trimmed.startsWith("okay arles") || trimmed.startsWith("okay arley") ||
+            trimmed.startsWith("okey arlet") || trimmed.startsWith("okey arle") ||
+            trimmed.startsWith("okei arlet") || trimmed.startsWith("okei arle") ||
+            trimmed.startsWith("o k arlet") || trimmed.startsWith("o k arle") ||
             trimmed.startsWith("oye arlet") || trimmed.startsWith("oye arle") ||
+            trimmed.startsWith("oye arles") || trimmed.startsWith("oye arley") ||
             trimmed.startsWith("hola arlet") || trimmed.startsWith("hola arle") ||
-            trimmed.startsWith("hey arlet") || trimmed.startsWith("ok arlet")) {
+            trimmed.startsWith("hola arles") || trimmed.startsWith("hola arley") ||
+            trimmed.startsWith("hey arlet") || trimmed.startsWith("hey arle") ||
+            trimmed.startsWith("hey arles") || trimmed.startsWith("hey arley")) {
             return true
         }
 
@@ -570,13 +703,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
     private fun isWakeWordOnly(norm: String): Boolean {
         val c = stripWakeWord(norm)
-        return c.isBlank() || c == "oye" || c == "hola" || c == "hey" || c == "ok"
+        return c.isBlank() || c == "oye" || c == "hola" || c == "hey" ||
+               c == "ok" || c == "okay" || c == "okey" || c == "okei" || c == "o k"
     }
 
     private fun stripWakeWord(norm: String): String {
         var command = norm
         val triggers = listOf(
-            "oye arlet", "oye arle", "hola arlet", "hola arle", "hey arlet", "ok arlet",
+            "okay arlet", "okay arle", "okay arles", "okay arley",
+            "okey arlet", "okey arle", "okey arles", "okey arley",
+            "okei arlet", "okei arle", "okei arles", "okei arley",
+            "o k arlet", "o k arle",
+            "ok arlet", "ok arle", "ok arles", "ok arley",
+            "oye arlet", "oye arle", "oye arles", "oye arley",
+            "hola arlet", "hola arle", "hola arles", "hola arley",
+            "hey arlet", "hey arle", "hey arles", "hey arley",
             "ar let", "ar le", "ar led", "ar les",
             "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
             "arlette", "arlety", "aleta", "aletta", "atlet", "adlet", "darlet",
@@ -951,7 +1092,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         // Limpiar "arlet" y variantes fonéticas
         var command = stripWakeWord(normalized)
 
-        if (command.isBlank() || command == "oye" || command == "hola") {
+        if (command.isBlank() || command == "oye" || command == "hola" || command == "hey" ||
+            command == "ok" || command == "okay" || command == "okey" || command == "okei") {
             mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
             isWakeWordActiveWindow.value = true
             showOverlay.value = true
