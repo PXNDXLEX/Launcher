@@ -78,6 +78,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private var voskModel: Model? = null
     private var voskSpeechService: SpeechService? = null
     private var isVoskModelInitializing = false
+    private var isContinuousRunning = false
     private var isManualPushToTalk = false
 
     // Fallback Android SpeechRecognizer (solo si Vosk no está disponible o para toque manual)
