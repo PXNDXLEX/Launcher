@@ -79,6 +79,9 @@ class MainActivity : ComponentActivity() {
 
         AppSettings.init(this)
         
+        // Inicializar persistencia de música para restaurar de inmediato la última canción y carátula
+        com.tuusuario.carlauncher.services.GlobalState.init(this)
+
         // Inicializar ArletAssistant inmediatamente para que el modelo offline cargue en segundo plano
         com.tuusuario.carlauncher.services.ArletAssistant.init(applicationContext, this)
 

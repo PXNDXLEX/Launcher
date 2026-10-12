@@ -1220,14 +1220,14 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         if (isMusicPause) {
             lastActionExecutedTime = now
-            GlobalState.mediaController?.transportControls?.pause()
+            GlobalState.pause()
             speak("Música pausada")
             return
         }
 
         if (isMusicPlay) {
             lastActionExecutedTime = now
-            GlobalState.mediaController?.transportControls?.play()
+            GlobalState.play()
             speak("Reproduciendo música")
             return
         }
