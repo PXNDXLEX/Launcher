@@ -57,7 +57,7 @@ fun ArletMicButton(
         } else {
             Toast.makeText(
                 context,
-                "Se requiere permiso de micrófono para activar a Arlet",
+                "Se requiere permiso de micrófono para activar a Sara",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -123,7 +123,7 @@ fun ArletMicButton(
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = if (isListening) Icons.Default.Mic else if (isSpeaking) Icons.Default.VolumeUp else Icons.Default.MicNone,
-                    contentDescription = "Asistente Arlet",
+                    contentDescription = "Asistente Sara",
                     tint = if (isListening || isSpeaking) arletColor else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(26.dp)
                 )
@@ -276,7 +276,7 @@ fun ArletOverlay(
                             )
                         } else {
                             Text(
-                                text = "Arlet te escucha...",
+                                text = "Sara te escucha...",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = activeColor,

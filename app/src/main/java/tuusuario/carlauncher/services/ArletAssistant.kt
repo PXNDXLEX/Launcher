@@ -707,6 +707,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     }
 
     private val wakeWordTokens = setOf(
+        "sara", "sarah", "zara", "sarita", "saras",
         "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
         "arlette", "arlety", "aleta", "aletta", "atlet", "adlet",
         "darlet", "arle", "arles", "arley", "arlez", "arler",
@@ -717,8 +718,15 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         val trimmed = norm.trim()
         if (trimmed.isEmpty()) return false
 
-        // Frases o inicios directos con Ok Arlet / Arlet / Oye Arlet / Hola Arlet / Hey Arlet
-        if (trimmed.startsWith("arlet") || trimmed.startsWith("harlet") ||
+        // Frases o inicios directos con Sara / Oye Sara / Ok Sara / Hola Sara / Hey Sara / Arlet
+        if (trimmed.startsWith("sara") || trimmed.startsWith("sarah") || trimmed.startsWith("zara") ||
+            trimmed.startsWith("oye sara") || trimmed.startsWith("oye sarah") ||
+            trimmed.startsWith("ok sara") || trimmed.startsWith("ok sarah") ||
+            trimmed.startsWith("okay sara") || trimmed.startsWith("okey sara") ||
+            trimmed.startsWith("okei sara") || trimmed.startsWith("o k sara") ||
+            trimmed.startsWith("hola sara") || trimmed.startsWith("hola sarah") ||
+            trimmed.startsWith("hey sara") || trimmed.startsWith("hey sarah") ||
+            trimmed.startsWith("arlet") || trimmed.startsWith("harlet") ||
             trimmed.startsWith("arle") || trimmed.startsWith("ar le") ||
             trimmed.startsWith("arles") || trimmed.startsWith("arley") ||
             trimmed.startsWith("ok arlet") || trimmed.startsWith("ok arle") ||
@@ -762,6 +770,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private fun stripWakeWord(norm: String): String {
         var command = norm
         val triggers = listOf(
+            "okay sara", "okey sara", "okei sara", "o k sara", "ok sara",
+            "oye sara", "hola sara", "hey sara", "sara", "sarah", "zara",
             "ocarlet", "ocarle",
             "oc arlet", "oc arle",
             "okay arlet", "okay arle", "okay arles", "okay arley",
@@ -1260,7 +1270,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         if (command.contains("quien eres") || command.contains("como te llamas")) {
             lastActionExecutedTime = now
-            speak("Soy Arlet, tu copiloto virtual para este viaje.")
+            speak("Soy Sara, tu copiloto virtual para este viaje.")
             return
         }
 

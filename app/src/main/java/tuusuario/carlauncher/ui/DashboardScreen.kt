@@ -713,12 +713,12 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                         SettingsDivider()
                     }
 
-                    // ── ASISTENTE DE VOZ ARLET ──
-                    SettingsGroupCard("Asistente de Voz Arlet") {
+                    // ── ASISTENTE DE VOZ SARA ──
+                    SettingsGroupCard("Asistente de Voz Sara") {
                         SettingsRowSwitch(
                             icon = Icons.Default.RecordVoiceOver,
-                            title = "Activación por Voz Manos Libres (\"Arlet\")",
-                            subtitle = "Escuchar continuamente y activar comandos por voz sin tocar la pantalla",
+                            title = "Activación por Voz Manos Libres (\"Sara\" / \"Oye Sara\")",
+                            subtitle = "Escuchar continuamente y activar comandos por voz diciendo 'Sara' u 'Oye Sara'",
                             checked = AppSettings.arletVoiceWakeEnabled.value,
                             onCheckedChange = { enabled ->
                                 AppSettings.setArletVoiceWakeEnabled(enabled)
@@ -735,7 +735,7 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                             title = "Probar Voz y Comandos",
                             subtitle = "Escuchar ejemplo de voz y comandos disponibles",
                             onClick = {
-                                ArletAssistant.speak("Hola, soy Arlet. Puedes decir 'Arlet comienza a grabar', 'Arlet pausa la música' o tocar mi botón en pantalla.")
+                                ArletAssistant.speak("Hola, soy Sara. Puedes decir 'Oye Sara comienza a grabar', 'Sara pon música' o tocar mi botón en pantalla.")
                             }
                         )
                     }
