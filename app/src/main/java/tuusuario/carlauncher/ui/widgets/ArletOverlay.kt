@@ -247,7 +247,7 @@ fun ArletOverlay(
                                 maxLines = 1,
                                 modifier = Modifier.clickable { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
                             )
-                        } else if (responseText.isNotBlank()) {
+                        } else if (isSpeaking && responseText.isNotBlank()) {
                             Text(
                                 text = responseText,
                                 fontSize = 12.sp,
@@ -262,6 +262,15 @@ fun ArletOverlay(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Normal,
                                 color = Color.White.copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else if (responseText.isNotBlank()) {
+                            Text(
+                                text = responseText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )

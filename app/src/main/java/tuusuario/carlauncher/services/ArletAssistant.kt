@@ -64,6 +64,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     val assistantResponse = mutableStateOf("")
     val showOverlay = mutableStateOf(false)
     val isAwaitingDisambiguation = mutableStateOf(false)
+    val isWakeWordActiveWindow = mutableStateOf(false)
     val disambiguationOptions = mutableStateListOf<PlaceResult>()
     val isVoskModelReady = mutableStateOf(false)
 
@@ -255,15 +256,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         mainHandler.removeCallbacksAndMessages(null)
 
         isManualPushToTalk = true
+        isWakeWordActiveWindow.value = true
         showOverlay.value = true
         assistantResponse.value = "Te escucho..."
         lastSpokenQuery.value = ""
         isListening.value = true
         isAwaitingDisambiguation.value = false
         disambiguationOptions.clear()
+        speechMutedUntil = 0L
+
+        mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+        mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
 
         // Si Vosk está disponible, usarlo
         if (voskSpeechService != null) {
+            voskSpeechService?.reset()
             voskSpeechService?.setPause(false)
         } else if (voskModel != null) {
             startContinuousListening()
@@ -320,6 +327,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     fun closeOverlay() {
         showOverlay.value = false
         isAwaitingDisambiguation.value = false
+        isWakeWordActiveWindow.value = false
         disambiguationOptions.clear()
         isListening.value = false
         isSpeaking.value = false
@@ -346,6 +354,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         showOverlay.value = true
         isSpeaking.value = true
         isListening.value = false
+        isWakeWordActiveWindow.value = false
         audioRms.value = 0f
         speechMutedUntil = Long.MAX_VALUE // Silencio absoluto de reconocimiento durante habla
 
@@ -500,6 +509,19 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private var lastHandledTime = 0L
     private var lastHandledText = ""
 
+    private val wakeWordTimeoutRunnable = Runnable {
+        if (isWakeWordActiveWindow.value && !isSpeaking.value) {
+            Log.i(TAG, "Ventana de escucha activa expirada sin comando.")
+            isWakeWordActiveWindow.value = false
+            isListening.value = false
+            showOverlay.value = false
+            assistantResponse.value = ""
+            lastSpokenQuery.value = ""
+            mainHandler.removeCallbacks(silenceWatchdog)
+            voskSpeechService?.reset()
+        }
+    }
+
     private val silenceWatchdog = Runnable {
         val query = lastSpokenQuery.value.trim()
         if (query.isNotBlank() && (showOverlay.value || isListening.value)) {
@@ -514,33 +536,54 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private val wakeWordTokens = setOf(
         "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
         "arlette", "arlety", "aleta", "aletta", "atlet", "adlet",
-        "darlet"
+        "darlet", "arle", "arles", "arley", "arlez", "arler",
+        "arlex", "allet", "arlec", "arlett"
     )
 
     private fun containsWakeWord(norm: String): Boolean {
         val trimmed = norm.trim()
+        if (trimmed.isEmpty()) return false
+
+        // Frases o inicios directos
         if (trimmed.startsWith("arlet") || trimmed.startsWith("harlet") ||
-            trimmed.startsWith("ar le") || trimmed.startsWith("oye arlet") ||
-            trimmed.startsWith("hola arlet") || trimmed.startsWith("hey arlet") ||
-            trimmed.startsWith("ok arlet")) {
+            trimmed.startsWith("arle") || trimmed.startsWith("ar le") ||
+            trimmed.startsWith("arles") || trimmed.startsWith("arley") ||
+            trimmed.startsWith("oye arlet") || trimmed.startsWith("oye arle") ||
+            trimmed.startsWith("hola arlet") || trimmed.startsWith("hola arle") ||
+            trimmed.startsWith("hey arlet") || trimmed.startsWith("ok arlet")) {
             return true
         }
 
         val words = trimmed.split(Regex("\\s+"))
-        return words.any { wakeWordTokens.contains(it) } ||
-               (words.size >= 2 && words[0] == "ar" && (words[1] == "le" || words[1] == "let" || words[1] == "led"))
+        if (words.any { wakeWordTokens.contains(it) }) {
+            return true
+        }
+
+        for (i in 0 until words.size - 1) {
+            if (words[i] == "ar" && (words[i + 1] == "le" || words[i + 1] == "let" || words[i + 1] == "led" || words[i + 1] == "les")) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private fun isWakeWordOnly(norm: String): Boolean {
+        val c = stripWakeWord(norm)
+        return c.isBlank() || c == "oye" || c == "hola" || c == "hey" || c == "ok"
     }
 
     private fun stripWakeWord(norm: String): String {
         var command = norm
         val triggers = listOf(
-            "oye arlet", "hola arlet", "hey arlet", "ok arlet",
-            "ar let", "ar le", "ar led",
+            "oye arlet", "oye arle", "hola arlet", "hola arle", "hey arlet", "ok arlet",
+            "ar let", "ar le", "ar led", "ar les",
             "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
-            "arlette", "arlety", "aleta", "aletta", "atlet", "adlet", "darlet"
+            "arlette", "arlety", "aleta", "aletta", "atlet", "adlet", "darlet",
+            "arles", "arley", "arlez", "arler", "arlex", "allet", "arlec", "arlett", "arle"
         )
         for (t in triggers) {
-            command = command.replace(t, " ")
+            command = command.replace(Regex("\\b$t\\b"), " ")
         }
         return command
             .replace("por favor", " ")
@@ -548,6 +591,38 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             .replace(Regex("\\s+"), " ")
             .trim()
     }
+
+    private val navTriggers = listOf(
+        // Traza / Trazar ruta
+        "traza la ruta para", "traza la ruta hacia", "traza la ruta a", "traza la ruta al",
+        "traza ruta para", "traza ruta hacia", "traza ruta a", "traza ruta al",
+        "trazar la ruta para", "trazar la ruta hacia", "trazar la ruta a", "trazar la ruta al",
+        "trazar ruta para", "trazar ruta hacia", "trazar ruta a", "trazar ruta al",
+        // Inicia / Iniciar ruta
+        "inicia la ruta para", "inicia la ruta hacia", "inicia la ruta a", "inicia la ruta al",
+        "inicia ruta para", "inicia ruta hacia", "inicia ruta a", "inicia ruta al",
+        "iniciar la ruta para", "iniciar la ruta hacia", "iniciar la ruta a", "iniciar la ruta al",
+        "iniciar ruta para", "iniciar ruta hacia", "iniciar ruta a", "iniciar ruta al",
+        // Pon / Poner ruta
+        "pon la ruta para", "pon la ruta hacia", "pon la ruta a", "pon la ruta al",
+        "pon ruta para", "pon ruta hacia", "pon ruta a", "pon ruta al",
+        // Vamos
+        "vamos para", "vamos hacia", "vamos a la", "vamos al", "vamos a",
+        // Llévame / Guíame / Conduce / Navega
+        "llevame para", "llevame hacia", "llevame al", "llevame a la", "llevame a",
+        "guiame para", "guiame hacia", "guiame al", "guiame a la", "guiame a",
+        "conduce para", "conduce hacia", "conduce a la", "conduce al", "conduce a",
+        "navega para", "navega hacia", "navega a la", "navega al", "navega a",
+        "navegar para", "navegar hacia", "navegar a",
+        // Ir / Cómo llego
+        "ir para", "ir hacia", "ir al", "ir a la", "ir a",
+        "como llego a la", "como llego al", "como llego a",
+        "como llegar a", "como voy para", "como voy a",
+        // Destino / Dirección / Rumbo
+        "rumbo a", "rumbo hacia", "rumbo para",
+        "direccion a", "direccion hacia", "direccion para",
+        "destino a", "destino"
+    )
 
     private fun isActionableCommand(norm: String): Boolean {
         val c = stripWakeWord(norm)
@@ -584,28 +659,28 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             c.contains("retrocede la cancion") || c.contains("vuelve la cancion") ||
             c == "anterior" || c == "retrocede") return true
 
-        // Navegación
-        if (c.contains("inicia ruta") || c.contains("iniciar ruta") || c.contains("inicia la ruta") ||
-            c.contains("iniciar la ruta") || c.contains("traza la ruta") || c.contains("trazar la ruta") ||
-            c.contains("traza ruta") || c.contains("trazar ruta") || c.contains("ruta para") ||
-            c.contains("ruta hacia") || c.contains("ruta a") || c.contains("vamos para") ||
-            c.contains("vamos hacia") || c.contains("vamos a") || c.contains("ir para") ||
-            c.contains("ir a") || c.contains("ir al") || c.contains("llevame") ||
-            c.contains("guiame") || c.contains("navega") || c.contains("conduce") ||
-            c.contains("pon la ruta") || c.contains("pon ruta") || c.contains("como llego") ||
-            c.contains("destino") || c.contains("rumbo a")) return true
-
         // Desambiguación si está esperando
         if (isAwaitingDisambiguation.value) {
             if (c.contains("primero") || c.contains("primera") || c.contains("segundo") ||
                 c.contains("segunda") || c.contains("tercero") || c.contains("tercera") ||
-                c.contains("uno") || c.contains("dos") || c.contains("tres")) return true
+                c.contains("uno") || c.contains("dos") || c.contains("tres") ||
+                c.contains("cancela") || c.contains("ninguno") || c.contains("ninguna")) return true
         }
 
         // Saludos y preguntas
         if (c.contains("hola") || c.contains("buenos dias") || c.contains("buenas tardes") ||
             c.contains("quien eres") || c.contains("como te llamas") || c.contains("ayuda") ||
             c.contains("que puedes hacer") || c.contains("comandos") || c.contains("gracias")) return true
+
+        // Navegación (solo si ya incluye el destino con al menos 3 letras)
+        for (trigger in navTriggers) {
+            if (c.contains(trigger)) {
+                val dest = c.substringAfter(trigger).trim()
+                if (dest.length >= 3) {
+                    return true
+                }
+            }
+        }
 
         return false
     }
@@ -624,10 +699,24 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             if (partial.isNotBlank()) {
                 val norm = normalize(partial)
                 val hasWakeWord = containsWakeWord(norm)
-                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
+                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value || isWakeWordActiveWindow.value
 
-                // SOLO responder si se dijo "Arlet" O si el usuario presionó el botón de hablar en pantalla
+                // Si no tiene wake word y no estamos en ventana activa, ignorar
                 if (!hasWakeWord && !allowWithoutWakeWord) {
+                    return
+                }
+
+                // Si el usuario dijo la palabra de activación Arlet (sola), activar de inmediato la ventana de 3.5 segundos
+                if (hasWakeWord && isWakeWordOnly(norm)) {
+                    mainHandler.removeCallbacks(silenceWatchdog)
+                    mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+                    isWakeWordActiveWindow.value = true
+                    showOverlay.value = true
+                    isListening.value = true
+                    assistantResponse.value = "Te escucho..."
+                    lastSpokenQuery.value = ""
+                    speechMutedUntil = 0L
+                    mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
                     return
                 }
 
@@ -638,11 +727,18 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     assistantResponse.value = "Te escucho..."
                 }
 
-                // Si ya se identificó un comando claro, procesarlo
+                // Si ya se identificó un comando claro, procesarlo de inmediato
                 if (isActionableCommand(norm)) {
                     mainHandler.removeCallbacks(silenceWatchdog)
+                    mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
                     handleSpeechInput(partial)
                     return
+                }
+
+                // Si estamos en ventana activa, reiniciar el temporizador de 3.5s con cada audio
+                if (isWakeWordActiveWindow.value) {
+                    mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+                    mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
                 }
 
                 // Watchdog: Si el usuario para de hablar durante 900ms, procesar lo capturado
@@ -665,9 +761,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 Log.i(TAG, "Vosk onResult: '$text'")
                 val norm = normalize(text)
                 val hasWakeWord = containsWakeWord(norm)
-                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
+                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value || isWakeWordActiveWindow.value
 
                 if (hasWakeWord || allowWithoutWakeWord) {
+                    if (isWakeWordOnly(norm)) {
+                        mainHandler.removeCallbacks(silenceWatchdog)
+                        mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+                        isWakeWordActiveWindow.value = true
+                        showOverlay.value = true
+                        isListening.value = true
+                        assistantResponse.value = "Te escucho..."
+                        lastSpokenQuery.value = ""
+                        speechMutedUntil = 0L
+                        mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
+                        return
+                    }
                     handleSpeechInput(text)
                 }
             }
@@ -686,9 +794,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             if (text.isNotBlank()) {
                 val norm = normalize(text)
                 val hasWakeWord = containsWakeWord(norm)
-                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
+                val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value || isWakeWordActiveWindow.value
 
                 if (hasWakeWord || allowWithoutWakeWord) {
+                    if (isWakeWordOnly(norm)) {
+                        mainHandler.removeCallbacks(silenceWatchdog)
+                        mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+                        isWakeWordActiveWindow.value = true
+                        showOverlay.value = true
+                        isListening.value = true
+                        assistantResponse.value = "Te escucho..."
+                        lastSpokenQuery.value = ""
+                        speechMutedUntil = 0L
+                        mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
+                        return
+                    }
                     handleSpeechInput(text)
                 }
             }
@@ -778,18 +898,37 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         val hasWakeWord = containsWakeWord(normalized)
-        val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value
+        val allowWithoutWakeWord = isManualPushToTalk || isAwaitingDisambiguation.value || isWakeWordActiveWindow.value
 
-        // Garantía estricta: No procesar órdenes si no se nombró a Arlet y no es toque manual ni desambiguación
+        // Garantía estricta: No procesar órdenes si no se nombró a Arlet y no es toque manual ni desambiguación ni ventana activa
         if (!hasWakeWord && !allowWithoutWakeWord) {
             Log.i(TAG, "Ignorando orden sin nombre de invocación Arlet: '$rawText'")
             return
         }
 
+        // Si solo se dijo el wake word (ej. "Arlet", "Oye Arlet"):
+        if (isWakeWordOnly(normalized)) {
+            Log.i(TAG, "Wake word 'Arlet' detectado. Abriendo ventana de escucha de 3.5 segundos.")
+            mainHandler.removeCallbacks(silenceWatchdog)
+            mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+            isWakeWordActiveWindow.value = true
+            showOverlay.value = true
+            isListening.value = true
+            assistantResponse.value = "Te escucho..."
+            lastSpokenQuery.value = ""
+            speechMutedUntil = 0L
+            mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
+            return
+        }
+
+        // Es un comando ejecutable: cancelar temporizadores de espera y ventana activa
+        mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+        mainHandler.removeCallbacks(silenceWatchdog)
+        isWakeWordActiveWindow.value = false
+        isManualPushToTalk = false
+
         lastHandledTime = now
         lastHandledText = normalized
-        mainHandler.removeCallbacks(silenceWatchdog)
-        isManualPushToTalk = false
 
         // Inmediatamente apagar escucha, silenciar y pausar Vosk
         isListening.value = false
@@ -813,8 +952,12 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         var command = stripWakeWord(normalized)
 
         if (command.isBlank() || command == "oye" || command == "hola") {
-            lastActionExecutedTime = now
-            speak("Dime, ¿en qué te puedo ayudar?")
+            mainHandler.removeCallbacks(wakeWordTimeoutRunnable)
+            isWakeWordActiveWindow.value = true
+            showOverlay.value = true
+            isListening.value = true
+            assistantResponse.value = "Te escucho..."
+            mainHandler.postDelayed(wakeWordTimeoutRunnable, 3500)
             return
         }
 
@@ -891,38 +1034,6 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
 
         // ── COMANDOS DE NAVEGACIÓN A LUGARES GUARDADOS O MAPA ────────────────
-        val navTriggers = listOf(
-            // Traza / Trazar ruta
-            "traza la ruta para", "traza la ruta hacia", "traza la ruta a", "traza la ruta al",
-            "traza ruta para", "traza ruta hacia", "traza ruta a", "traza ruta al",
-            "trazar la ruta para", "trazar la ruta hacia", "trazar la ruta a", "trazar la ruta al",
-            "trazar ruta para", "trazar ruta hacia", "trazar ruta a", "trazar ruta al",
-            // Inicia / Iniciar ruta
-            "inicia la ruta para", "inicia la ruta hacia", "inicia la ruta a", "inicia la ruta al",
-            "inicia ruta para", "inicia ruta hacia", "inicia ruta a", "inicia ruta al",
-            "iniciar la ruta para", "iniciar la ruta hacia", "iniciar la ruta a", "iniciar la ruta al",
-            "iniciar ruta para", "iniciar ruta hacia", "iniciar ruta a", "iniciar ruta al",
-            // Pon / Poner ruta
-            "pon la ruta para", "pon la ruta hacia", "pon la ruta a", "pon la ruta al",
-            "pon ruta para", "pon ruta hacia", "pon ruta a", "pon ruta al",
-            // Vamos
-            "vamos para", "vamos hacia", "vamos a la", "vamos al", "vamos a",
-            // Llévame / Guíame / Conduce / Navega
-            "llevame para", "llevame hacia", "llevame al", "llevame a la", "llevame a",
-            "guiame para", "guiame hacia", "guiame al", "guiame a la", "guiame a",
-            "conduce para", "conduce hacia", "conduce a la", "conduce al", "conduce a",
-            "navega para", "navega hacia", "navega a la", "navega al", "navega a",
-            "navegar para", "navegar hacia", "navegar a",
-            // Ir / Cómo llego
-            "ir para", "ir hacia", "ir al", "ir a la", "ir a",
-            "como llego a la", "como llego al", "como llego a",
-            "como llegar a", "como voy para", "como voy a",
-            // Destino / Dirección / Rumbo
-            "rumbo a", "rumbo hacia", "rumbo para",
-            "direccion a", "direccion hacia", "direccion para",
-            "destino a", "destino"
-        )
-
         var destinationQuery: String? = null
         for (trigger in navTriggers) {
             if (command.contains(trigger)) {
@@ -1128,6 +1239,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
      */
     fun selectDestination(place: PlaceResult) {
         isAwaitingDisambiguation.value = false
+        isWakeWordActiveWindow.value = false
         disambiguationOptions.clear()
 
         val destPoint = Point.fromLngLat(place.lon, place.lat)
