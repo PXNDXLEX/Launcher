@@ -3,6 +3,7 @@ package com.tuusuario.carlauncher.services
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -315,6 +316,15 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             // Tono y velocidad naturales (1.0f) para evitar efecto robótico
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
+            try {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                tts?.setAudioAttributes(audioAttributes)
+            } catch (e: Exception) {
+                Log.w(TAG, "No se pudo asignar AudioAttributes a TTS", e)
+            }
             isTtsInitialized = true
             Log.i(TAG, "TextToSpeech inicializado correctamente")
         } else {
@@ -854,7 +864,9 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             c == "pausa" || c == "pausar") return true
 
         if (c.contains("reproduce") || c.contains("reproducir") || c.contains("continua la musica") ||
-            c.contains("pon musica") || c.contains("sigue la musica") || c == "play") return true
+            c.contains("pon musica") || c.contains("sigue la musica") || c == "play" ||
+            c.contains("dale play") || c.contains("toca musica") || c.contains("pon la musica") ||
+            c.contains("reanuda la musica") || c == "musica") return true
 
         if (c.contains("siguiente cancion") || c.contains("pasa la cancion") || c.contains("cambia la cancion") ||
             c.contains("siguiente pista") || c.contains("proxima cancion") || c.contains("otra cancion") ||
@@ -1207,7 +1219,10 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         val isMusicPlay = command.contains("reproduce") || command.contains("reproducir") ||
                           command.contains("continua la musica") || command.contains("pon musica") ||
-                          command.contains("sigue la musica") || command == "play"
+                          command.contains("sigue la musica") || command == "play" ||
+                          command.contains("dale play") || command.contains("toca musica") ||
+                          command.contains("pon la musica") || command.contains("reanuda la musica") ||
+                          command == "musica"
 
         val isMusicNext = command.contains("siguiente cancion") || command.contains("pasa la cancion") ||
                           command.contains("cambia la cancion") || command.contains("siguiente pista") ||
@@ -1227,22 +1242,59 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         if (isMusicPlay) {
             lastActionExecutedTime = now
-            GlobalState.play()
-            speak("Reproduciendo música")
+            if (GlobalState.isPlaying.value) {
+                speak("La música ya se está reproduciendo")
+                return
+            }
+
+            if (GlobalState.mediaController != null) {
+                // Reproductor activo y caliente: reanudación instantánea
+                GlobalState.play()
+                speak("Reproduciendo")
+            } else {
+                // Reproductor cerrado en segundo plano:
+                // Para evitar que el AudioFocus de TTS bloquee o mate el arranque en frío del reproductor de música,
+                // hablamos una confirmación corta ("Reproduciendo") y disparamos GlobalState.play()
+                // exactamente en el callback onDone una vez liberado el foco de audio.
+                var playTriggered = false
+                val triggerPlay = {
+                    if (!playTriggered) {
+                        playTriggered = true
+                        GlobalState.play()
+                    }
+                }
+
+                speak("Reproduciendo") {
+                    triggerPlay()
+                }
+
+                // Respaldo de seguridad por si TTS tarda o no reporta onDone
+                mainHandler.postDelayed({
+                    triggerPlay()
+                }, 850)
+
+                // Segundo pulso de respaldo tras 1.8s si el reproductor aún no inicia reproducción
+                mainHandler.postDelayed({
+                    if (!GlobalState.isPlaying.value) {
+                        Log.i(TAG, "Reintentando enviar play a reproductor tras arranque en frío")
+                        GlobalState.play()
+                    }
+                }, 1800)
+            }
             return
         }
 
         if (isMusicNext) {
             lastActionExecutedTime = now
             GlobalState.skipToNext()
-            speak("Siguiente canción")
+            speak("Siguiente")
             return
         }
 
         if (isMusicPrev) {
             lastActionExecutedTime = now
             GlobalState.skipToPrevious()
-            speak("Canción anterior")
+            speak("Anterior")
             return
         }
 

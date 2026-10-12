@@ -290,26 +290,53 @@ object GlobalState {
         mediaController?.transportControls?.seekTo(positionMs)
     }
 
+    private fun getValidContext(): Context? {
+        return appContext ?: ArletAssistant.context ?: com.tuusuario.carlauncher.MainActivity.instance?.applicationContext
+    }
+
     private fun wakeUpAndPlayLastPlayer() {
-        val ctx = appContext ?: return
+        val ctx = getValidContext() ?: return
         val pkg = lastPackageName
         Log.i(TAG, "Despertando última app de música: pkg='$pkg'")
 
-        // 1. Enviar ACTION_MEDIA_BUTTON dirigido directamente al paquete guardado
+        // 1. Enviar ACTION_MEDIA_BUTTON con FLAG_RECEIVER_FOREGROUND a los receptores registrados del paquete
         if (!pkg.isNullOrBlank()) {
             try {
-                val downIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                    setPackage(pkg)
-                    putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-                }
-                ctx.sendOrderedBroadcast(downIntent, null)
+                val queryIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply { setPackage(pkg) }
+                val receivers = ctx.packageManager.queryBroadcastReceivers(queryIntent, 0)
+                if (receivers.isNotEmpty()) {
+                    for (resolveInfo in receivers) {
+                        val comp = ComponentName(resolveInfo.activityInfo.packageName, resolveInfo.activityInfo.name)
+                        val down = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                            component = comp
+                            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                            putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
+                        }
+                        ctx.sendOrderedBroadcast(down, null)
+                        val up = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                            component = comp
+                            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                            putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+                        }
+                        ctx.sendOrderedBroadcast(up, null)
+                    }
+                    Log.i(TAG, "Enviado ACTION_MEDIA_BUTTON con component a ${receivers.size} receivers de $pkg")
+                } else {
+                    val downIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                        setPackage(pkg)
+                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                        putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
+                    }
+                    ctx.sendOrderedBroadcast(downIntent, null)
 
-                val upIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                    setPackage(pkg)
-                    putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+                    val upIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                        setPackage(pkg)
+                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                        putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+                    }
+                    ctx.sendOrderedBroadcast(upIntent, null)
+                    Log.i(TAG, "Enviado ACTION_MEDIA_BUTTON explícito a $pkg")
                 }
-                ctx.sendOrderedBroadcast(upIntent, null)
-                Log.i(TAG, "Enviado ACTION_MEDIA_BUTTON explícito a $pkg")
             } catch (e: Exception) {
                 Log.w(TAG, "Error enviando intent de media button a $pkg", e)
             }
@@ -328,7 +355,7 @@ object GlobalState {
     }
 
     private fun dispatchMediaKey(keyCode: Int) {
-        val ctx = appContext ?: return
+        val ctx = getValidContext() ?: return
         try {
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
             if (am != null) {
