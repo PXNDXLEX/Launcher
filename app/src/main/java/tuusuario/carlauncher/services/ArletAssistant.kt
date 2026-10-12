@@ -127,26 +127,21 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         }
     }
 
-    private fun isModelDirValid(dir: File, expectedUuid: String): Boolean {
+    private fun isModelDirValid(dir: File): Boolean {
         if (!dir.exists() || !dir.isDirectory) return false
-        val uuidFile = File(dir, "uuid")
-        if (!uuidFile.exists() || (expectedUuid.isNotBlank() && uuidFile.readText().trim() != expectedUuid)) {
-            Log.d(TAG, "Validación modelo: uuid no coincide o ausente")
-            return false
-        }
         val cmvnFile = File(dir, "ivector/global_cmvn.stats")
-        if (!cmvnFile.exists() || cmvnFile.length() < 500L) {
-            Log.w(TAG, "Validación modelo: global_cmvn.stats inválido o corrupto")
+        if (!cmvnFile.exists() || cmvnFile.length() < 100L) {
+            Log.w(TAG, "Validación modelo: global_cmvn.stats inválido o ausente (${cmvnFile.length()} bytes)")
             return false
         }
         val finalMdl = File(dir, "am/final.mdl")
-        if (!finalMdl.exists() || finalMdl.length() < 10_000_000L) {
-            Log.w(TAG, "Validación modelo: am/final.mdl incompleto")
+        if (!finalMdl.exists() || finalMdl.length() < 5_000_000L) {
+            Log.w(TAG, "Validación modelo: am/final.mdl ausente o incompleto (${finalMdl.length()} bytes)")
             return false
         }
         val finalIe = File(dir, "ivector/final.ie")
-        if (!finalIe.exists() || finalIe.length() < 5_000_000L) {
-            Log.w(TAG, "Validación modelo: ivector/final.ie incompleto")
+        if (!finalIe.exists() || finalIe.length() < 1_000_000L) {
+            Log.w(TAG, "Validación modelo: ivector/final.ie ausente o incompleto (${finalIe.length()} bytes)")
             return false
         }
         val graphHclr = File(dir, "graph/HCLr.fst")
@@ -161,12 +156,12 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private fun unpackAndLoadModel(appContext: Context): Model? {
         val targetDir = File(appContext.filesDir, "vosk-model-es")
 
-        // Limpiar directorio legacy en external storage si existía de versiones previas con datos corruptos
+        // Limpiar directorio legacy en external storage si existía de versiones previas
         try {
             val legacyExternalDir = File(appContext.getExternalFilesDir(null), "model")
             if (legacyExternalDir.exists()) {
                 legacyExternalDir.deleteRecursively()
-                Log.i(TAG, "Directorio legacy corrupto eliminado de externalFilesDir")
+                Log.i(TAG, "Directorio legacy eliminado de externalFilesDir")
             }
         } catch (_: Exception) {}
 
@@ -174,7 +169,14 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             appContext.assets.open("model-es/uuid").bufferedReader().use { it.readText().trim() }
         } catch (_: Exception) { "" }
 
-        if (isModelDirValid(targetDir, assetUuid)) {
+        val localUuid = try {
+            val f = File(targetDir, "uuid")
+            if (f.exists()) f.readText().trim() else ""
+        } catch (_: Exception) { "" }
+
+        val needsUpdate = assetUuid.isNotBlank() && localUuid.isNotBlank() && assetUuid != localUuid
+
+        if (!needsUpdate && isModelDirValid(targetDir)) {
             Log.i(TAG, "Modelo Vosk en memoria interna validado al 100%. Cargando...")
             return try {
                 Model(targetDir.absolutePath)
@@ -198,10 +200,16 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
             copyAssetRecursive(appContext, "model-es", tmpDir)
 
-            if (!isModelDirValid(tmpDir, assetUuid)) {
-                Log.e(TAG, "La extracción en tmpDir no pasó la verificación de integridad")
+            if (!isModelDirValid(tmpDir)) {
+                Log.e(TAG, "La extracción en tmpDir no contiene los archivos esenciales del modelo")
                 tmpDir.deleteRecursively()
                 return null
+            }
+
+            if (assetUuid.isNotBlank()) {
+                try {
+                    File(tmpDir, "uuid").writeText(assetUuid)
+                } catch (_: Exception) {}
             }
 
             if (!tmpDir.renameTo(targetDir)) {
@@ -220,20 +228,27 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     }
 
     private fun copyAssetRecursive(context: Context, assetPath: String, destDir: File) {
-        val list = context.assets.list(assetPath) ?: return
-        destDir.mkdirs()
-        for (item in list) {
-            val childAssetPath = "$assetPath/$item"
-            val childDest = File(destDir, item)
-            val subList = context.assets.list(childAssetPath)
-            if (subList != null && subList.isNotEmpty()) {
-                copyAssetRecursive(context, childAssetPath, childDest)
-            } else {
-                context.assets.open(childAssetPath).use { input ->
-                    FileOutputStream(childDest).use { output ->
+        val list = context.assets.list(assetPath)
+        if (list.isNullOrEmpty()) {
+            // Es un archivo leaf: abrir y copiar
+            try {
+                context.assets.open(assetPath).use { input ->
+                    destDir.parentFile?.mkdirs()
+                    FileOutputStream(destDir).use { output ->
                         input.copyTo(output, bufferSize = 64 * 1024)
                     }
                 }
+            } catch (_: Exception) {
+                // Si falla al abrir como archivo, asegurarse de que exista como directorio
+                destDir.mkdirs()
+            }
+        } else {
+            // Es un directorio
+            destDir.mkdirs()
+            for (item in list) {
+                val childAssetPath = if (assetPath.isEmpty()) item else "$assetPath/$item"
+                val childDest = File(destDir, item)
+                copyAssetRecursive(context, childAssetPath, childDest)
             }
         }
     }
@@ -316,7 +331,15 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             Log.w(TAG, "No hay permiso de microfono para escucha continua")
             return
         }
-        val model = voskModel ?: return
+        val model = voskModel
+        if (model == null) {
+            Log.d(TAG, "voskModel aún no está listo al llamar startContinuousListening")
+            val ctx = context
+            if (ctx != null && !isVoskModelInitializing) {
+                initVosk(ctx)
+            }
+            return
+        }
         if (voskSpeechService != null) return
 
         mainHandler.post {
@@ -324,6 +347,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 val recognizer = Recognizer(model, 16000.0f)
                 voskSpeechService = SpeechService(recognizer, 16000.0f)
                 voskSpeechService?.startListening(voskListener)
+                isContinuousRunning = true
                 Log.i(TAG, "Escucha continua manos libres (Vosk) iniciada: di 'Arlet' o 'Ok Arlet' para activar comandos")
             } catch (e: Throwable) {
                 Log.e(TAG, "Error al iniciar Vosk SpeechService", e)
@@ -332,6 +356,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                     targetDir.deleteRecursively()
                 } catch (_: Exception) {}
                 voskModel = null
+                voskSpeechService = null
+                isContinuousRunning = false
                 isVoskModelReady.value = false
             }
         }
@@ -343,6 +369,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
                 voskSpeechService?.stop()
                 voskSpeechService?.shutdown()
                 voskSpeechService = null
+                isContinuousRunning = false
             } catch (_: Exception) {}
         }
     }
@@ -398,8 +425,30 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         } else if (voskModel != null) {
             startContinuousListening()
         } else {
-            // Fallback a Android SpeechRecognizer
-            startAndroidRecognitionSession()
+            if (isVoskModelInitializing) {
+                assistantResponse.value = "Iniciando Arlet, un momento..."
+                val ctx = context
+                if (ctx != null) {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        var waited = 0
+                        while (voskModel == null && waited < 50) {
+                            kotlinx.coroutines.delay(100)
+                            waited++
+                        }
+                        mainHandler.post {
+                            if (voskModel != null) {
+                                triggerManualListening()
+                            } else {
+                                startAndroidRecognitionSession()
+                            }
+                        }
+                    }
+                }
+            } else {
+                val ctx = context
+                if (ctx != null) initVosk(ctx)
+                startAndroidRecognitionSession()
+            }
         }
     }
 
@@ -660,7 +709,7 @@ object ArletAssistant : TextToSpeech.OnInitListener {
         "arlet", "arleth", "arlete", "harlet", "harleth", "arled",
         "arlette", "arlety", "aleta", "aletta", "atlet", "adlet",
         "darlet", "arle", "arles", "arley", "arlez", "arler",
-        "arlex", "allet", "arlec", "arlett"
+        "arlex", "allet", "arlec", "arlett", "ocarlet", "ocarle"
     )
 
     private fun containsWakeWord(norm: String): Boolean {
@@ -678,6 +727,8 @@ object ArletAssistant : TextToSpeech.OnInitListener {
             trimmed.startsWith("okey arlet") || trimmed.startsWith("okey arle") ||
             trimmed.startsWith("okei arlet") || trimmed.startsWith("okei arle") ||
             trimmed.startsWith("o k arlet") || trimmed.startsWith("o k arle") ||
+            trimmed.startsWith("oc arlet") || trimmed.startsWith("oc arle") ||
+            trimmed.startsWith("ocarlet") || trimmed.startsWith("ocarle") ||
             trimmed.startsWith("oye arlet") || trimmed.startsWith("oye arle") ||
             trimmed.startsWith("oye arles") || trimmed.startsWith("oye arley") ||
             trimmed.startsWith("hola arlet") || trimmed.startsWith("hola arle") ||
@@ -704,12 +755,14 @@ object ArletAssistant : TextToSpeech.OnInitListener {
     private fun isWakeWordOnly(norm: String): Boolean {
         val c = stripWakeWord(norm)
         return c.isBlank() || c == "oye" || c == "hola" || c == "hey" ||
-               c == "ok" || c == "okay" || c == "okey" || c == "okei" || c == "o k"
+               c == "ok" || c == "okay" || c == "okey" || c == "okei" || c == "o k" || c == "oc"
     }
 
     private fun stripWakeWord(norm: String): String {
         var command = norm
         val triggers = listOf(
+            "ocarlet", "ocarle",
+            "oc arlet", "oc arle",
             "okay arlet", "okay arle", "okay arles", "okay arley",
             "okey arlet", "okey arle", "okey arles", "okey arley",
             "okei arlet", "okei arle", "okei arles", "okei arley",
@@ -957,6 +1010,13 @@ object ArletAssistant : TextToSpeech.OnInitListener {
 
         override fun onError(exception: Exception) {
             Log.w(TAG, "Vosk error: ${exception.message}")
+            isContinuousRunning = false
+            voskSpeechService = null
+            mainHandler.postDelayed({
+                if (hasMicrophonePermission() && AppSettings.arletVoiceWakeEnabled.value) {
+                    startContinuousListening()
+                }
+            }, 2000)
         }
 
         override fun onTimeout() {}

@@ -79,6 +79,9 @@ class MainActivity : ComponentActivity() {
 
         AppSettings.init(this)
         
+        // Inicializar ArletAssistant inmediatamente para que el modelo offline cargue en segundo plano
+        com.tuusuario.carlauncher.services.ArletAssistant.init(applicationContext, this)
+
         // Limpiar rutas antiguas de la papelera
         com.tuusuario.carlauncher.services.RouteTracker.init(this)
         com.tuusuario.carlauncher.services.RouteTracker.cleanupOldTrash()
