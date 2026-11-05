@@ -187,15 +187,18 @@ fun NavigationMap(
     isDarkMode: Boolean = true,
     isVisible: Boolean = true,
     startOverlayPadding: Dp = 0.dp,
-    endOverlayPadding: Dp = 0.dp
+    endOverlayPadding: Dp = 0.dp,
+    bottomOverlayPadding: Dp = 0.dp
 ) {
     val context         = LocalContext.current
     val density         = LocalDensity.current
     val isVisibleState  = rememberUpdatedState(isVisible)
     val leftInsetPx     = with(density) { startOverlayPadding.toPx().toDouble() }
     val rightInsetPx    = with(density) { endOverlayPadding.toPx().toDouble() }
+    val bottomInsetPx   = with(density) { bottomOverlayPadding.toPx().toDouble() }
     val leftInsetRef    = rememberUpdatedState(leftInsetPx)
     val rightInsetRef   = rememberUpdatedState(rightInsetPx)
+    val bottomInsetRef  = rememberUpdatedState(bottomInsetPx)
 
     val mockLocationProvider = remember { MockLocationProvider() }
     val lifecycleOwner  = LocalLifecycleOwner.current
@@ -847,7 +850,7 @@ fun NavigationMap(
     }
 
     // ── Sincronizar visibilidad e insets CarPlay sin recrear el MapView ──────
-    LaunchedEffect(isVisible, leftInsetPx, rightInsetPx, mapReady) {
+    LaunchedEffect(isVisible, leftInsetPx, rightInsetPx, bottomInsetPx, mapReady) {
         if (!mapReady) return@LaunchedEffect
         mapView.visibility = if (isVisible) android.view.View.VISIBLE else android.view.View.INVISIBLE
         if (isVisible) {
@@ -866,7 +869,7 @@ fun NavigationMap(
                         .pitch(68.0)
                         .zoom(18.5)
                         .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                        .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetPx, 0.0, rightInsetPx))
+                        .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetPx, bottomInsetPx, rightInsetPx))
                         .build()
                 )
                 vp.transitionTo(
@@ -1340,11 +1343,15 @@ fun NavigationMap(
             }
         )
 
-        // ── Contenedor de controles HUD (respeta paneles laterales CarPlay) ──
+        // ── Contenedor de controles HUD (respeta paneles laterales e inferiores CarPlay) ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = startOverlayPadding, end = endOverlayPadding)
+                .padding(
+                    start = startOverlayPadding,
+                    end = endOverlayPadding,
+                    bottom = bottomOverlayPadding
+                )
         ) {
         // ── Barra de búsqueda (oculta en modo ruta) ──────────────────────────
         AnimatedVisibility(

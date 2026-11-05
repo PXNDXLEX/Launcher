@@ -159,21 +159,26 @@ private fun VehicleShowcaseCard(
     onOpenSettings: () -> Unit
 ) {
     val palette = LocalBentoPalette.current
+    val context = LocalContext.current
     val customCarPath = AppSettings.customHomeCarPhotoPath.value
-    var customCarBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    val carScale = AppSettings.homeCarScale.value
+    var carBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
+    // Cargar y recortar márgenes transparentes automáticamente en segundo plano
+    // para que cualquier PNG del auto aproveche al máximo el espacio disponible
     LaunchedEffect(customCarPath) {
-        if (customCarPath.isNotBlank()) {
-            customCarBitmap = withContext(Dispatchers.IO) {
-                try {
+        carBitmap = withContext(Dispatchers.IO) {
+            try {
+                val rawBmp = if (customCarPath.isNotBlank()) {
                     val f = File(customCarPath)
-                    if (f.exists()) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
-                } catch (_: Exception) {
-                    null
+                    if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
+                } else {
+                    BitmapFactory.decodeResource(context.resources, R.drawable.car_hero_kia_rio)
                 }
+                rawBmp?.let { trimTransparentBounds(it).asImageBitmap() }
+            } catch (_: Exception) {
+                null
             }
-        } else {
-            customCarBitmap = null
         }
     }
 
@@ -184,37 +189,25 @@ private fun VehicleShowcaseCard(
         shadowElevation = if (palette.isDark) 0.dp else 4.dp,
         border = androidx.compose.foundation.BorderStroke(1.dp, palette.cardBorder)
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 22.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
-            // ── FILA SUPERIOR: Reloj grande a la izquierda + Emblema Vehículo a la derecha ──
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                IsolatedClockHeader()
-                VehicleIdentityBadge(onClick = onOpenSettings)
-            }
-
-            // ── CENTRO: Imagen fija del Kia Rio amarillo con sombra de contacto realista ──
+            // ── CAPA CENTRAL AMPLIA: Auto protagonista (aprovecha el espacio central entre reloj y emblema) ──
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .fillMaxSize()
+                    .padding(top = 38.dp, bottom = 68.dp),
                 contentAlignment = Alignment.Center
             ) {
                 // Sombra elíptica suave bajo los neumáticos
                 Canvas(
                     modifier = Modifier
-                        .fillMaxWidth(0.78f)
-                        .height(34.dp)
+                        .fillMaxWidth(0.84f)
+                        .height(36.dp)
                         .align(Alignment.BottomCenter)
-                        .offset(y = (-6).dp)
+                        .offset(y = (-2).dp)
                 ) {
                     drawOval(
                         brush = Brush.radialGradient(
@@ -230,13 +223,17 @@ private fun VehicleShowcaseCard(
                     )
                 }
 
-                if (customCarBitmap != null) {
+                if (carBitmap != null) {
                     Image(
-                        bitmap = customCarBitmap!!,
+                        bitmap = carBitmap!!,
                         contentDescription = "Vehículo",
                         modifier = Modifier
-                            .fillMaxHeight(0.95f)
-                            .fillMaxWidth(0.90f),
+                            .fillMaxWidth(0.92f)
+                            .fillMaxHeight(0.96f)
+                            .graphicsLayer {
+                                scaleX = carScale
+                                scaleY = carScale
+                            },
                         contentScale = ContentScale.Fit
                     )
                 } else {
@@ -244,18 +241,35 @@ private fun VehicleShowcaseCard(
                         painter = painterResource(id = R.drawable.car_hero_kia_rio),
                         contentDescription = "Kia Rio Amarillo",
                         modifier = Modifier
+                            .fillMaxWidth(0.92f)
                             .fillMaxHeight(0.96f)
-                            .fillMaxWidth(0.92f),
+                            .graphicsLayer {
+                                scaleX = carScale
+                                scaleY = carScale
+                            },
                         contentScale = ContentScale.Fit
                     )
                 }
+            }
+
+            // ── FILA SUPERIOR: Reloj grande a la izquierda + Emblema Vehículo a la derecha ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                IsolatedClockHeader()
+                VehicleIdentityBadge(onClick = onOpenSettings)
             }
 
             // ── FILA INFERIOR: Pastilla Velocímetro GPS (tocar = abre 18 Velocímetros) + Clima Doble ──
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(78.dp),
+                    .height(72.dp)
+                    .align(Alignment.BottomCenter),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 HomeGpsSpeedPill(
@@ -273,6 +287,53 @@ private fun VehicleShowcaseCard(
             }
         }
     }
+}
+
+/**
+ * Elimina márgenes transparentes sobrantes alrededor de PNGs recortados de autos
+ * para que la carrocería ocupe todo el ancho/alto visual disponible.
+ */
+private fun trimTransparentBounds(src: android.graphics.Bitmap): android.graphics.Bitmap {
+    if (!src.hasAlpha()) return src
+    val w = src.width
+    val h = src.height
+    if (w <= 16 || h <= 16) return src
+
+    val pixels = IntArray(w * h)
+    src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+    var minX = w
+    var minY = h
+    var maxX = -1
+    var maxY = -1
+
+    for (y in 0 until h) {
+        val rowOffset = y * w
+        for (x in 0 until w) {
+            val alpha = (pixels[rowOffset + x] ushr 24) and 0xFF
+            if (alpha > 14) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
+    }
+
+    if (maxX <= minX || maxY <= minY) return src
+
+    val padX = ((maxX - minX) * 0.02f).toInt()
+    val padY = ((maxY - minY) * 0.02f).toInt()
+    val cropLeft = (minX - padX).coerceAtLeast(0)
+    val cropTop = (minY - padY).coerceAtLeast(0)
+    val cropRight = (maxX + padX).coerceAtMost(w - 1)
+    val cropBottom = (maxY + padY).coerceAtMost(h - 1)
+
+    val cropW = cropRight - cropLeft + 1
+    val cropH = cropBottom - cropTop + 1
+    if (cropW >= w * 0.96f && cropH >= h * 0.96f) return src
+
+    return android.graphics.Bitmap.createBitmap(src, cropLeft, cropTop, cropW, cropH)
 }
 
 @Composable
@@ -1287,7 +1348,7 @@ fun CleanBentoMusicCard(
 }
 
 @Composable
-private fun ExpandedMusicModal(onDismiss: () -> Unit) {
+internal fun ExpandedMusicModal(onDismiss: () -> Unit) {
     val palette = LocalBentoPalette.current
     val songTitle = GlobalState.songTitle.value
     val songArtist = GlobalState.songArtist.value
@@ -1408,10 +1469,11 @@ private fun ExpandedMusicModal(onDismiss: () -> Unit) {
     }
 }
 
-private fun formatDurationMs(ms: Long): String {
+internal fun formatDurationMs(ms: Long): String {
     if (ms <= 0L) return "00:00"
     val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
     val minutes = totalSeconds / 60L
     val seconds = totalSeconds % 60L
     return "%02d:%02d".format(minutes, seconds)
 }
+

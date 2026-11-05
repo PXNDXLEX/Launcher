@@ -31,6 +31,7 @@ object AppSettings {
     val carModelName = mutableStateOf("RIO STYLUS")
     val carYearOrPlate = mutableStateOf("AD513IM")
     val customHomeCarPhotoPath = mutableStateOf("") // Vacío = usa Kia Rio amarillo integrado
+    val homeCarScale = mutableStateOf(1.14f) // Escala visual del auto en la tarjeta de Inicio
 
     // Custom Speedometer settings
     val customSpeedoShape = mutableStateOf("ARC")
@@ -75,6 +76,7 @@ object AppSettings {
         carModelName.value = p.getString("carModelName", "RIO STYLUS") ?: "RIO STYLUS"
         carYearOrPlate.value = p.getString("carYearOrPlate", "AD513IM") ?: "AD513IM"
         customHomeCarPhotoPath.value = p.getString("customHomeCarPhotoPath", "") ?: ""
+        homeCarScale.value = p.getFloat("homeCarScale", 1.14f)
 
         if (autoThemeByTime.value) {
             val calendar = java.util.Calendar.getInstance()
@@ -195,6 +197,11 @@ object AppSettings {
     fun setCustomHomeCarPhotoPath(path: String) {
         customHomeCarPhotoPath.value = path
         prefs?.edit()?.putString("customHomeCarPhotoPath", path)?.apply()
+    }
+
+    fun setHomeCarScale(scale: Float) {
+        homeCarScale.value = scale
+        prefs?.edit()?.putFloat("homeCarScale", scale)?.apply()
     }
 
     fun setMapDarkMode(isDark: Boolean) {

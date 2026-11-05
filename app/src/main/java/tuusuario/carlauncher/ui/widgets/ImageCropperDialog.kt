@@ -37,7 +37,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
-enum class CropShape { CIRCLE, SQUARE }
+enum class CropShape { CIRCLE, SQUARE, WIDE }
 
 /**
  * Diálogo de recorte de imagen con vista previa, zoom, arrastre, y recorte circular/cuadrado.
@@ -118,10 +118,30 @@ fun ImageCropperDialog(
                         Text("Nota: Los GIFs se usarán completos para mantener la animación.", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
                     }
                     
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        FilterChip(selected = cropShape == CropShape.CIRCLE, onClick = { cropShape = CropShape.CIRCLE }, label = { Text("Círculo") }, leadingIcon = { Icon(Icons.Default.Circle, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        FilterChip(selected = cropShape == CropShape.SQUARE, onClick = { cropShape = CropShape.SQUARE }, label = { Text("Cuadrado") }, leadingIcon = { Icon(Icons.Default.CropSquare, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                        FilterChip(selected = cropShape == CropShape.WIDE, onClick = { cropShape = CropShape.WIDE }, label = { Text("Auto 16:10", fontSize = 11.sp) }, leadingIcon = { Icon(Icons.Default.Crop169, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                        FilterChip(selected = cropShape == CropShape.CIRCLE, onClick = { cropShape = CropShape.CIRCLE }, label = { Text("Círculo", fontSize = 11.sp) }, leadingIcon = { Icon(Icons.Default.Circle, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                        FilterChip(selected = cropShape == CropShape.SQUARE, onClick = { cropShape = CropShape.SQUARE }, label = { Text("Cuadrado", fontSize = 11.sp) }, leadingIcon = { Icon(Icons.Default.CropSquare, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
+                    }
+
+                    if (initialCropShape == CropShape.WIDE && sourceAndroidBitmap != null && !isGif) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedButton(
+                            onClick = {
+                                if (!isProcessing) {
+                                    isProcessing = true
+                                    val saved = saveOriginalPng(context, sourceAndroidBitmap!!, outputFileName)
+                                    isProcessing = false
+                                    if (saved != null) onCropped(saved)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF67E8F9))
+                        ) {
+                            Icon(Icons.Default.AutoFixHigh, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Usar imagen completa sin recortar", fontSize = 12.sp)
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -186,14 +206,23 @@ fun ImageCropperDialog(
                         if (sourceBitmap != null) {
                             Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                                 val canvasSize = size
-                                val cropSize = minOf(canvasSize.width, canvasSize.height) * 0.8f
+                                val cropW = if (cropShape == CropShape.WIDE) {
+                                    minOf(canvasSize.width * 0.88f, canvasSize.height * 0.84f * 1.6f)
+                                } else {
+                                    minOf(canvasSize.width, canvasSize.height) * 0.8f
+                                }
+                                val cropH = if (cropShape == CropShape.WIDE) cropW / 1.6f else cropW
                                 val cropCenter = Offset(canvasSize.width / 2f, canvasSize.height / 2f)
 
                                 val img = sourceBitmap!!
                                 val imgW = img.width.toFloat()
                                 val imgH = img.height.toFloat()
 
-                                val baseScale = cropSize / minOf(imgW, imgH)
+                                val baseScale = if (cropShape == CropShape.WIDE) {
+                                    minOf(cropW / imgW, cropH / imgH)
+                                } else {
+                                    cropW / minOf(imgW, imgH)
+                                }
                                 val finalScale = baseScale * scale
                                 val drawW = imgW * finalScale
                                 val drawH = imgH * finalScale
@@ -203,20 +232,21 @@ fun ImageCropperDialog(
 
                                 drawImage(img, dstOffset = IntOffset(imgLeft.toInt(), imgTop.toInt()), dstSize = IntSize(drawW.toInt(), drawH.toInt()))
 
+                                val cropRect = Rect(cropCenter.x - cropW / 2f, cropCenter.y - cropH / 2f, cropCenter.x + cropW / 2f, cropCenter.y + cropH / 2f)
                                 val cropPath = Path().apply {
                                     if (cropShape == CropShape.CIRCLE) {
-                                        addOval(Rect(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f, cropCenter.x + cropSize / 2f, cropCenter.y + cropSize / 2f))
+                                        addOval(cropRect)
                                     } else {
-                                        addRect(Rect(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f, cropCenter.x + cropSize / 2f, cropCenter.y + cropSize / 2f))
+                                        addRect(cropRect)
                                     }
                                 }
 
                                 clipPath(cropPath, clipOp = ClipOp.Difference) { drawRect(Color.Black.copy(alpha = 0.7f)) }
 
                                 if (cropShape == CropShape.CIRCLE) {
-                                    drawCircle(color = Color.White.copy(alpha = 0.8f), radius = cropSize / 2f, center = cropCenter, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                                    drawCircle(color = Color.White.copy(alpha = 0.8f), radius = cropW / 2f, center = cropCenter, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
                                 } else {
-                                    drawRect(color = Color.White.copy(alpha = 0.8f), topLeft = Offset(cropCenter.x - cropSize / 2f, cropCenter.y - cropSize / 2f), size = Size(cropSize, cropSize), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                                    drawRect(color = Color.White.copy(alpha = 0.8f), topLeft = Offset(cropRect.left, cropRect.top), size = Size(cropW, cropH), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
                                 }
                             }
                         } else {
@@ -256,15 +286,16 @@ private fun cropAndSave(
     outputFileName: String
 ): String? {
     try {
-        val outputSize = 512 // tamaño de salida en px
-        val outputBitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.ARGB_8888)
+        val outW = if (cropShape == CropShape.WIDE) 960 else 512
+        val outH = if (cropShape == CropShape.WIDE) 600 else 512
+        val outputBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(outputBitmap)
 
         // Si es círculo, recortar con path circular
         if (cropShape == CropShape.CIRCLE) {
             val path = android.graphics.Path().apply {
                 addCircle(
-                    outputSize / 2f, outputSize / 2f, outputSize / 2f,
+                    outW / 2f, outH / 2f, outW / 2f,
                     android.graphics.Path.Direction.CCW
                 )
             }
@@ -274,13 +305,17 @@ private fun cropAndSave(
         // Calcular posición de la imagen en el output
         val imgW = sourceBitmap.width.toFloat()
         val imgH = sourceBitmap.height.toFloat()
-        val baseScale = outputSize.toFloat() / minOf(imgW, imgH)
+        val baseScale = if (cropShape == CropShape.WIDE) {
+            minOf(outW.toFloat() / imgW, outH.toFloat() / imgH)
+        } else {
+            outW.toFloat() / minOf(imgW, imgH)
+        }
         val finalScale = baseScale * scale
         val drawW = imgW * finalScale
         val drawH = imgH * finalScale
 
-        val imgLeft = (outputSize / 2f) - (drawW / 2f) + (offsetX * outputSize / 512f)
-        val imgTop = (outputSize / 2f) - (drawH / 2f) + (offsetY * outputSize / 512f)
+        val imgLeft = (outW / 2f) - (drawW / 2f) + (offsetX * outW / 512f)
+        val imgTop = (outH / 2f) - (drawH / 2f) + (offsetY * outH / 512f)
 
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
         canvas.drawBitmap(
@@ -302,6 +337,35 @@ private fun cropAndSave(
     } catch (e: Exception) {
         e.printStackTrace()
         return null
+    }
+}
+
+private fun saveOriginalPng(
+    context: Context,
+    sourceBitmap: Bitmap,
+    outputFileName: String
+): String? {
+    return try {
+        val maxDim = 1280
+        val bmp = if (sourceBitmap.width > maxDim || sourceBitmap.height > maxDim) {
+            val ratio = minOf(maxDim.toFloat() / sourceBitmap.width, maxDim.toFloat() / sourceBitmap.height)
+            Bitmap.createScaledBitmap(
+                sourceBitmap,
+                (sourceBitmap.width * ratio).toInt().coerceAtLeast(1),
+                (sourceBitmap.height * ratio).toInt().coerceAtLeast(1),
+                true
+            )
+        } else sourceBitmap
+
+        val file = File(context.filesDir, outputFileName)
+        FileOutputStream(file).use { fos ->
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, fos)
+            fos.flush()
+        }
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }
 

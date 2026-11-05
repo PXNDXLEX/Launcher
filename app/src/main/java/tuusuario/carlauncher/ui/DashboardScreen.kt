@@ -215,7 +215,10 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     // Padding dinámico para que los controles HUD y el auto 3D se centren en el área libre de CarPlay
     val mapStartPadding = if (isLandscape) 78.dp else 0.dp
-    val mapEndPadding = if (isLandscape && isNavSplit) 306.dp else 0.dp
+    val mapEndPadding = if (isLandscape && isNavSplit) 260.dp else 0.dp
+    val mapBottomPadding = if (!isLandscape && isNavigationVisible) {
+        if (isNavSplit) 232.dp else 60.dp
+    } else 0.dp
 
     Box(
         modifier = Modifier
@@ -231,7 +234,8 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             isDarkMode = isDarkMode,
             isVisible = isNavigationVisible,
             startOverlayPadding = mapStartPadding,
-            endOverlayPadding = mapEndPadding
+            endOverlayPadding = mapEndPadding,
+            bottomOverlayPadding = mapBottomPadding
         )
 
         // ══════════════════════════════════════════════════════════════════════
@@ -624,6 +628,17 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                                     }
                                 }
                             }
+                            Text(
+                                "Tamaño del auto en Inicio: ${(AppSettings.homeCarScale.value * 100).toInt()}%",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = AppSettings.homeCarScale.value,
+                                onValueChange = { AppSettings.setHomeCarScale(it) },
+                                valueRange = 0.80f..1.55f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }
@@ -1012,11 +1027,18 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
     }
 
     if (showCarPhotoCropper && pendingCropUri != null) {
+        val uniqueFileName = remember(pendingCropUri) { "custom_home_car_${System.currentTimeMillis()}.png" }
         ImageCropperDialog(
             imageUri = pendingCropUri!!,
-            outputFileName = "custom_home_car.png",
-            initialCropShape = CropShape.SQUARE,
+            outputFileName = uniqueFileName,
+            initialCropShape = CropShape.WIDE,
             onCropped = { path ->
+                // Limpiar recortes anteriores del auto para no acumular archivos
+                try {
+                    context.filesDir.listFiles { f ->
+                        f.name.startsWith("custom_home_car") && f.absolutePath != path
+                    }?.forEach { it.delete() }
+                } catch (_: Exception) {}
                 AppSettings.setCustomHomeCarPhotoPath(path)
                 showCarPhotoCropper = false
                 pendingCropUri = null

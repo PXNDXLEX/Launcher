@@ -52,12 +52,16 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import android.os.Build
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 
 @Composable
-fun SpeedometerWidget() {
+fun SpeedometerWidget(
+    scaleMultiplier: Float = 1.20f,
+    forceDarkBackground: Boolean = false
+) {
     val context = LocalContext.current
     // Leemos directamente del motor GPS unificado (LocationEngine) sin crear un listener duplicado
     val speed = NavigationState.currentSpeedKmH.value
@@ -70,12 +74,12 @@ fun SpeedometerWidget() {
 
     val style = AppSettings.speedoStyle.value 
     val baseColor = Color(AppSettings.speedoColor.value)
-    val isLight = MaterialTheme.colorScheme.background.red > 0.5f 
+    val isLight = if (forceDarkBackground) false else MaterialTheme.colorScheme.background.red > 0.5f 
     
     val inactiveColor = if (isLight) Color.LightGray.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.15f)
-    val textColor = MaterialTheme.colorScheme.onSurface
+    val textColor = if (forceDarkBackground) Color.White else MaterialTheme.colorScheme.onSurface
     val tickColor = if (isLight) Color.Black.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.4f)
-    val backgroundColor = MaterialTheme.colorScheme.background
+    val backgroundColor = if (forceDarkBackground) Color(0xFF0B101E) else MaterialTheme.colorScheme.background
 
     val c0 = Color(baseColor.red * 0.3f, baseColor.green * 0.3f, baseColor.blue * 0.3f, 1f)
     val c1 = baseColor
@@ -106,8 +110,8 @@ fun SpeedometerWidget() {
         shakeY = if ((style == "SHONEN" || style == "OMNIMON") && isHighSpeed) (Math.random() * shakeMult * 2 - shakeMult).toFloat() else 0f
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val boxSize = min(maxWidth, maxHeight) * 1.20f 
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
+        val boxSize = min(maxWidth, maxHeight) * scaleMultiplier 
         
         val customBgPath = AppSettings.customSpeedoBgPath.value
         val isGif = customBgPath.endsWith(".gif", ignoreCase = true)
@@ -251,7 +255,7 @@ fun SpeedometerWidget() {
                                 Text(text = speed.toInt().toString(), color = Color.Red.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = glitchOffset * 2))
                                 Text(text = speed.toInt().toString(), color = Color.Cyan.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = -glitchOffset * 2))
                             }
-                            Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = Shadow(color = reactiveColorText, blurRadius = 30f)))
+                            Text(text = speed.toInt().toString(), color = if (isLight) Color(0xFF0F172A) else Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = Shadow(color = reactiveColorText, blurRadius = 24f)))
                         }
                         Text(text = "KM/H", color = reactiveColorText, fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Black, letterSpacing = 8.sp, style = TextStyle(fontStyle = FontStyle.Italic))
                     }
@@ -259,13 +263,13 @@ fun SpeedometerWidget() {
                 "NEBULA" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Thin, style = TextStyle(fontFamily = FontFamily.Serif, shadow = Shadow(color = reactiveColorText, blurRadius = 40f)))
-                        Text(text = "KM/H", color = Color.White.copy(alpha=0.8f), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Black, letterSpacing = 15.sp)
+                        Text(text = "KM/H", color = if (isLight) Color(0xFF0F172A) else Color.White.copy(alpha=0.8f), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Black, letterSpacing = 12.sp)
                     }
                 }
                 "DEMONIC" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.06f).dp)) {
-                        Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.40f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = Shadow(color = Color.Black, offset = Offset(0f, 10f), blurRadius = 20f)))
-                        Text(text = "P O W E R", color = Color.White, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp, style = TextStyle(shadow = Shadow(color = reactiveColorText, blurRadius = 10f)))
+                        Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.40f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = Shadow(color = Color.Black, offset = Offset(0f, 4f), blurRadius = 16f)))
+                        Text(text = "P O W E R", color = if (isLight) Color(0xFF0F172A) else Color.White, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp, style = TextStyle(shadow = Shadow(color = reactiveColorText, blurRadius = 10f)))
                     }
                 }
                 "CUSTOM" -> {
