@@ -25,6 +25,8 @@ object AppSettings {
     val isGpsSimulationMode = mutableStateOf(false)
     // Modo dividido CarPlay en Navegación (Mapa + Música reducida al costado)
     val navSplitMode = mutableStateOf(true)
+    // Porcentaje lateral/inferior ocupado por Música + Velocímetro frente al Mapa (25% a 50% máx)
+    val navPanelPercent = mutableStateOf(38f)
 
     // Personalización de la tarjeta principal del vehículo (Home Bento)
     val carBrandName = mutableStateOf("KIA")
@@ -71,6 +73,7 @@ object AppSettings {
         mapIconColor.value = p.getInt("mapIconColor", Color.parseColor("#FFD600"))
         autoThemeByTime.value = p.getBoolean("autoThemeByTime", false)
         navSplitMode.value = p.getBoolean("navSplitMode", true)
+        navPanelPercent.value = p.getFloat("navPanelPercent", 38f).coerceIn(25f, 50f)
 
         carBrandName.value = p.getString("carBrandName", "KIA") ?: "KIA"
         carModelName.value = p.getString("carModelName", "RIO STYLUS") ?: "RIO STYLUS"
@@ -177,6 +180,12 @@ object AppSettings {
     fun setNavSplitMode(split: Boolean) {
         navSplitMode.value = split
         prefs?.edit()?.putBoolean("navSplitMode", split)?.apply()
+    }
+
+    fun setNavPanelPercent(percent: Float) {
+        val clamped = percent.coerceIn(25f, 50f)
+        navPanelPercent.value = clamped
+        prefs?.edit()?.putFloat("navPanelPercent", clamped)?.apply()
     }
 
     fun setCarBrandName(brand: String) {

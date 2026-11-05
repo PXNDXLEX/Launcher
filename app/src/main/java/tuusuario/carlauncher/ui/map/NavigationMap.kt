@@ -156,22 +156,27 @@ private const val CAR_TAILLIGHTS_LAYER_ID  = "car-taillights-layer"
 private const val BUILDING_FACADE_IMAGE_ID = "building-facade-windows"
 
 class MockLocationProvider : LocationProvider {
-    val consumers = mutableSetOf<LocationConsumer>()
+    val consumers = java.util.concurrent.CopyOnWriteArraySet<LocationConsumer>()
     override fun registerLocationConsumer(locationConsumer: LocationConsumer) {
         consumers.add(locationConsumer)
     }
     override fun unRegisterLocationConsumer(locationConsumer: LocationConsumer) {
         consumers.remove(locationConsumer)
     }
-    fun updateLocation(point: com.mapbox.geojson.Point, bearing: Double) {
-        consumers.forEach {
-            it.onLocationUpdated(point)
-            it.onBearingUpdated(bearing)
-            
-            // Update lights source
-            val map = (it as? com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin)?.let {
-                // In a real implementation we would have a reference to the map here
-                // For now, we update global or map-specific context if possible
+    fun updateLocation(
+        point: com.mapbox.geojson.Point,
+        bearing: Double,
+        animDurationMs: Long = 850L
+    ) {
+        val dur = animDurationMs.coerceIn(50L, 1250L)
+        consumers.forEach { consumer ->
+            consumer.onLocationUpdated(point) {
+                duration = dur
+                interpolator = LinearInterpolator()
+            }
+            consumer.onBearingUpdated(bearing) {
+                duration = dur
+                interpolator = LinearInterpolator()
             }
         }
     }
@@ -650,17 +655,18 @@ fun NavigationMap(
             NavigationState.currentLocation.value?.let { loc ->
                 mockLocationProvider.updateLocation(
                     com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
-                    if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
+                    if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing,
+                    animDurationMs = 80L
                 )
             }
 
-            // ── Heading-up SIEMPRE activo: brujula + GPS bearing (con throttle a 15 FPS) ──
+            // ── Heading-up SIEMPRE activo: brujula + GPS bearing (con actualización fluida a 30 FPS) ──
             var lastIndicatorPos: com.mapbox.geojson.Point? = null
             var lastIndicatorBearing: Double = 0.0
             var lastGlowUpdateMs: Long = 0L
             val updateGlow = {
                 val nowMs = System.currentTimeMillis()
-                if (isNightMode && isVisibleState.value && (nowMs - lastGlowUpdateMs >= 66L)) {
+                if (isNightMode && isVisibleState.value && (nowMs - lastGlowUpdateMs >= 32L)) {
                     lastGlowUpdateMs = nowMs
                     lastIndicatorPos?.let { pos ->
                         mapView.mapboxMap.getStyle { style ->
@@ -858,7 +864,7 @@ fun NavigationMap(
                 if (loc.latitude != 0.0) {
                     val carPos = Point.fromLngLat(loc.longitude, loc.latitude)
                     val carBearing = if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
-                    mockLocationProvider.updateLocation(carPos, carBearing)
+                    mockLocationProvider.updateLocation(carPos, carBearing, animDurationMs = 80L)
                     hasInitializedPosition = true
                 }
             }
@@ -882,9 +888,9 @@ fun NavigationMap(
         }
     }
 
-    // ── Suscripción al motor GPS unificado (LocationEngine) ──────────────────
+    // ── Suscripción al motor GPS unificado en tiempo real (LocationEngine) ──
     DisposableEffect(Unit) {
-        val listener = LocationEngine.Listener { loc, _, _ ->
+        val listener = LocationEngine.Listener { loc, projectedLat, projectedLon, bearingDeg, _, animDurationMs, _ ->
             // Lógica de ruta activa funciona siempre (incluso en pantalla Home)
             if (currentRoutePoints.isNotEmpty() && selectedDestination != null) {
                 var minDistance = Float.MAX_VALUE
@@ -934,9 +940,11 @@ fun NavigationMap(
             // Si el mapa está oculto tras el menú Home, evitamos renderizado GPU innecesario
             if (!isVisibleState.value) return@Listener
 
+            gpsBearing = bearingDeg
             mockLocationProvider.updateLocation(
-                Point.fromLngLat(loc.longitude, loc.latitude),
-                if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
+                Point.fromLngLat(projectedLon, projectedLat),
+                bearingDeg,
+                animDurationMs = animDurationMs
             )
 
             if (!hasInitializedPosition && loc.latitude != 0.0) {
@@ -947,7 +955,7 @@ fun NavigationMap(
                         .pitch(68.0)
                         .zoom(18.5)
                         .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                        .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                        .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
                         .build()
                 )
                 vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -966,7 +974,7 @@ fun NavigationMap(
                             .pitch(68.0)
                             .zoom(18.5)
                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                            .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
                             .build()
                     )
                     vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -981,7 +989,7 @@ fun NavigationMap(
                             .pitch(68.0)
                             .zoom(18.5)
                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                            .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
                             .build()
                     )
                     vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -993,23 +1001,6 @@ fun NavigationMap(
         onDispose {
             LocationEngine.removeListener(listener)
             animator?.cancel()
-        }
-    }
-
-    // ── Mover cámara suavemente en modo simulación cuando el mapa es visible ──
-    LaunchedEffect(NavigationState.currentLocation.value, isVisible) {
-        if (isVisible && AppSettings.isGpsSimulationMode.value && !isIntroAnimating && isFollowingLocation) {
-            val loc = NavigationState.currentLocation.value ?: return@LaunchedEffect
-            mapView.camera.easeTo(
-                cameraOptions {
-                    center(Point.fromLngLat(loc.longitude, loc.latitude))
-                    bearing(loc.bearing.toDouble())
-                    pitch(68.0)
-                    zoom(18.5)
-                    padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetPx, 0.0, rightInsetPx))
-                },
-                MapAnimationOptions.mapAnimationOptions { duration(250) }
-            )
         }
     }
 
@@ -1292,10 +1283,10 @@ fun NavigationMap(
                                     val vp = mapView.viewport
                                     val followState = vp.makeFollowPuckViewportState(
                                         FollowPuckViewportStateOptions.Builder()
-                                            .pitch(55.0)
+                                            .pitch(68.0)
                                             .zoom(18.5)
-                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
-                                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                                            .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
                                             .build()
                                     )
                                     vp.transitionTo(followState, vp.makeDefaultViewportTransition())

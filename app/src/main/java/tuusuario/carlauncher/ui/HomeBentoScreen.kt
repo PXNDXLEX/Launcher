@@ -3,6 +3,7 @@ package com.tuusuario.carlauncher.ui
 import android.graphics.BitmapFactory
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -498,6 +499,11 @@ private fun HomeGpsSpeedPill(
 ) {
     val palette = LocalBentoPalette.current
     val speed = NavigationState.currentSpeedKmH.value
+    val smoothSpeed by animateFloatAsState(
+        targetValue = speed,
+        animationSpec = tween(durationMillis = 120, easing = LinearEasing),
+        label = "homeSpeedAnim"
+    )
     val gpsReady = NavigationState.isGpsReady.value
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -522,14 +528,14 @@ private fun HomeGpsSpeedPill(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (!gpsReady && speed <= 0f) {
+            if (!gpsReady && smoothSpeed <= 0f) {
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.width(12.dp).height(4.dp).background(palette.accent, RoundedCornerShape(2.dp)))
                     Box(Modifier.width(12.dp).height(4.dp).background(palette.accent, RoundedCornerShape(2.dp)))
                 }
             } else {
                 Text(
-                    text = speed.roundToInt().toString(),
+                    text = smoothSpeed.roundToInt().toString(),
                     fontSize = 32.sp,
                     fontWeight = FontWeight.Black,
                     color = palette.accent,
@@ -722,11 +728,11 @@ private fun RightBentoColumn(
             onOpenRecords = onOpenRecords
         )
 
-        // 3. BARRA "Todas las apps >" + Accesos rápidos a Voz Sara, Tema y Ajustes
+        // 3. BARRA "Todas las apps >" + Accesos rápidos amplios a Voz Sara, Tema y Ajustes
         AllAppsAndToolsBar(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp),
+                .height(58.dp),
             onOpenAllApps = onOpenAllApps,
             onOpenSettings = onOpenSettings,
             onToggleTheme = onToggleTheme
@@ -861,7 +867,9 @@ private fun InternalQuickFeaturesRow(
                 else DashcamManager.startRecording(context, lifecycleOwner)
             },
             badgeContent = {
-                Box(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(if (isRec) Color(0xFFE53935) else palette.dashcamTileBg)
@@ -869,11 +877,16 @@ private fun InternalQuickFeaturesRow(
                             if (isRec) DashcamManager.stopRecording()
                             else DashcamManager.startRecording(context, lifecycleOwner)
                         }
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .padding(horizontal = 11.dp, vertical = 6.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(if (isRec) Color.White else palette.dashcamTileFg, CircleShape)
+                    )
                     Text(
                         text = if (isRec) "STOP" else "REC",
-                        fontSize = 9.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Black,
                         color = if (isRec) Color.White else palette.dashcamTileFg
                     )
@@ -1042,19 +1055,20 @@ private fun AllAppsAndToolsBar(
             }
         }
 
-        // Botón rápido Asistente de Voz Sara / Arlet
+        // Botón amplio y claro para Asistente de Voz Sara (fácil de presionar al conducir)
         val micColor by animateColorAsState(
             targetValue = when {
                 isListening -> Color(0xFFFF007F)
                 isSpeaking -> Color(0xFF00B8D4)
-                else -> palette.cardBg
+                else -> palette.routesTileBg
             },
             animationSpec = tween(220),
             label = "micBg"
         )
         Surface(
             modifier = Modifier
-                .size(54.dp)
+                .width(102.dp)
+                .fillMaxHeight()
                 .clickable {
                     if (isListening || isSpeaking) ArletAssistant.closeOverlay()
                     else ArletAssistant.triggerManualListening()
@@ -1064,15 +1078,29 @@ private fun AllAppsAndToolsBar(
             shadowElevation = if (palette.isDark) 0.dp else 3.dp,
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                if (isListening || isSpeaking) Color.Transparent else palette.cardBorder
+                if (isListening || isSpeaking) Color.Transparent else palette.accent.copy(alpha = 0.35f)
             )
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
                 Icon(
                     imageVector = Icons.Default.Mic,
                     contentDescription = "Asistente Sara",
                     tint = if (isListening || isSpeaking) Color.White else palette.accent,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(25.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isListening) "Oír" else "Voz",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isListening || isSpeaking) Color.White else palette.accent,
+                    maxLines = 1
                 )
             }
         }
@@ -1080,7 +1108,7 @@ private fun AllAppsAndToolsBar(
         // Botón rápido Tema Día/Noche
         Surface(
             modifier = Modifier
-                .size(54.dp)
+                .size(56.dp)
                 .clickable(onClick = onToggleTheme),
             shape = RoundedCornerShape(18.dp),
             color = palette.cardBg,
@@ -1092,7 +1120,7 @@ private fun AllAppsAndToolsBar(
                     imageVector = if (palette.isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                     contentDescription = "Tema",
                     tint = palette.textPrimary,
-                    modifier = Modifier.size(21.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
@@ -1100,7 +1128,7 @@ private fun AllAppsAndToolsBar(
         // Botón rápido Configuración
         Surface(
             modifier = Modifier
-                .size(54.dp)
+                .size(56.dp)
                 .clickable(onClick = onOpenSettings),
             shape = RoundedCornerShape(18.dp),
             color = palette.cardBg,
@@ -1112,7 +1140,7 @@ private fun AllAppsAndToolsBar(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Ajustes",
                     tint = palette.textPrimary,
-                    modifier = Modifier.size(21.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }

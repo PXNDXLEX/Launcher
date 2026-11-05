@@ -164,9 +164,12 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
 
     val activeUiColor = Color(AppSettings.uiColor.value)
     val isNavSplit = AppSettings.navSplitMode.value
+    val navPanelPct = AppSettings.navPanelPercent.value.coerceIn(25f, 50f)
 
-    // Pantallas: "HOME", "NAVIGATION", "SPEEDOMETER", "ALL_APPS", "VIDEOS", "RUTAS", "RECORDS", "YOUTUBE"
+    // Pantallas: "HOME", "NAVIGATION", "SPEEDOMETER", "ALL_APPS", "VIDEOS", "RUTAS", "RECORDS"
     var currentScreen by rememberSaveable { mutableStateOf("HOME") }
+    // Modo de ventana YouTube: "NONE" (cerrado), "MINI" (ventana flotante junto al mapa), "FULL" (pantalla completa)
+    var youtubeOverlayMode by rememberSaveable { mutableStateOf("NONE") }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var showWelcome by rememberSaveable { mutableStateOf(true) }
 
@@ -213,11 +216,18 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     val isNavigationVisible = currentScreen == "NAVIGATION"
     val isSubScreenVisible = currentScreen !in setOf("HOME", "NAVIGATION")
 
-    // Padding dinámico para que los controles HUD y el auto 3D se centren en el área libre de CarPlay
-    val mapStartPadding = if (isLandscape) 78.dp else 0.dp
-    val mapEndPadding = if (isLandscape && isNavSplit) 260.dp else 0.dp
+    // Padding dinámico sincronizado con el slider (25%..50% máx) y el dock ergonómico (80.dp)
+    val availLandscapeWidth = (configuration.screenWidthDp.dp - 20.dp).coerceAtLeast(320.dp)
+    val rightPanelWidthDp = (availLandscapeWidth * (navPanelPct / 100f)).coerceIn(220.dp, availLandscapeWidth * 0.50f)
+
+    val availPortraitHeight = (configuration.screenHeightDp.dp - 16.dp).coerceAtLeast(400.dp)
+    val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
+    val bottomRowHeightDp = (availPortraitHeight * portraitFraction).coerceIn(168.dp, 310.dp)
+
+    val mapStartPadding = if (isLandscape) 96.dp else 0.dp
+    val mapEndPadding = if (isLandscape && isNavSplit) rightPanelWidthDp + 18.dp else 0.dp
     val mapBottomPadding = if (!isLandscape && isNavigationVisible) {
-        if (isNavSplit) 232.dp else 60.dp
+        if (isNavSplit) bottomRowHeightDp + 76.dp else 70.dp
     } else 0.dp
 
     Box(
@@ -247,7 +257,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             exit = fadeOut(tween(180)),
             modifier = Modifier.fillMaxSize()
         ) {
-            BackHandler(enabled = isNavigationVisible && !showSettingsDialog) {
+            BackHandler(enabled = isNavigationVisible && !showSettingsDialog && youtubeOverlayMode != "FULL") {
                 currentScreen = "HOME"
             }
             CarPlayNavigationOverlay(
@@ -256,7 +266,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 onToggleSplitMode = { AppSettings.setNavSplitMode(!isNavSplit) },
                 onBackToHome = { currentScreen = "HOME" },
                 onOpenFullSpeedometer = { currentScreen = "SPEEDOMETER" },
-                onOpenYoutube = { currentScreen = "YOUTUBE" },
+                onOpenYoutube = { youtubeOverlayMode = "MINI" },
                 onOpenSettings = { showSettingsDialog = true }
             )
         }
@@ -287,7 +297,10 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 onOpenRoutes = { currentScreen = "RUTAS" },
                 onOpenRecords = { currentScreen = "RECORDS" },
                 onOpenAllApps = { currentScreen = "ALL_APPS" },
-                onOpenYoutube = { currentScreen = "YOUTUBE" },
+                onOpenYoutube = {
+                    currentScreen = "NAVIGATION"
+                    youtubeOverlayMode = "MINI"
+                },
                 onOpenSettings = { showSettingsDialog = true },
                 onToggleTheme = onToggleTheme
             )
@@ -316,7 +329,14 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 youtubeContent = youtubeContent,
                 onBackToHome = { currentScreen = "HOME" },
                 onOpenNavigation = { currentScreen = "NAVIGATION" },
-                onOpenScreen = { next -> currentScreen = next },
+                onOpenScreen = { next ->
+                    if (next == "YOUTUBE") {
+                        currentScreen = "NAVIGATION"
+                        youtubeOverlayMode = "MINI"
+                    } else {
+                        currentScreen = next
+                    }
+                },
                 onOpenSettings = { showSettingsDialog = true }
             )
         }
@@ -412,6 +432,21 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         if (DashcamManager.isRecording.value) {
             DashcamPreviewOverlay()
         }
+
+        // Ventana flotante YouTube (PiP junto al Mapa + opción Pantalla Completa sin recargar video)
+        YouTubeOverlayHost(
+            mode = youtubeOverlayMode,
+            isLandscape = isLandscape,
+            youtubeContent = youtubeContent,
+            onExpandFull = { youtubeOverlayMode = "FULL" },
+            onShrinkMini = {
+                youtubeOverlayMode = "MINI"
+                if (currentScreen !in setOf("NAVIGATION", "HOME")) {
+                    currentScreen = "NAVIGATION"
+                }
+            },
+            onClose = { youtubeOverlayMode = "NONE" }
+        )
 
         // Modal de Configuración
         AnimatedVisibility(
@@ -726,6 +761,74 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                         checked = AppSettings.navSplitMode.value,
                         onCheckedChange = { AppSettings.setNavSplitMode(it) }
                     )
+
+                    SettingsDivider()
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val panelPctInt = AppSettings.navPanelPercent.value.roundToInt().coerceIn(25, 50)
+                        val mapPctInt = 100 - panelPctInt
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AspectRatio,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Porcentaje de Mapa vs Música y Velocímetro",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Mapa: ${mapPctInt}%  ·  Música y Velocímetro: ${panelPctInt}% (Máx 50%)",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+
+                        Slider(
+                            value = AppSettings.navPanelPercent.value.coerceIn(25f, 50f),
+                            onValueChange = { AppSettings.setNavPanelPercent(it) },
+                            valueRange = 25f..50f,
+                            enabled = AppSettings.navSplitMode.value,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "75% Mapa / 25% Widgets",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "50% Mapa / 50% Widgets (Límite)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
                     SettingsDivider()
 
@@ -1731,6 +1834,272 @@ fun DashcamPreviewOverlay() {
                 Box(modifier = Modifier.size(7.dp).background(Color.White, CircleShape))
                 Spacer(modifier = Modifier.width(5.dp))
                 Text("REC", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/**
+ * Contenedor flotante inteligente para YouTube:
+ *  - Modo "MINI": ventana arrastrable sobre el Mapa 3D para ver video y navegación simultáneamente,
+ *    con selector de tamaño y botón directo para pasar a Pantalla Completa.
+ *  - Modo "FULL": ocupa toda la pantalla con botón directo para volver a ventana pequeña sobre el Mapa.
+ * Usa `movableContentOf` para que el WebView jamás se recargue ni corte el audio/video al cambiar de tamaño.
+ */
+@Composable
+fun YouTubeOverlayHost(
+    mode: String,
+    isLandscape: Boolean,
+    youtubeContent: @Composable () -> Unit,
+    onExpandFull: () -> Unit,
+    onShrinkMini: () -> Unit,
+    onClose: () -> Unit
+) {
+    if (mode == "NONE") return
+
+    val palette = LocalBentoPalette.current
+    var sizeStep by rememberSaveable { mutableStateOf(1) } // 0 = Compacto, 1 = Mediano, 2 = Grande
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+
+    if (mode == "FULL") {
+        BackHandler(onBack = onShrinkMini)
+
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF0A0E17),
+            shadowElevation = 18.dp,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Barra superior de Pantalla Completa con opción directa a Ventana Pequeña + Mapa
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .background(Color(0xFF101726))
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Surface(
+                        onClick = onShrinkMini,
+                        shape = RoundedCornerShape(14.dp),
+                        color = palette.accent,
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PictureInPictureAlt,
+                                contentDescription = "Modo ventana pequeña",
+                                tint = Color.White,
+                                modifier = Modifier.size(19.dp)
+                            )
+                            Text(
+                                text = "Ventana Pequeña · Ver Mapa",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OndemandVideo,
+                            contentDescription = null,
+                            tint = Color(0xFFFF3D00),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "YouTube · Pantalla Completa",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Surface(
+                        onClick = onClose,
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color.White.copy(alpha = 0.12f),
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cerrar YouTube",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    youtubeContent()
+                }
+            }
+        }
+    } else {
+        // Modo "MINI": ventana flotante arrastrable sobre el área del mapa
+        val miniWidth = when (sizeStep) {
+            0 -> 288.dp
+            2 -> 436.dp
+            else -> 356.dp
+        }
+        val miniHeight = when (sizeStep) {
+            0 -> 196.dp
+            2 -> 280.dp
+            else -> 234.dp
+        }
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    start = if (isLandscape) 96.dp else 12.dp,
+                    top = 74.dp,
+                    end = 12.dp,
+                    bottom = 12.dp
+                )
+        ) {
+            val clampedWidth = miniWidth.coerceAtMost(maxWidth)
+            val clampedHeight = miniHeight.coerceAtMost(maxHeight)
+
+            Surface(
+                modifier = Modifier
+                    .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                    .width(clampedWidth)
+                    .height(clampedHeight),
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF0A0E17),
+                shadowElevation = 16.dp,
+                border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.22f))
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Barra superior arrastrable + botones Tamaño / Pantalla Completa / Cerrar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .background(Color(0xFF11192B))
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    offsetX += dragAmount.x
+                                    offsetY += dragAmount.y
+                                }
+                            }
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DragIndicator,
+                                contentDescription = "Mover ventana",
+                                tint = Color.White.copy(alpha = 0.65f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.OndemandVideo,
+                                contentDescription = null,
+                                tint = Color(0xFFFF3D00),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "YouTube",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Cambiar tamaño de mini-ventana (Compacto / Mediano / Grande)
+                            Surface(
+                                onClick = { sizeStep = (sizeStep + 1) % 3 },
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color.White.copy(alpha = 0.12f),
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.PhotoSizeSelectLarge,
+                                        contentDescription = "Cambiar tamaño",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            // Botón para expandir a Pantalla Completa
+                            Surface(
+                                onClick = onExpandFull,
+                                shape = RoundedCornerShape(10.dp),
+                                color = palette.accent,
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.OpenInFull,
+                                        contentDescription = "Pantalla completa",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        text = "Ampliar",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            // Botón Cerrar
+                            Surface(
+                                onClick = onClose,
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFE53935).copy(alpha = 0.85f),
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Cerrar",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        youtubeContent()
+                    }
+                }
             }
         }
     }

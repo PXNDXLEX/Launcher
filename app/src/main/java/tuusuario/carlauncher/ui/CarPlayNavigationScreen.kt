@@ -10,6 +10,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -60,8 +61,10 @@ import kotlin.math.roundToInt
 
 /**
  * Interfaz estilo Apple CarPlay / Android Auto Coolwalk para Modo Navegación:
- *  - Horizontal: Dock izquierdo + Columna lateral derecha compacta (Velocímetro programado activo arriba + Música compacta con carátula de fondo abajo).
- *  - Vertical: Barra inferior compacta + Fila dual simétrica (Velocímetro programado a la izquierda + Música con carátula de fondo a la derecha).
+ *  - Horizontal: Dock izquierdo ergonómico (80.dp) con botones VOZ y CAM grandes y físicamente separados
+ *    + Panel lateral derecho adaptable mediante slider (25% hasta máximo 50% de la pantalla) sin deformarse.
+ *  - Vertical: Fila dual adaptable (Velocímetro + Música a partes iguales) + Barra inferior ergonómica
+ *    con botones VOZ y CAM en extremos opuestos para evitar toques accidentales al conducir.
  */
 @Composable
 fun CarPlayNavigationOverlay(
@@ -73,17 +76,27 @@ fun CarPlayNavigationOverlay(
     onOpenYoutube: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
+    val navPanelPct = AppSettings.navPanelPercent.value.coerceIn(25f, 50f)
+
     if (isLandscape) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(10.dp)
         ) {
-            // ── DOCK LATERAL IZQUIERDO ESTILO CARPLAY (62.dp) ──
+            // Ancho dinámico del panel Música + Velocímetro (25%..50% máx del ancho disponible)
+            val targetPanelWidth = (maxWidth * (navPanelPct / 100f)).coerceIn(220.dp, maxWidth * 0.50f)
+            val animatedPanelWidth by animateDpAsState(
+                targetValue = targetPanelWidth,
+                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
+                label = "navPanelWidth"
+            )
+
+            // ── DOCK LATERAL IZQUIERDO ERGONÓMICO (80.dp): VOZ y CAM grandes y separados ──
             CarPlayLeftDock(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .width(62.dp)
+                    .width(80.dp)
                     .fillMaxHeight(),
                 isSplitMode = isSplitMode,
                 onBackToHome = onBackToHome,
@@ -91,7 +104,7 @@ fun CarPlayNavigationOverlay(
                 onOpenSettings = onOpenSettings
             )
 
-            // ── PANEL LATERAL DERECHO COMPACTO (246.dp): Velocímetro Programado + Música con Carátula ──
+            // ── PANEL LATERAL DERECHO ADAPTABLE (hasta 50% máx): Velocímetro + Música con Carátula ──
             AnimatedVisibility(
                 visible = isSplitMode,
                 enter = slideInHorizontally(
@@ -107,26 +120,26 @@ fun CarPlayNavigationOverlay(
                 ) + fadeOut(tween(170)),
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .width(246.dp)
+                    .width(animatedPanelWidth)
                     .fillMaxHeight()
             ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Tarjeta Superior (57%): Velocímetro programado seleccionado en vivo
+                    // Tarjeta Superior (54%): Velocímetro programado seleccionado en vivo (escala circular sin deformación)
                     CarPlayLiveSpeedometerCard(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(0.57f),
+                            .weight(0.54f),
                         onClick = onOpenFullSpeedometer
                     )
 
-                    // Tarjeta Inferior (43%): Widget de Música compacto con carátula de fondo
+                    // Tarjeta Inferior (46%): Widget de Música adaptable con carátula de fondo
                     CarPlayAlbumArtMusicCard(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(0.43f),
+                            .weight(0.46f),
                         ultraCompact = false,
                         onOpenYoutube = onOpenYoutube
                     )
@@ -134,21 +147,30 @@ fun CarPlayNavigationOverlay(
             }
         }
     } else {
-        // ── MODO VERTICAL: Fila Dual Simétrica (Velocímetro + Música del mismo tamaño) + Dock Inferior ──
-        Box(
+        // ── MODO VERTICAL: Fila Dual Simétrica Adaptable + Dock Inferior con VOZ y CAM separados ──
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
+            // Altura adaptable según el slider (manteniendo máximo razonable vertical sin deformar)
+            val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
+            val targetRowHeight = (maxHeight * portraitFraction).coerceIn(168.dp, 310.dp)
+            val animatedRowHeight by animateDpAsState(
+                targetValue = targetRowHeight,
+                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
+                label = "portraitRowHeight"
+            )
+
             AnimatedVisibility(
                 visible = isSplitMode,
                 enter = slideInVertically { it } + fadeIn(tween(200)),
                 exit = slideOutVertically { it } + fadeOut(tween(170)),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 54.dp)
+                    .padding(bottom = 66.dp)
                     .fillMaxWidth()
-                    .height(166.dp)
+                    .height(animatedRowHeight)
             ) {
                 Row(
                     modifier = Modifier.fillMaxSize(),
@@ -162,7 +184,7 @@ fun CarPlayNavigationOverlay(
                         onClick = onOpenFullSpeedometer
                     )
 
-                    // Derecha (50%): Widget de música compacto con carátula de fondo
+                    // Derecha (50%): Widget de música con carátula de fondo
                     CarPlayAlbumArtMusicCard(
                         modifier = Modifier
                             .weight(1f)
@@ -173,11 +195,12 @@ fun CarPlayNavigationOverlay(
                 }
             }
 
-            // Dock inferior compacto en modo vertical
+            // Dock inferior ergonómico con VOZ a la izquierda y CAM a la derecha
             CarPlayPortraitBottomDock(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .height(46.dp),
+                    .fillMaxWidth()
+                    .height(58.dp),
                 isSplitMode = isSplitMode,
                 onBackToHome = onBackToHome,
                 onToggleSplitMode = onToggleSplitMode,
@@ -190,7 +213,7 @@ fun CarPlayNavigationOverlay(
 /**
  * Tarjeta de velocímetro para Modo Navegación que renderiza directamente el estilo programado
  * seleccionado por el usuario (de los 18 velocímetros disponibles).
- * Permite tocar para abrir en grande o deslizar horizontalmente para cambiar de estilo al vuelo.
+ * Escala proporcionalmente con `min(maxWidth, maxHeight)` para nunca deformarse al ampliar el panel.
  */
 @Composable
 private fun CarPlayLiveSpeedometerCard(
@@ -242,7 +265,7 @@ private fun CarPlayLiveSpeedometerCard(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(6.dp),
+                .padding(8.dp),
             contentAlignment = Alignment.Center
         ) {
             Crossfade(
@@ -250,7 +273,7 @@ private fun CarPlayLiveSpeedometerCard(
                 animationSpec = tween(220),
                 label = "navLiveSpeedo"
             ) { _ ->
-                SpeedometerWidget(scaleMultiplier = 1.04f)
+                SpeedometerWidget(scaleMultiplier = 1.06f)
             }
 
             // Etiqueta discreta superior derecha (Récord del día o distancia restante)
@@ -269,11 +292,11 @@ private fun CarPlayLiveSpeedometerCard(
                 ) {
                     Text(
                         text = badgeText,
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = palette.accent,
                         maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
             }
@@ -282,8 +305,9 @@ private fun CarPlayLiveSpeedometerCard(
 }
 
 /**
- * Widget de música compacto para Modo Navegación con la carátula de la canción actual
- * ocupando todo el fondo de la tarjeta y velo oscuro cinematográfico para legibilidad perfecta.
+ * Widget de música adaptable para Modo Navegación con la carátula de la canción actual
+ * ocupando todo el fondo de la tarjeta. Se adapta fluidamente desde ancho compacto (25%)
+ * hasta mitad de pantalla (50%) manteniendo proporciones armónicas sin estirarse.
  */
 @Composable
 private fun CarPlayAlbumArtMusicCard(
@@ -319,7 +343,7 @@ private fun CarPlayAlbumArtMusicCard(
     } else 0f
 
     val textShadow = remember {
-        Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 8f)
+        Shadow(color = Color.Black.copy(alpha = 0.78f), blurRadius = 8f)
     }
 
     Surface(
@@ -329,7 +353,10 @@ private fun CarPlayAlbumArtMusicCard(
         shadowElevation = 6.dp,
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val isSpacious = maxWidth >= 300.dp && maxHeight >= 150.dp
+            val isWide = maxWidth >= 360.dp
+
             // ── CAPA 1: Carátula de la canción como fondo completo de la tarjeta ──
             if (artImageBitmap != null) {
                 Image(
@@ -353,7 +380,7 @@ private fun CarPlayAlbumArtMusicCard(
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.08f),
                         modifier = Modifier
-                            .size(88.dp)
+                            .size(92.dp)
                             .align(Alignment.Center)
                     )
                 }
@@ -366,7 +393,7 @@ private fun CarPlayAlbumArtMusicCard(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xFF070C17).copy(alpha = 0.48f),
+                                Color(0xFF070C17).copy(alpha = 0.46f),
                                 Color(0xFF070C17).copy(alpha = 0.66f),
                                 Color(0xFF070C17).copy(alpha = 0.88f)
                             )
@@ -374,28 +401,57 @@ private fun CarPlayAlbumArtMusicCard(
                     )
             )
 
-            // ── CAPA 3: Controles e información compacta ──
+            // ── CAPA 3: Controles e información con escalado proporcional ──
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(
-                        horizontal = if (ultraCompact) 11.dp else 13.dp,
-                        vertical = if (ultraCompact) 10.dp else 11.dp
+                        horizontal = when {
+                            isWide -> 18.dp
+                            ultraCompact -> 11.dp
+                            else -> 14.dp
+                        },
+                        vertical = when {
+                            isSpacious -> 13.dp
+                            ultraCompact -> 10.dp
+                            else -> 11.dp
+                        }
                     ),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Fila superior: Título y Artista + botón discreto YouTube
+                // Fila superior: Miniatura nítida opcional (en vista amplia) + Título/Artista + Botón YouTube PiP
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showExpandedModal = true },
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (isSpacious && artImageBitmap != null) {
+                        Image(
+                            bitmap = artImageBitmap,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(if (isWide) 50.dp else 42.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = songTitle.ifBlank { "Sin reproducción" },
-                            fontSize = if (ultraCompact) 13.sp else 14.sp,
-                            lineHeight = if (ultraCompact) 15.sp else 16.sp,
+                            fontSize = when {
+                                isWide -> 18.sp
+                                isSpacious -> 16.sp
+                                ultraCompact -> 13.sp
+                                else -> 15.sp
+                            },
+                            lineHeight = when {
+                                isWide -> 21.sp
+                                isSpacious -> 19.sp
+                                else -> 17.sp
+                            },
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
                             maxLines = 1,
@@ -415,9 +471,14 @@ private fun CarPlayAlbumArtMusicCard(
                         }
                         Text(
                             text = sub,
-                            fontSize = if (ultraCompact) 10.sp else 11.sp,
+                            fontSize = when {
+                                isWide -> 13.sp
+                                isSpacious -> 12.sp
+                                ultraCompact -> 10.sp
+                                else -> 11.sp
+                            },
                             fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.80f),
+                            color = Color.White.copy(alpha = 0.82f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             style = TextStyle(shadow = textShadow)
@@ -425,31 +486,43 @@ private fun CarPlayAlbumArtMusicCard(
                     }
 
                     if (onOpenYoutube != null) {
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                             onClick = onOpenYoutube,
-                            shape = CircleShape,
-                            color = Color.White.copy(alpha = 0.16f),
-                            modifier = Modifier.size(if (ultraCompact) 26.dp else 28.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFE53935).copy(alpha = 0.86f),
+                            modifier = Modifier.height(if (ultraCompact) 28.dp else 32.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = if (isSpacious) 10.dp else 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.OndemandVideo,
-                                    contentDescription = "YouTube",
+                                    imageVector = Icons.Default.PictureInPictureAlt,
+                                    contentDescription = "YouTube en ventana",
                                     tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(if (ultraCompact) 14.dp else 16.dp)
                                 )
+                                if (isSpacious) {
+                                    Text(
+                                        text = "YT",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                // Zona media: Barra de progreso interactiva + tiempos compactos
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                // Zona media: Barra de progreso interactiva + tiempos
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(12.dp)
+                            .height(14.dp)
                             .pointerInput(duration) {
                                 detectTapGestures { offset ->
                                     if (duration > 0L && size.width > 0) {
@@ -465,9 +538,9 @@ private fun CarPlayAlbumArtMusicCard(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(4.dp)
+                                .height(if (isSpacious) 5.dp else 4.dp)
                                 .clip(RoundedCornerShape(50))
-                                .background(Color.White.copy(alpha = 0.26f))
+                                .background(Color.White.copy(alpha = 0.28f))
                         ) {
                             Box(
                                 modifier = Modifier
@@ -485,66 +558,85 @@ private fun CarPlayAlbumArtMusicCard(
                     ) {
                         Text(
                             text = formatDurationMs(position),
-                            fontSize = 9.sp,
+                            fontSize = if (isSpacious) 11.sp else 9.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.78f),
+                            color = Color.White.copy(alpha = 0.80f),
                             style = TextStyle(fontFeatureSettings = "tnum")
                         )
                         Text(
                             text = formatDurationMs(duration),
-                            fontSize = 9.sp,
+                            fontSize = if (isSpacious) 11.sp else 9.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.78f),
+                            color = Color.White.copy(alpha = 0.80f),
                             style = TextStyle(fontFeatureSettings = "tnum")
                         )
                     }
                 }
 
-                // Fila inferior: Controles Anterior / Play-Pause / Siguiente centrados y proporcionados
-                Row(
+                // Fila inferior: Controles Anterior / Play-Pause / Siguiente con separación acotada sin deformarse
+                Box(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
+                    contentAlignment = Alignment.Center
                 ) {
-                    IconButton(
-                        onClick = { GlobalState.skipToPrevious() },
-                        modifier = Modifier.size(if (ultraCompact) 32.dp else 34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipPrevious,
-                            contentDescription = "Anterior",
-                            tint = Color.White,
-                            modifier = Modifier.size(if (ultraCompact) 22.dp else 24.dp)
-                        )
+                    val playBtnSize = when {
+                        isWide -> 48.dp
+                        isSpacious -> 44.dp
+                        ultraCompact -> 36.dp
+                        else -> 40.dp
+                    }
+                    val skipBtnSize = when {
+                        isWide -> 40.dp
+                        isSpacious -> 36.dp
+                        else -> 32.dp
                     }
 
-                    Surface(
-                        onClick = { GlobalState.togglePlayPause() },
-                        shape = CircleShape,
-                        color = palette.accent,
-                        shadowElevation = 4.dp,
-                        modifier = Modifier.size(if (ultraCompact) 36.dp else 40.dp)
+                    Row(
+                        modifier = Modifier
+                            .widthIn(max = 260.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        IconButton(
+                            onClick = { GlobalState.skipToPrevious() },
+                            modifier = Modifier.size(skipBtnSize)
+                        ) {
                             Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Reproducir / Pausar",
+                                imageVector = Icons.Default.SkipPrevious,
+                                contentDescription = "Anterior",
                                 tint = Color.White,
-                                modifier = Modifier.size(if (ultraCompact) 21.dp else 23.dp)
+                                modifier = Modifier.size(if (isSpacious) 28.dp else 23.dp)
                             )
                         }
-                    }
 
-                    IconButton(
-                        onClick = { GlobalState.skipToNext() },
-                        modifier = Modifier.size(if (ultraCompact) 32.dp else 34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Siguiente",
-                            tint = Color.White,
-                            modifier = Modifier.size(if (ultraCompact) 22.dp else 24.dp)
-                        )
+                        Surface(
+                            onClick = { GlobalState.togglePlayPause() },
+                            shape = CircleShape,
+                            color = palette.accent,
+                            shadowElevation = 4.dp,
+                            modifier = Modifier.size(playBtnSize)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Reproducir / Pausar",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(if (isSpacious) 26.dp else 22.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { GlobalState.skipToNext() },
+                            modifier = Modifier.size(skipBtnSize)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SkipNext,
+                                contentDescription = "Siguiente",
+                                tint = Color.White,
+                                modifier = Modifier.size(if (isSpacious) 28.dp else 23.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -556,6 +648,10 @@ private fun CarPlayAlbumArtMusicCard(
     }
 }
 
+/**
+ * Barra inferior para modo vertical: coloca VOZ en el extremo izquierdo y CAM en el extremo derecho,
+ * grandes y con etiqueta visible, separados por los controles centrales para evitar errores al conducir.
+ */
 @Composable
 private fun CarPlayPortraitBottomDock(
     modifier: Modifier = Modifier,
@@ -571,76 +667,152 @@ private fun CarPlayPortraitBottomDock(
     val isListening = ArletAssistant.isListening.value || ArletAssistant.isWakeWordActiveWindow.value
     val isSpeaking = ArletAssistant.isSpeaking.value
 
+    val micBg by animateColorAsState(
+        targetValue = when {
+            isListening -> Color(0xFFFF007F)
+            isSpeaking -> Color(0xFF00B8D4)
+            else -> palette.routesTileBg
+        },
+        animationSpec = tween(200),
+        label = "portraitMicBg"
+    )
+
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        color = palette.cardBg.copy(alpha = 0.95f),
+        shape = RoundedCornerShape(22.dp),
+        color = palette.cardBg.copy(alpha = 0.96f),
         shadowElevation = 8.dp,
         border = BorderStroke(1.dp, palette.cardBorder)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            DockIconButton(
-                icon = Icons.Default.GridView,
-                contentDescription = "Menú Principal",
-                containerColor = palette.accent,
-                contentColor = Color.White,
-                sizeDp = 36,
-                onClick = onBackToHome
-            )
-
-            DockIconButton(
-                icon = if (isSplitMode) Icons.Default.Fullscreen else Icons.Default.VerticalSplit,
-                contentDescription = "Mostrar / Ocultar Widgets",
-                containerColor = if (isSplitMode) palette.routesTileBg else palette.subCardBg,
-                contentColor = if (isSplitMode) palette.accent else palette.textPrimary,
-                sizeDp = 36,
-                onClick = onToggleSplitMode
-            )
-
-            DockIconButton(
-                icon = Icons.Default.Mic,
-                contentDescription = "Asistente Sara",
-                containerColor = when {
-                    isListening -> Color(0xFFFF007F)
-                    isSpeaking -> Color(0xFF00B8D4)
-                    else -> palette.subCardBg
-                },
-                contentColor = if (isListening || isSpeaking) Color.White else palette.accent,
-                sizeDp = 36,
+            // ── EXTREMO IZQUIERDO: BOTÓN GRANDE ASISTENTE DE VOZ ──
+            Surface(
                 onClick = {
                     if (isListening || isSpeaking) ArletAssistant.closeOverlay()
                     else ArletAssistant.triggerManualListening()
+                },
+                shape = RoundedCornerShape(16.dp),
+                color = micBg,
+                border = BorderStroke(
+                    1.dp,
+                    if (isListening || isSpeaking) Color.Transparent else palette.accent.copy(alpha = 0.35f)
+                ),
+                modifier = Modifier
+                    .width(92.dp)
+                    .fillMaxHeight()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "Asistente Sara",
+                        tint = if (isListening || isSpeaking) Color.White else palette.accent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = if (isListening) "OÍR" else "VOZ",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isListening || isSpeaking) Color.White else palette.accent
+                    )
                 }
-            )
+            }
 
-            DockIconButton(
-                icon = if (isRec) Icons.Default.Stop else Icons.Default.Videocam,
-                contentDescription = "Dashcam",
-                containerColor = if (isRec) Color(0xFFE53935) else palette.subCardBg,
-                contentColor = if (isRec) Color.White else palette.dashcamTileFg,
-                sizeDp = 36,
-                onClick = {
-                    if (isRec) DashcamManager.stopRecording()
-                    else DashcamManager.startRecording(context, lifecycleOwner)
+            // ── ZONA CENTRAL SEPARADORA: Inicio · Vista · Ajustes ──
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DockIconButton(
+                    icon = Icons.Default.GridView,
+                    contentDescription = "Menú Principal",
+                    containerColor = palette.accent,
+                    contentColor = Color.White,
+                    sizeDp = 42,
+                    onClick = onBackToHome
+                )
+
+                DockIconButton(
+                    icon = if (isSplitMode) Icons.Default.Fullscreen else Icons.Default.VerticalSplit,
+                    contentDescription = "Mostrar / Ocultar Widgets",
+                    containerColor = if (isSplitMode) palette.routesTileBg else palette.subCardBg,
+                    contentColor = if (isSplitMode) palette.accent else palette.textPrimary,
+                    sizeDp = 42,
+                    onClick = onToggleSplitMode
+                )
+
+                DockIconButton(
+                    icon = Icons.Default.Settings,
+                    contentDescription = "Ajustes",
+                    containerColor = palette.subCardBg,
+                    contentColor = palette.textSecondary,
+                    sizeDp = 42,
+                    onClick = onOpenSettings
+                )
+            }
+
+            // ── EXTREMO DERECHO: BOTÓN GRANDE CÁMARA / DASHCAM ──
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isRec) Color(0xFFE53935) else palette.dashcamTileBg,
+                border = BorderStroke(
+                    1.dp,
+                    if (isRec) Color.Transparent else palette.dashcamTileFg.copy(alpha = 0.35f)
+                ),
+                modifier = Modifier
+                    .width(92.dp)
+                    .fillMaxHeight()
+                    .pointerInput(isRec) {
+                        detectTapGestures(
+                            onTap = {
+                                if (isRec) DashcamManager.stopRecording()
+                                else DashcamManager.startRecording(context, lifecycleOwner)
+                            },
+                            onLongPress = {
+                                DashcamManager.cycleCamera(context, lifecycleOwner)
+                            }
+                        )
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = if (isRec) Icons.Default.Stop else Icons.Default.Videocam,
+                        contentDescription = "Cámara Dashcam",
+                        tint = if (isRec) Color.White else palette.dashcamTileFg,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = if (isRec) "REC" else "CAM",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isRec) Color.White else palette.dashcamTileFg
+                    )
                 }
-            )
-
-            DockIconButton(
-                icon = Icons.Default.Settings,
-                contentDescription = "Ajustes",
-                containerColor = palette.subCardBg,
-                contentColor = palette.textSecondary,
-                sizeDp = 36,
-                onClick = onOpenSettings
-            )
+            }
         }
     }
 }
 
+/**
+ * Dock izquierdo ergonómico (80.dp) para conducción horizontal:
+ * Separa físicamente el botón grande de VOZ (arriba) y el botón grande de CAM (abajo),
+ * colocando los botones de Vista Dividida y Ajustes en el centro como barrera táctil.
+ */
 @Composable
 private fun CarPlayLeftDock(
     modifier: Modifier = Modifier,
@@ -684,93 +856,179 @@ private fun CarPlayLeftDock(
         }
     }
 
+    val micBg by animateColorAsState(
+        targetValue = when {
+            isListening -> Color(0xFFFF007F)
+            isSpeaking -> Color(0xFF00B8D4)
+            else -> palette.routesTileBg
+        },
+        animationSpec = tween(200),
+        label = "dockMicBg"
+    )
+
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        color = palette.cardBg.copy(alpha = 0.94f),
+        shape = RoundedCornerShape(24.dp),
+        color = palette.cardBg.copy(alpha = 0.95f),
         shadowElevation = 8.dp,
         border = BorderStroke(1.dp, palette.cardBorder)
     ) {
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(vertical = 12.dp, horizontal = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+                .padding(vertical = 10.dp, horizontal = 6.dp)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = clockText.ifEmpty { "12:00" },
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = palette.textPrimary,
-                    style = TextStyle(fontFeatureSettings = "tnum")
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(
-                                if (NavigationState.isGpsReady.value) Color(0xFF10B981) else Color(0xFFF59E0B),
-                                CircleShape
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "${batteryPct}%",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.textSecondary
-                    )
-                }
-            }
+            val isCompactHeight = maxHeight < 390.dp
+            val heroBtnHeight = if (isCompactHeight) 52.dp else 64.dp
+            val heroIconSize = if (isCompactHeight) 24.dp else 28.dp
 
             Column(
+                modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                DockIconButton(
-                    icon = Icons.Default.GridView,
-                    contentDescription = "Menú Principal",
-                    containerColor = palette.accent,
-                    contentColor = Color.White,
-                    onClick = onBackToHome
-                )
+                // 1. CABECERA + BOTÓN INICIO
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = clockText.ifEmpty { "12:00" },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = palette.textPrimary,
+                            style = TextStyle(fontFeatureSettings = "tnum")
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(
+                                        if (NavigationState.isGpsReady.value) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                        CircleShape
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "${batteryPct}%",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.textSecondary
+                            )
+                        }
+                    }
 
-                DockIconButton(
-                    icon = if (isSplitMode) Icons.Default.Fullscreen else Icons.Default.VerticalSplit,
-                    contentDescription = "Alternar Panel Lateral",
-                    containerColor = if (isSplitMode) palette.routesTileBg else palette.subCardBg,
-                    contentColor = if (isSplitMode) palette.accent else palette.textPrimary,
-                    onClick = onToggleSplitMode
-                )
+                    Surface(
+                        onClick = onBackToHome,
+                        shape = RoundedCornerShape(15.dp),
+                        color = palette.accent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (isCompactHeight) 38.dp else 44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = "Menú Principal",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                }
 
-                val micBg by animateColorAsState(
-                    targetValue = when {
-                        isListening -> Color(0xFFFF007F)
-                        isSpeaking -> Color(0xFF00B8D4)
-                        else -> palette.subCardBg
-                    },
-                    animationSpec = tween(200),
-                    label = "dockMicBg"
-                )
-                DockIconButton(
-                    icon = Icons.Default.Mic,
-                    contentDescription = "Asistente de Voz",
-                    containerColor = micBg,
-                    contentColor = if (isListening || isSpeaking) Color.White else palette.accent,
+                // 2. MITAD SUPERIOR: BOTÓN GRANDE DE VOZ (ASISTENTE SARA)
+                Surface(
                     onClick = {
                         if (isListening || isSpeaking) ArletAssistant.closeOverlay()
                         else ArletAssistant.triggerManualListening()
-                    }
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(15.dp),
-                    color = if (isRec) Color(0xFFE53935) else palette.subCardBg,
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    color = micBg,
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (isListening || isSpeaking) Color.Transparent else palette.accent.copy(alpha = 0.40f)
+                    ),
                     modifier = Modifier
-                        .size(44.dp)
+                        .fillMaxWidth()
+                        .height(heroBtnHeight)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Asistente de Voz",
+                            tint = if (isListening || isSpeaking) Color.White else palette.accent,
+                            modifier = Modifier.size(heroIconSize)
+                        )
+                        Text(
+                            text = if (isListening) "OYENDO" else "VOZ",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            color = if (isListening || isSpeaking) Color.White else palette.accent
+                        )
+                    }
+                }
+
+                // 3. ZONA INTERMEDIA SEPARADORA: Vista Dividida + Ajustes (evita tocar CAM por error al buscar VOZ)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = onToggleSplitMode,
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSplitMode) palette.routesTileBg else palette.subCardBg,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isSplitMode) Icons.Default.Fullscreen else Icons.Default.VerticalSplit,
+                                contentDescription = "Alternar Panel Lateral",
+                                tint = if (isSplitMode) palette.accent else palette.textPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onOpenSettings,
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.subCardBg,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Ajustes",
+                                tint = palette.textSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                // 4. MITAD INFERIOR: BOTÓN GRANDE DE CÁMARA (DASHCAM) — Físicamente alejado de VOZ
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (isRec) Color(0xFFE53935) else palette.dashcamTileBg,
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (isRec) Color.Transparent else palette.dashcamTileFg.copy(alpha = 0.40f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(heroBtnHeight)
                         .pointerInput(isRec) {
                             detectTapGestures(
                                 onTap = {
@@ -783,24 +1041,27 @@ private fun CarPlayLeftDock(
                             )
                         }
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Icon(
                             imageVector = if (isRec) Icons.Default.Stop else Icons.Default.Videocam,
-                            contentDescription = "Dashcam",
+                            contentDescription = "Cámara Dashcam",
                             tint = if (isRec) Color.White else palette.dashcamTileFg,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(heroIconSize)
+                        )
+                        Text(
+                            text = if (isRec) "STOP" else "CAM",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            color = if (isRec) Color.White else palette.dashcamTileFg
                         )
                     }
                 }
             }
-
-            DockIconButton(
-                icon = Icons.Default.Settings,
-                contentDescription = "Ajustes",
-                containerColor = palette.subCardBg,
-                contentColor = palette.textSecondary,
-                onClick = onOpenSettings
-            )
         }
     }
 }

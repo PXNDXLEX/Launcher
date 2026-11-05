@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Looper
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -45,6 +46,7 @@ import kotlinx.coroutines.withContext
 import java.net.URL
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -68,9 +70,10 @@ fun SpeedometerWidget(
 
     val animatedSpeed by animateFloatAsState(
         targetValue = speed,
-        animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 120, easing = LinearEasing),
         label = "SpeedAnimation"
     )
+    val displaySpeedInt = animatedSpeed.roundToInt()
 
     val style = AppSettings.speedoStyle.value 
     val baseColor = Color(AppSettings.speedoColor.value)
@@ -156,15 +159,15 @@ fun SpeedometerWidget(
                 "OMNIMON" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.03f).dp)) {
                         val textShadow = if (isLight) Shadow(color = Color.White.copy(alpha = 0.9f), blurRadius = 10f) else Shadow(color = reactiveColorText, blurRadius = 25f)
-                        Text(text = speed.toInt().toString(), color = if (isLight) Color.Black else Color.White, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, shadow = textShadow))
+                        Text(text = displaySpeedInt.toString(), color = if (isLight) Color.Black else Color.White, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, shadow = textShadow))
                         Text(text = "OMEGA INFORCE", color = if (isLight) Color(0xFFE31B23) else Color(0xFF00E5FF), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp, style = TextStyle(shadow = textShadow))
                         Text(text = "KM/H", color = if (isLight) Color.Black else reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = TextStyle(shadow = textShadow))
                     }
                 }
                 "SHONEN" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.05f).dp)) {
-                        val textShadow = if (speed > 100f && !isLight) Shadow(color = reactiveColorText, offset = Offset(-4f, 4f), blurRadius = 15f) else null
-                        Text(text = speed.toInt().toString(), color = if (isLight) Color.Black else Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = textShadow))
+                        val textShadow = if (animatedSpeed > 100f && !isLight) Shadow(color = reactiveColorText, offset = Offset(-4f, 4f), blurRadius = 15f) else null
+                        Text(text = displaySpeedInt.toString(), color = if (isLight) Color.Black else Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = textShadow))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                             Text(text = "限界突破", color = if (isLight) Color.Black else reactiveColorText, fontSize = (boxSize.value * 0.07f).sp, fontWeight = FontWeight.Bold, style = TextStyle(fontStyle = FontStyle.Italic))
                             Text(text = "KM/H", color = textColor.copy(alpha = 0.8f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic))
@@ -173,22 +176,22 @@ fun SpeedometerWidget(
                 }
                 "MECHA" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.05f).dp)) {
-                        Text(text = "[ ${speed.toInt().toString().padStart(3, '0')} ]", color = if (isLight) Color(0xFF003366) else reactiveColorText, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Bold, style = TextStyle(fontFamily = FontFamily.Monospace))
+                        Text(text = "[ ${displaySpeedInt.toString().padStart(3, '0')} ]", color = if (isLight) Color(0xFF003366) else reactiveColorText, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Bold, style = TextStyle(fontFamily = FontFamily.Monospace))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                            Box(modifier = Modifier.size(10.dp).background(if (speed > 100f) Color(0xFFED1C24) else (if (isLight) Color(0xFF003366) else reactiveColorText)))
-                            Text(text = if (speed > 100f) "SYS_OVERRIDE" else "SYS_THRUST", color = textColor.copy(alpha = 0.7f), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Medium, style = TextStyle(fontFamily = FontFamily.Monospace))
+                            Box(modifier = Modifier.size(10.dp).background(if (animatedSpeed > 100f) Color(0xFFED1C24) else (if (isLight) Color(0xFF003366) else reactiveColorText)))
+                            Text(text = if (animatedSpeed > 100f) "SYS_OVERRIDE" else "SYS_THRUST", color = textColor.copy(alpha = 0.7f), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Medium, style = TextStyle(fontFamily = FontFamily.Monospace))
                         }
                     }
                 }
                 "RACING" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (boxSize.value * 0.15f).dp)) {
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black)
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black)
                         Text(text = "KM/H", color = textColor.copy(alpha = 0.5f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                     }
                 }
                 "CYBER" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (boxSize.value * 0.05f).dp)) {
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Bold)
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Bold)
                         Box(modifier = Modifier.width(60.dp).height(2.dp).background(baseColor.copy(alpha = 0.8f)).padding(vertical = 4.dp))
                         Text(text = "K M / H", color = baseColor.copy(alpha = 0.8f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -196,7 +199,7 @@ fun SpeedometerWidget(
                 "AURA" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (boxSize.value * 0.03f).dp)) {
                         val textShadow = if (!isLight) Shadow(color = baseColor.copy(alpha = 0.4f), offset = Offset(0f, 0f), blurRadius = 25f) else null
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow))
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow))
                         Box(modifier = Modifier.padding(top = 4.dp).background(baseColor, shape = RoundedCornerShape(16.dp)).padding(horizontal = 16.dp, vertical = 4.dp)) {
                             Text(text = "KM/H", color = Color.White, fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                         }
@@ -204,27 +207,27 @@ fun SpeedometerWidget(
                 }
                 "VORTEX" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.05f).dp)) {
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic))
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic))
                         Text(text = "KM/H", color = textColor.copy(alpha = 0.5f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 8.sp)
                     }
                 }
                 "QUANTUM" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.06f).dp)) {
-                        Text(text = speed.toInt().toString().padStart(3, '0'), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Light, style = TextStyle(fontFamily = FontFamily.Monospace))
+                        Text(text = displaySpeedInt.toString().padStart(3, '0'), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Light, style = TextStyle(fontFamily = FontFamily.Monospace))
                         Text(text = "K M / H", color = reactiveColorText, fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
                     }
                 }
                 "PULSAR" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.04f).dp)) {
                         val pulseShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 30f) else null
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Bold, style = TextStyle(shadow = pulseShadow))
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Bold, style = TextStyle(shadow = pulseShadow))
                         Text(text = "KM/H", color = reactiveColorText.copy(alpha = 0.8f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp)
                     }
                 }
                 "PLASMA" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.04f).dp)) {
                         val plasmaShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 25f) else null
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = plasmaShadow))
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.30f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = plasmaShadow))
                         Box(modifier = Modifier.padding(top = 4.dp).background(if (isLight) Color.Black.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 4.dp)) {
                             Text(text = "KM/H", color = reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 5.sp)
                         }
@@ -233,7 +236,7 @@ fun SpeedometerWidget(
                 "ANIME" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.05f).dp)) {
                         val textShadow = Shadow(color = if (isLight) reactiveColorText.copy(alpha = 0.4f) else reactiveColorText, offset = Offset(4f, 4f), blurRadius = 0f)
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = textShadow))
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = textShadow))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                             Text(text = "速度", color = reactiveColorText, fontSize = (boxSize.value * 0.07f).sp, fontWeight = FontWeight.Bold)
                             Text(text = "KM/H", color = textColor.copy(alpha = 0.7f), fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic))
@@ -243,45 +246,45 @@ fun SpeedometerWidget(
                 "KAIJU" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.04f).dp)) {
                         val textShadow = if (!isLight) Shadow(color = reactiveColorText, blurRadius = 30f) else null
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow)) 
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = textShadow)) 
                         Text(text = "K M / H", color = reactiveColorText, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 10.sp)
                     }
                 }
                 "OVERDRIVE" -> {
-                    val glitchOffset = if (speed > 150f) (Math.random() * 6 - 3).dp else 0.dp
+                    val glitchOffset = if (animatedSpeed > 150f) (Math.random() * 6 - 3).dp else 0.dp
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.08f).dp)) {
                         Box(contentAlignment = Alignment.Center) {
-                            if (speed > 100f) {
-                                Text(text = speed.toInt().toString(), color = Color.Red.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = glitchOffset * 2))
-                                Text(text = speed.toInt().toString(), color = Color.Cyan.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = -glitchOffset * 2))
+                            if (animatedSpeed > 100f) {
+                                Text(text = displaySpeedInt.toString(), color = Color.Red.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = glitchOffset * 2))
+                                Text(text = displaySpeedInt.toString(), color = Color.Cyan.copy(alpha=0.5f), fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic), modifier = Modifier.offset(x = -glitchOffset * 2))
                             }
-                            Text(text = speed.toInt().toString(), color = if (isLight) Color(0xFF0F172A) else Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = Shadow(color = reactiveColorText, blurRadius = 24f)))
+                            Text(text = displaySpeedInt.toString(), color = if (isLight) Color(0xFF0F172A) else Color.White, fontSize = (boxSize.value * 0.38f).sp, fontWeight = FontWeight.Black, style = TextStyle(fontStyle = FontStyle.Italic, shadow = Shadow(color = reactiveColorText, blurRadius = 24f)))
                         }
                         Text(text = "KM/H", color = reactiveColorText, fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Black, letterSpacing = 8.sp, style = TextStyle(fontStyle = FontStyle.Italic))
                     }
                 }
                 "NEBULA" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Thin, style = TextStyle(fontFamily = FontFamily.Serif, shadow = Shadow(color = reactiveColorText, blurRadius = 40f)))
+                        Text(text = displaySpeedInt.toString(), color = Color.White, fontSize = (boxSize.value * 0.32f).sp, fontWeight = FontWeight.Thin, style = TextStyle(fontFamily = FontFamily.Serif, shadow = Shadow(color = reactiveColorText, blurRadius = 40f)))
                         Text(text = "KM/H", color = if (isLight) Color(0xFF0F172A) else Color.White.copy(alpha=0.8f), fontSize = (boxSize.value * 0.05f).sp, fontWeight = FontWeight.Black, letterSpacing = 12.sp)
                     }
                 }
                 "DEMONIC" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.06f).dp)) {
-                        Text(text = speed.toInt().toString(), color = Color.White, fontSize = (boxSize.value * 0.40f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = Shadow(color = Color.Black, offset = Offset(0f, 4f), blurRadius = 16f)))
+                        Text(text = displaySpeedInt.toString(), color = Color.White, fontSize = (boxSize.value * 0.40f).sp, fontWeight = FontWeight.Black, style = TextStyle(shadow = Shadow(color = Color.Black, offset = Offset(0f, 4f), blurRadius = 16f)))
                         Text(text = "P O W E R", color = if (isLight) Color(0xFF0F172A) else Color.White, fontSize = (boxSize.value * 0.06f).sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp, style = TextStyle(shadow = Shadow(color = reactiveColorText, blurRadius = 10f)))
                     }
                 }
                 "CUSTOM" -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.offset(y = (-boxSize.value * 0.04f).dp)) {
                         val textShadow = if (!isLight) Shadow(color = reactiveColorText.copy(alpha = 0.5f), blurRadius = 25f) else null
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Bold, style = TextStyle(shadow = textShadow))
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.35f).sp, fontWeight = FontWeight.Bold, style = TextStyle(shadow = textShadow))
                         Text(text = "KM/H", color = textColor.copy(alpha = 0.6f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Normal)
                     }
                 }
                 else -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = speed.toInt().toString(), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Bold)
+                        Text(text = displaySpeedInt.toString(), color = textColor, fontSize = (boxSize.value * 0.28f).sp, fontWeight = FontWeight.Bold)
                         Text(text = "km/h", color = textColor.copy(alpha = 0.6f), fontSize = (boxSize.value * 0.08f).sp, fontWeight = FontWeight.Normal)
                     }
                 }
