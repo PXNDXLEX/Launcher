@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.tuusuario.carlauncher.services.RouteTracker
 import com.tuusuario.carlauncher.services.SpeedRecord
 import com.tuusuario.carlauncher.services.SpeedRecordTracker
+import kotlinx.coroutines.launch
 import kotlin.math.sin
 import kotlin.math.cos
 
@@ -160,31 +161,37 @@ fun RecordsScreen() {
     }
 }
 
-// ── Abre la ruta en el mapa, marcando el punto exacto del récord ──────────────
+// ── Abre la ruta en el mapa de forma asíncrona sin bloquear la animación del toque ──
 private fun openRouteForRecord(record: SpeedRecord) {
-    val route = RouteTracker.loadRoute(record.date)
-    if (route != null) {
-        val snippet = RouteTracker.extractWindowSegment(route, record.time, 30)
-        NavigationState.selectedHistorySegment.value = snippet
-        NavigationState.selectedHistoryRoute.value = route
-    }
-    // Pin exacto del récord (lat/lon del SpeedRecord)
-    if (record.lat != 0.0 && record.lon != 0.0) {
-        NavigationState.speedRecordPin.value = com.mapbox.geojson.Point.fromLngLat(record.lon, record.lat)
-    } else {
-        NavigationState.speedRecordPin.value = null
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        val route = RouteTracker.loadRoute(record.date)
+        val snippet = route?.let { RouteTracker.extractWindowSegment(it, record.time, 30) }
+        val pin = if (record.lat != 0.0 && record.lon != 0.0) {
+            com.mapbox.geojson.Point.fromLngLat(record.lon, record.lat)
+        } else null
+
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            if (route != null) {
+                NavigationState.selectedHistorySegment.value = snippet
+                NavigationState.selectedHistoryRoute.value = route
+            }
+            NavigationState.speedRecordPin.value = pin
+        }
     }
 }
 
-// Mantener función antigua para compatibilidad
 private fun openRouteForDate(date: String, timeStr: String) {
-    val route = RouteTracker.loadRoute(date)
-    if (route != null) {
-        val snippet = RouteTracker.extractWindowSegment(route, timeStr, 30)
-        NavigationState.selectedHistorySegment.value = snippet
-        NavigationState.selectedHistoryRoute.value = route
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        val route = RouteTracker.loadRoute(date)
+        val snippet = route?.let { RouteTracker.extractWindowSegment(it, timeStr, 30) }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            if (route != null) {
+                NavigationState.selectedHistorySegment.value = snippet
+                NavigationState.selectedHistoryRoute.value = route
+            }
+            NavigationState.speedRecordPin.value = null
+        }
     }
-    NavigationState.speedRecordPin.value = null
 }
 
 // ── Tarjeta grande del campeón histórico ─────────────────────────────────────

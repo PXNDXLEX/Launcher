@@ -10,13 +10,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Mapbox SDK — token inyectado como variable de entorno (nunca en git)
-        // En GitHub Actions: secret MAPBOX_DOWNLOADS_TOKEN
-        // En local: agrega en ~/.gradle/gradle.properties → MAPBOX_DOWNLOADS_TOKEN=sk.eyJ1...
+        // Mapbox SDK v11 — soporta token en CI o repositorio público de Mapbox v11
         val mapboxToken = System.getenv("MAPBOX_DOWNLOADS_TOKEN") ?: ""
-        if (mapboxToken.isNotEmpty()) {
-            maven {
-                url = uri("https://api.mapbox.com/downloads/v2/releases/maven")
+        maven {
+            url = uri("https://api.mapbox.com/downloads/v2/releases/maven")
+            if (mapboxToken.isNotEmpty()) {
                 authentication {
                     create<BasicAuthentication>("basic")
                 }
@@ -29,4 +27,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "CarLauncher"
-include(":app")
+include(":app")

@@ -3,25 +3,33 @@ package com.tuusuario.carlauncher.ui
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.media.RingtoneManager
 import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -30,47 +38,32 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha as modifierAlpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.draw.alpha as modifierAlpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import android.os.BatteryManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.tuusuario.carlauncher.services.GlobalState
-import com.tuusuario.carlauncher.services.ArletAssistant
-import com.tuusuario.carlauncher.ui.widgets.ArletMicButton
-import com.tuusuario.carlauncher.ui.widgets.ArletOverlay
-import com.tuusuario.carlauncher.ui.map.NavigationMap
-import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
-import com.tuusuario.carlauncher.ui.widgets.MusicPlayerWidget
-import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.mapbox.geojson.Point
 import com.mapbox.geojson.Feature
 import com.mapbox.geojson.FeatureCollection
 import com.mapbox.geojson.LineString
+import com.mapbox.geojson.Point
+import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.dsl.cameraOptions
@@ -79,76 +72,77 @@ import com.mapbox.maps.extension.style.layers.generated.lineLayer
 import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
 import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
 import com.mapbox.maps.extension.style.sources.addSource
-import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
-import com.mapbox.maps.plugin.animation.MapAnimationOptions
-import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.camera.view.PreviewView
+import com.tuusuario.carlauncher.services.ArletAssistant
+import com.tuusuario.carlauncher.services.DashcamManager
+import com.tuusuario.carlauncher.services.GlobalState
+import com.tuusuario.carlauncher.services.LocationEngine
+import com.tuusuario.carlauncher.services.RouteTracker
+import com.tuusuario.carlauncher.services.SpeedRecordTracker
+import com.tuusuario.carlauncher.ui.map.NavigationMap
+import com.tuusuario.carlauncher.ui.widgets.ArletOverlay
+import com.tuusuario.carlauncher.ui.widgets.CropShape
+import com.tuusuario.carlauncher.ui.widgets.ImageCropperDialog
+import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
+import com.tuusuario.carlauncher.ui.widgets.YouTubeWidget
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.math.roundToInt
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import kotlin.math.sin
 
 /**
- * Turn-by-turn instruction from OSRM steps.
+ * Turn-by-turn instruction from Mapbox Directions / OSRM steps.
  */
 data class RouteStep(
-    val maneuverType: String,   // "turn", "new name", "depart", "arrive", "end of road", "roundabout", "fork", "merge"
-    val modifier: String,       // "left", "right", "straight", "uturn", "slight left", "slight right", "sharp left", "sharp right"
-    val distance: Double,       // meters for this step
+    val maneuverType: String,
+    val modifier: String,
+    val distance: Double,
     val streetName: String,
     val maneuverLat: Double,
     val maneuverLon: Double
 )
 
-object NavigationState { 
+object NavigationState {
     val showGlowTuning = mutableStateOf(false)
-    val currentSpeedKmH = mutableStateOf(0f) 
+    val currentSpeedKmH = mutableStateOf(0f)
     val isBraking = mutableStateOf(false)
     var lastZeroSpeedTime: Long = 0L
     val currentLocation = mutableStateOf<android.location.Location?>(null)
     val selectedHistoryRoute = mutableStateOf<com.tuusuario.carlauncher.services.DailyRoute?>(null)
     val selectedDashcamRoute = mutableStateOf<List<com.tuusuario.carlauncher.services.RoutePoint>?>(null)
 
-    // ── Flags de inicialización real para la pantalla de bienvenida ──────────
-    /** true en cuanto llega el primer fix de GPS con velocidad */
     val isGpsReady = mutableStateOf(false)
-    /** true cuando el mapa Mapbox termina de cargar su primer estilo */
     val isMapStyleReady = mutableStateOf(false)
-    /** true cuando AppSettings ya terminó de leer SharedPreferences */
     val isSettingsLoaded = mutableStateOf(false)
 
-    // ── ACTIVE NAVIGATION (persists across tab switches) ──
-    // Usamos Point de Mapbox GeoJSON como tipo estándar de coordenada
+    // Navegación activa persistente entre pantallas
     val activeDestination = mutableStateOf<Point?>(null)
     val activeRoutePoints = mutableStateListOf<Point>()
     val activeRouteDistance = mutableStateOf("")
     val activeRouteSteps = mutableStateListOf<RouteStep>()
     val cachedRouteJson = mutableStateOf<String?>(null)
     val isRouteActive = mutableStateOf(false)
-    
-    /** Selected segment for history viewing */
-    val selectedHistorySegment = mutableStateOf<com.tuusuario.carlauncher.services.RouteSegment?>(null)
 
-    /** Pin exacto del récord de velocidad (para mostrarlo en el mapa al tocar un record) */
+    val selectedHistorySegment = mutableStateOf<com.tuusuario.carlauncher.services.RouteSegment?>(null)
     val speedRecordPin = mutableStateOf<Point?>(null)
-    
     val pendingRouteTrigger = mutableStateOf(0L)
-    
+
+    // Permite que el asistente de voz abra automáticamente el Modo Navegación al iniciar una ruta
+    val requestedScreen = mutableStateOf<String?>(null)
+
     fun startRoute(dest: Point) {
         activeDestination.value = dest
         pendingRouteTrigger.value = System.currentTimeMillis()
+        requestedScreen.value = "NAVIGATION"
     }
 
     fun clearActiveRoute() {
@@ -161,167 +155,184 @@ object NavigationState {
     }
 }
 
-
-
 @Composable
 fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
-    var currentTime by remember { mutableStateOf("") }
-    var currentDate by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    
-    // Leemos el color activo directamente del AppSettings global
-    val activeUiColor = Color(AppSettings.uiColor.value)
 
-    // FIX: rememberSaveable impide que te saque de la pantalla actual o reinicie YouTube al rotar
-    var currentScreen by rememberSaveable { mutableStateOf("DASHBOARD") } 
-    var showYoutubeInDashboard by rememberSaveable { mutableStateOf(false) }
+    val activeUiColor = Color(AppSettings.uiColor.value)
+    val isNavSplit = AppSettings.navSplitMode.value
+
+    // Pantallas: "HOME", "NAVIGATION", "SPEEDOMETER", "ALL_APPS", "VIDEOS", "RUTAS", "RECORDS", "YOUTUBE"
+    var currentScreen by rememberSaveable { mutableStateOf("HOME") }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var showWelcome by rememberSaveable { mutableStateOf(true) }
 
     val youtubeContent = remember { movableContentOf { YouTubeWidget() } }
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
 
-    LaunchedEffect(lifecycleOwner) {
+    // Sincronizar motor GPS unificado y modo simulación
+    LaunchedEffect(Unit) {
+        LocationEngine.start(context)
         ArletAssistant.init(context, lifecycleOwner)
     }
 
-    LaunchedEffect(Unit) {
-        if (showWelcome) {
-            // Esperar al menos 2 segundos para que la animación se aprecie
-            val startMs = System.currentTimeMillis()
-            // Luego esperar a que los 3 sistemas estén listos (o max 8s de timeout)
-            while (System.currentTimeMillis() - startMs < 8000) {
-                val elapsed = System.currentTimeMillis() - startMs
-                val allReady = NavigationState.isSettingsLoaded.value &&
-                               NavigationState.isMapStyleReady.value &&
-                               NavigationState.isGpsReady.value
-                if (elapsed >= 2000 && allReady) break
-                delay(100)
-            }
-            showWelcome = false
-        }
-        while (true) {
-            val now = LocalDateTime.now()
-            currentTime = now.format(DateTimeFormatter.ofPattern("HH:mm"))
-            currentDate = now.format(DateTimeFormatter.ofPattern("EEE, dd MMM"))
-            delay(1000)
+    LaunchedEffect(AppSettings.batterySaverMode.value) {
+        LocationEngine.refreshHardwareRequest()
+    }
+
+    LaunchedEffect(AppSettings.isGpsSimulationMode.value) {
+        LocationEngine.updateSimulationMode(AppSettings.isGpsSimulationMode.value)
+    }
+
+    // Si Sara/Arlet inicia una ruta por voz, abrir automáticamente el Modo Navegación fluido
+    LaunchedEffect(NavigationState.requestedScreen.value) {
+        val req = NavigationState.requestedScreen.value
+        if (!req.isNullOrBlank()) {
+            currentScreen = req
+            NavigationState.requestedScreen.value = null
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (isLandscape) {
-        Row(modifier = Modifier.fillMaxSize()) {
-                NavigationRail(
-                    modifier = Modifier.width(80.dp).fillMaxHeight(), 
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(currentTime, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = activeUiColor)
-                        Text(currentDate, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        
-                        // Indicadores de sistema (Batería, Señal) - Ahora más compactos
-                        SystemStatusRow()
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        IconButton(onClick = { currentScreen = "DASHBOARD" }) { Icon(Icons.Default.Dashboard, "Dashboard", tint = if (currentScreen == "DASHBOARD") activeUiColor else MaterialTheme.colorScheme.onSurface) }
-                        IconButton(onClick = { currentScreen = "MAPA_FULL" }) { Icon(Icons.Default.Map, "Mapa", tint = if (currentScreen == "MAPA_FULL") activeUiColor else MaterialTheme.colorScheme.onSurface) }
-                        IconButton(onClick = { currentScreen = "YOUTUBE" }) { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) }
-                        IconButton(onClick = { currentScreen = "RUTAS" }) { Icon(Icons.Default.History, "Rutas", tint = if (currentScreen == "RUTAS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
-                        IconButton(onClick = { currentScreen = "VIDEOS" }) { Icon(Icons.Default.VideoLibrary, "Videos", tint = if (currentScreen == "VIDEOS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
-                        IconButton(onClick = { currentScreen = "RECORDS" }) { Icon(Icons.Default.EmojiEvents, "Récords", tint = if (currentScreen == "RECORDS") activeUiColor else MaterialTheme.colorScheme.onSurface) }
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        IconButton(onClick = { showSettingsDialog = true }) { Icon(Icons.Default.Settings, "Ajustes") }
-                        IconButton(onClick = onToggleTheme) { Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Tema") }
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
+    // Arranque rápido sin bloqueos largos
+    LaunchedEffect(Unit) {
+        if (showWelcome) {
+            val startMs = System.currentTimeMillis()
+            while (System.currentTimeMillis() - startMs < 2200) {
+                val elapsed = System.currentTimeMillis() - startMs
+                if (elapsed >= 950 && NavigationState.isSettingsLoaded.value && NavigationState.isMapStyleReady.value) {
+                    break
                 }
-                MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it }, isDarkMode)
+                delay(60)
             }
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Box(modifier = Modifier.weight(1f)) {
-                    MainContentArea(currentScreen, isLandscape, youtubeContent, showYoutubeInDashboard, { showYoutubeInDashboard = it }, isDarkMode)
-                }
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.8f)) {
-                    NavigationBarItem(selected = currentScreen == "DASHBOARD", onClick = { currentScreen = "DASHBOARD" }, icon = { Icon(Icons.Default.Dashboard, "Dashboard", tint = if (currentScreen == "DASHBOARD") activeUiColor else MaterialTheme.colorScheme.onSurface) })
-                    NavigationBarItem(selected = currentScreen == "MAPA_FULL", onClick = { currentScreen = "MAPA_FULL" }, icon = { Icon(Icons.Default.Map, "Mapa", tint = if (currentScreen == "MAPA_FULL") activeUiColor else MaterialTheme.colorScheme.onSurface) })
-                    NavigationBarItem(selected = currentScreen == "YOUTUBE", onClick = { currentScreen = "YOUTUBE" }, icon = { Icon(Icons.Default.OndemandVideo, "YouTube", tint = if (currentScreen == "YOUTUBE") activeUiColor else MaterialTheme.colorScheme.onSurface) })
-                    NavigationBarItem(selected = currentScreen == "RUTAS", onClick = { currentScreen = "RUTAS" }, icon = { Icon(Icons.Default.History, "Rutas", tint = if (currentScreen == "RUTAS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
-                    NavigationBarItem(selected = currentScreen == "VIDEOS", onClick = { currentScreen = "VIDEOS" }, icon = { Icon(Icons.Default.VideoLibrary, "Videos", tint = if (currentScreen == "VIDEOS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
-                    NavigationBarItem(selected = currentScreen == "RECORDS", onClick = { currentScreen = "RECORDS" }, icon = { Icon(Icons.Default.EmojiEvents, "Récords", tint = if (currentScreen == "RECORDS") activeUiColor else MaterialTheme.colorScheme.onSurface) })
-                    NavigationBarItem(selected = false, onClick = { showSettingsDialog = true }, icon = { Icon(Icons.Default.Settings, "Ajustes") })
-                }
-            }
+            showWelcome = false
         }
+    }
 
-        // ── BOTONES RÁPIDOS ARLET & DASHCAM ──
-        // Dashcam arriba, Arlet debajo
-        val isRec = com.tuusuario.carlauncher.services.DashcamManager.isRecording.value
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = if (isLandscape) 96.dp else 0.dp, top = 16.dp, end = 16.dp),
-            contentAlignment = Alignment.TopEnd
+    val isNavigationVisible = currentScreen == "NAVIGATION"
+    val isSubScreenVisible = currentScreen !in setOf("HOME", "NAVIGATION")
+
+    // Padding dinámico para que los controles HUD y el auto 3D se centren en el área libre de CarPlay
+    val mapStartPadding = if (isLandscape) 78.dp else 0.dp
+    val mapEndPadding = if (isLandscape && isNavSplit) 306.dp else 0.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LocalBentoPalette.current.canvasBg)
+    ) {
+        // ══════════════════════════════════════════════════════════════════════
+        // CAPA 0 (PERSISTENTE): Mapa 3D precalentado en memoria (0ms al abrir/cerrar)
+        // ══════════════════════════════════════════════════════════════════════
+        NavigationMap(
+            modifier = Modifier.fillMaxSize(),
+            isFullScreen = !isNavSplit,
+            isDarkMode = isDarkMode,
+            isVisible = isNavigationVisible,
+            startOverlayPadding = mapStartPadding,
+            endOverlayPadding = mapEndPadding
+        )
+
+        // ══════════════════════════════════════════════════════════════════════
+        // CAPA 1: Interfaz CarPlay Split-Screen sobre el Mapa en Modo Navegación
+        // ══════════════════════════════════════════════════════════════════════
+        AnimatedVisibility(
+            visible = isNavigationVisible,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(180)),
+            modifier = Modifier.fillMaxSize()
         ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Botón Dashcam (arriba)
-                Surface(
-                    shape = CircleShape,
-                    color = if (isRec) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (isRec) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant,
-                    shadowElevation = 6.dp,
-                    modifier = Modifier
-                        .size(56.dp)
-                        .pointerInput(isRec) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (isRec) {
-                                        com.tuusuario.carlauncher.services.DashcamManager.stopRecording()
-                                    } else {
-                                        com.tuusuario.carlauncher.services.DashcamManager.startRecording(context, lifecycleOwner)
-                                    }
-                                },
-                                onLongPress = {
-                                    com.tuusuario.carlauncher.services.DashcamManager.cycleCamera(context, lifecycleOwner)
-                                }
-                            )
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(if (isRec) Icons.Default.Stop else Icons.Default.Videocam, "Dashcam")
-                    }
-                }
-
-                // Botón micrófono Asistente de Voz Arlet (debajo)
-                ArletMicButton(activeColor = activeUiColor)
+            BackHandler(enabled = isNavigationVisible && !showSettingsDialog) {
+                currentScreen = "HOME"
             }
+            CarPlayNavigationOverlay(
+                isLandscape = isLandscape,
+                isSplitMode = isNavSplit,
+                onToggleSplitMode = { AppSettings.setNavSplitMode(!isNavSplit) },
+                onBackToHome = { currentScreen = "HOME" },
+                onOpenFullSpeedometer = { currentScreen = "SPEEDOMETER" },
+                onOpenYoutube = { currentScreen = "YOUTUBE" },
+                onOpenSettings = { showSettingsDialog = true }
+            )
         }
 
-        // ── OVERLAY HUD ASISTENTE ARLET (Parte superior central) ──
+        // ══════════════════════════════════════════════════════════════════════
+        // CAPA 2: Menú Principal Bento (Kia Rio Amarillo + Clima + Accesos + Música)
+        // ══════════════════════════════════════════════════════════════════════
+        AnimatedVisibility(
+            visible = currentScreen == "HOME",
+            enter = fadeIn(tween(220)) + scaleIn(
+                initialScale = 0.965f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(180)) + scaleOut(
+                targetScale = 0.97f,
+                animationSpec = tween(180, easing = FastOutSlowInEasing)
+            ),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            HomeBentoScreen(
+                isLandscape = isLandscape,
+                onOpenNavigation = { currentScreen = "NAVIGATION" },
+                onOpenSpeedometer = { currentScreen = "SPEEDOMETER" },
+                onOpenDashcamGallery = { currentScreen = "VIDEOS" },
+                onOpenRoutes = { currentScreen = "RUTAS" },
+                onOpenRecords = { currentScreen = "RECORDS" },
+                onOpenAllApps = { currentScreen = "ALL_APPS" },
+                onOpenYoutube = { currentScreen = "YOUTUBE" },
+                onOpenSettings = { showSettingsDialog = true },
+                onToggleTheme = onToggleTheme
+            )
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // CAPA 3: Sub-ventanas fluidas (Velocímetro 18 Estilos, Apps, Videos, Rutas, Récords, YT)
+        // ══════════════════════════════════════════════════════════════════════
+        AnimatedVisibility(
+            visible = isSubScreenVisible,
+            enter = fadeIn(tween(200)) + slideInVertically(
+                initialOffsetY = { it / 16 },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(160)) + slideOutVertically(
+                targetOffsetY = { it / 18 },
+                animationSpec = tween(160)
+            ),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            SubScreenWindow(
+                screenKey = currentScreen,
+                youtubeContent = youtubeContent,
+                onBackToHome = { currentScreen = "HOME" },
+                onOpenNavigation = { currentScreen = "NAVIGATION" },
+                onOpenScreen = { next -> currentScreen = next },
+                onOpenSettings = { showSettingsDialog = true }
+            )
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // CAPA 4: Overlays Globales (Asistente Voz Sara, Dashcam PiP, Logros Xbox, Notificaciones)
+        // ══════════════════════════════════════════════════════════════════════
+
+        // HUD Asistente de Voz Sara / Arlet
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 16.dp, start = if (isLandscape) 96.dp else 16.dp, end = if (isLandscape) 140.dp else 16.dp),
+                .padding(top = 14.dp, start = 24.dp, end = 24.dp),
             contentAlignment = Alignment.TopCenter
         ) {
             ArletOverlay(activeColor = activeUiColor)
         }
 
-        // ── Overlay de récord de velocidad estilo logro Xbox (parte inferior) ──
-        val hasRecordAlert = com.tuusuario.carlauncher.services.SpeedRecordTracker.recordAlert.value != null
-
-        // Sonido al mostrar el logro
+        // Logro de récord de velocidad estilo Xbox al reducir velocidad (< 10 km/h)
+        val hasRecordAlert = SpeedRecordTracker.recordAlert.value != null
         LaunchedEffect(hasRecordAlert) {
             if (hasRecordAlert) {
                 try {
@@ -336,70 +347,100 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         }
 
         AnimatedVisibility(
-            visible  = hasRecordAlert,
-            enter    = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(400)),
-            exit     = slideOutVertically(targetOffsetY = { it }) + fadeOut(tween(300)),
+            visible = hasRecordAlert,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(320)),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(tween(250)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = if (isLandscape) 12.dp else 8.dp)
-                .padding(horizontal = if (isLandscape) 96.dp else 0.dp)
+                .padding(bottom = 12.dp)
         ) {
             RecordAlertOverlay()
         }
 
-        var offsetX by remember { mutableStateOf(0f) }
+        // Banner deslizable de notificaciones entrantes (ej. WhatsApp)
+        var notifOffsetX by remember { mutableStateOf(0f) }
         AnimatedVisibility(
             visible = GlobalState.showPopup.value,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 24.dp)
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 18.dp)
         ) {
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                elevation = CardDefaults.cardElevation(8.dp),
-                modifier = Modifier.width(350.dp).offset { IntOffset(offsetX.roundToInt(), 0) }.pointerInput(Unit) {
-                    detectHorizontalDragGestures(onDragEnd = { if (abs(offsetX) > 150f) GlobalState.showPopup.value = false; offsetX = 0f }) { change, dragAmount -> change.consume(); offsetX += dragAmount }
-                }
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = LocalBentoPalette.current.cardBg),
+                elevation = CardDefaults.cardElevation(10.dp),
+                border = BorderStroke(1.dp, LocalBentoPalette.current.cardBorder),
+                modifier = Modifier
+                    .width(360.dp)
+                    .offset { IntOffset(notifOffsetX.roundToInt(), 0) }
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (abs(notifOffsetX) > 140f) GlobalState.showPopup.value = false
+                                notifOffsetX = 0f
+                            }
+                        ) { change, dragAmount ->
+                            change.consume()
+                            notifOffsetX += dragAmount
+                        }
+                    }
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(GlobalState.popupApp.value, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(GlobalState.popupMessage.value, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha=0.8f))
+                    Text(
+                        GlobalState.popupApp.value,
+                        fontWeight = FontWeight.Bold,
+                        color = activeUiColor,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        GlobalState.popupMessage.value,
+                        color = LocalBentoPalette.current.textPrimary,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }
 
-        // Menú de configuración con animación fluida
+        // Vista previa flotante arrastrable cuando la Dashcam está grabando
+        if (DashcamManager.isRecording.value) {
+            DashcamPreviewOverlay()
+        }
+
+        // Modal de Configuración
         AnimatedVisibility(
             visible = showSettingsDialog,
-            enter = fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.9f, animationSpec = tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)),
-            exit = fadeOut(animationSpec = tween(200)) + scaleOut(targetScale = 0.9f, animationSpec = tween(200)),
+            enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.93f, animationSpec = tween(220, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.93f, animationSpec = tween(180)),
             modifier = Modifier.fillMaxSize()
         ) {
-            androidx.activity.compose.BackHandler(enabled = showSettingsDialog) {
+            BackHandler(enabled = showSettingsDialog) {
                 showSettingsDialog = false
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.5f))
+                    .background(Color.Black.copy(alpha = 0.55f))
                     .clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = { showSettingsDialog = false }
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Box(modifier = Modifier.clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                Box(
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        onClick = {} // Evitar cerrar al hacer clic dentro de la tarjeta
-                )) {
+                        onClick = {}
+                    )
+                ) {
                     PremiumSettingsDialog(
                         onDismiss = { showSettingsDialog = false },
                         onNavigateToMap = {
-                            currentScreen = "MAPA_FULL"
+                            currentScreen = "NAVIGATION"
                             showSettingsDialog = false
                             NavigationState.showGlowTuning.value = true
                         }
@@ -408,28 +449,29 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             }
         }
 
+        // Diálogo flotante de mapa para Rutas Históricas / Ruta de Video Dashcam / Pin de Récord
         if (NavigationState.selectedHistoryRoute.value != null || NavigationState.selectedDashcamRoute.value != null) {
-            RouteMapFloatingDialog(onDismiss = {
-                NavigationState.selectedHistoryRoute.value = null
-                NavigationState.selectedHistorySegment.value = null
-                NavigationState.selectedDashcamRoute.value = null
-            })
+            RouteMapFloatingDialog(
+                onDismiss = {
+                    NavigationState.selectedHistoryRoute.value = null
+                    NavigationState.selectedHistorySegment.value = null
+                    NavigationState.selectedDashcamRoute.value = null
+                    NavigationState.speedRecordPin.value = null
+                }
+            )
         }
 
-        if (com.tuusuario.carlauncher.services.DashcamManager.isRecording.value) {
-            DashcamPreviewOverlay()
-        }
-
+        // Pantalla de arranque cinemático rápida
         AnimatedVisibility(
             visible = showWelcome,
-            enter = fadeIn(animationSpec = tween(300)),
-            exit = fadeOut(animationSpec = tween(800)) + scaleOut(animationSpec = tween(800), targetScale = 1.08f),
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(450)),
             modifier = Modifier.fillMaxSize()
         ) {
             CinematicWelcomeScreen(
-                accentColor   = activeUiColor,
-                gpsReady      = NavigationState.isGpsReady.value,
-                mapReady      = NavigationState.isMapStyleReady.value,
+                accentColor = activeUiColor,
+                gpsReady = NavigationState.isGpsReady.value,
+                mapReady = NavigationState.isMapStyleReady.value,
                 settingsReady = NavigationState.isSettingsLoaded.value
             )
         }
@@ -443,441 +485,699 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
     var expandedSection by remember { mutableStateOf("") }
     var showSpeedoCropper by remember { mutableStateOf(false) }
+    var showCarPhotoCropper by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
     val speedoBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { pendingCropUri = it; showSpeedoCropper = true }
     }
+    val homeCarPhotoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { pendingCropUri = it; showCarPhotoCropper = true }
+    }
 
-    // Ya no usamos Dialog() nativo, la tarjeta se renderiza directamente para ser animada
     Card(
-        modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .fillMaxHeight(0.90f),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
     ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Header
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                        .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), MaterialTheme.colorScheme.surface)))
-                        .padding(20.dp)
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Cabecera
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                MaterialTheme.colorScheme.surface
+                            )
+                        )
+                    )
+                    .padding(horizontal = 22.dp, vertical = 18.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text("Configuración", fontWeight = FontWeight.Black, fontSize = 26.sp, color = MaterialTheme.colorScheme.onSurface)
-                            Text("Personaliza tu experiencia", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column {
+                        Text(
+                            "Configuración",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 24.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Personaliza interfaz, vehículo, mapa 3D, velocímetros y asistente",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, "Cerrar", modifier = Modifier.size(26.dp))
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // ── APARIENCIA Y TARJETA DE INICIO ──
+                SettingsGroupCard("Apariencia e Inicio") {
+                    SettingsRow(
+                        Icons.Default.Palette,
+                        "Color de Acento Principal",
+                        "Personaliza botones e indicadores",
+                        isExpanded = expandedSection == "color_ui",
+                        onClick = { expandedSection = if (expandedSection == "color_ui") "" else "color_ui" }
+                    ) {
+                        ColorPicker(AppSettings.uiColor.value) { AppSettings.setUiColor(it) }
+                    }
+
+                    SettingsDivider()
+
+                    SettingsRowSwitch(
+                        icon = if (AppSettings.isDarkMode.value) Icons.Default.DarkMode else Icons.Default.LightMode,
+                        title = "Modo Oscuro",
+                        subtitle = "Alterna entre el tema Claro (estilo referencia) y Oscuro Nocturno",
+                        checked = AppSettings.isDarkMode.value,
+                        onCheckedChange = { AppSettings.setDarkMode(it) }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsRowSwitch(
+                        icon = Icons.Default.Schedule,
+                        title = "Cambio Automático Día / Noche por Hora",
+                        subtitle = "Activa modo oscuro automáticamente entre 7:00 PM y 5:00 AM",
+                        checked = AppSettings.autoThemeByTime.value,
+                        onCheckedChange = { AppSettings.setAutoThemeByTime(it) }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsRow(
+                        Icons.Default.DirectionsCarFilled,
+                        "Datos e Imagen de tu Auto en Inicio",
+                        "${AppSettings.carBrandName.value} · ${AppSettings.carModelName.value} (${AppSettings.carYearOrPlate.value})",
+                        isExpanded = expandedSection == "home_car_badge",
+                        onClick = { expandedSection = if (expandedSection == "home_car_badge") "" else "home_car_badge" }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = AppSettings.carBrandName.value,
+                                onValueChange = { AppSettings.setCarBrandName(it) },
+                                label = { Text("Marca (ej. KIA)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = AppSettings.carModelName.value,
+                                onValueChange = { AppSettings.setCarModelName(it) },
+                                label = { Text("Modelo (ej. RIO STYLUS)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = AppSettings.carYearOrPlate.value,
+                                onValueChange = { AppSettings.setCarYearOrPlate(it) },
+                                label = { Text("Placa o Año (ej. AD513IM)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedButton(onClick = { homeCarPhotoPicker.launch("image/*") }) {
+                                    Icon(Icons.Default.Image, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Cambiar foto PNG")
+                                }
+                                if (AppSettings.customHomeCarPhotoPath.value.isNotEmpty()) {
+                                    TextButton(onClick = { AppSettings.setCustomHomeCarPhotoPath("") }) {
+                                        Text("Restaurar Kia Rio Amarillo", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
                         }
-                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar", modifier = Modifier.size(28.dp)) }
                     }
                 }
 
-                Column(
-                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // ── APARIENCIA ──
-                    SettingsGroupCard("Apariencia") {
-                        SettingsRow(Icons.Default.Palette, "Color de Interfaz", "Personaliza el color principal",
-                            isExpanded = expandedSection == "color_ui",
-                            onClick = { expandedSection = if (expandedSection == "color_ui") "" else "color_ui" }
-                        ) { ColorPicker(AppSettings.uiColor.value) { AppSettings.setUiColor(it) } }
+                // ── VEHÍCULO 3D EN EL MAPA ──
+                SettingsGroupCard("Vehículo 3D en Mapa") {
+                    SettingsRow(
+                        Icons.Default.DirectionsCar,
+                        "Modelo 3D en Navegación",
+                        AppSettings.vehicleType.value,
+                        isExpanded = expandedSection == "vehicle_type",
+                        onClick = { expandedSection = if (expandedSection == "vehicle_type") "" else "vehicle_type" }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("STYLUS", "SEDAN", "HATCHBACK", "SPORT", "TAXI", "CORSA", "FLECHA").forEach { option ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (AppSettings.vehicleType.value == option)
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                            else Color.Transparent
+                                        )
+                                        .clickable { AppSettings.setVehicleType(option) }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = AppSettings.vehicleType.value == option,
+                                        onClick = { AppSettings.setVehicleType(option) }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        option,
+                                        fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
 
-                        SettingsDivider()
-
-                        SettingsRowSwitch(
-                            icon = if (AppSettings.isDarkMode.value) Icons.Default.DarkMode else Icons.Default.LightMode,
-                            title = "Modo Oscuro",
-                            checked = AppSettings.isDarkMode.value,
-                            onCheckedChange = { AppSettings.setDarkMode(it) }
-                        )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val isSmallUnitModel = AppSettings.vehicleType.value in setOf("STYLUS", "CORSA")
+                            val sliderRange = if (isSmallUnitModel) 0.005f..0.03f else 0.05f..0.35f
+                            Text(
+                                "Escala del modelo 3D: ${String.format("%.4f", AppSettings.vehicle3DScale.value)}",
+                                fontSize = 13.sp
+                            )
+                            Slider(
+                                value = AppSettings.vehicle3DScale.value.coerceIn(sliderRange.start, sliderRange.endInclusive),
+                                onValueChange = { AppSettings.setVehicle3DScale(it) },
+                                valueRange = sliderRange,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
 
-                    // ── VEHÍCULO ──
-                    SettingsGroupCard("Vehículo") {
-                        SettingsRow(Icons.Default.DirectionsCar, "Ícono del Vehículo", AppSettings.vehicleType.value,
-                            isExpanded = expandedSection == "vehicle_type",
-                            onClick = { expandedSection = if (expandedSection == "vehicle_type") "" else "vehicle_type" }
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("FLECHA", "SEDAN", "HATCHBACK", "SPORT", "TAXI", "STYLUS", "CORSA").forEach { option ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                            .background(if (AppSettings.vehicleType.value == option) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
-                                            .clickable { AppSettings.setVehicleType(option) }.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        RadioButton(selected = AppSettings.vehicleType.value == option, onClick = { AppSettings.setVehicleType(option) }, colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(option, fontWeight = if (AppSettings.vehicleType.value == option) FontWeight.Bold else FontWeight.Normal)
-                                    }
-                                }
-                                
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text("Escala del modelo 3D: ${String.format("%.4f", AppSettings.vehicle3DScale.value)}", fontSize = 14.sp)
-                                Slider(
-                                    value = AppSettings.vehicle3DScale.value,
-                                    onValueChange = { AppSettings.setVehicle3DScale(it) },
-                                    valueRange = 0.005f..0.02f,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    SettingsDivider()
+
+                    SettingsRow(
+                        Icons.Default.LocationOn,
+                        "Color del Icono 2D en Mapa",
+                        "Aplica para Flecha o respaldo 2D",
+                        isExpanded = expandedSection == "map_icon_color",
+                        onClick = { expandedSection = if (expandedSection == "map_icon_color") "" else "map_icon_color" }
+                    ) {
+                        ColorPicker(AppSettings.mapIconColor.value) { AppSettings.setMapIconColor(it) }
+                    }
+
+                    SettingsDivider()
+
+                    SettingsRow(
+                        icon = Icons.Default.Tune,
+                        title = "Ajustar Luces y Dimensiones en Mapa",
+                        subtitle = "Calibración en vivo de faros, luces de freno y escala",
+                        onClick = onNavigateToMap
+                    )
+                }
+
+                // ── NAVEGACIÓN Y MAPA ──
+                SettingsGroupCard("Navegación y CarPlay") {
+                    SettingsRowSwitch(
+                        icon = Icons.Default.VerticalSplit,
+                        title = "Vista Dividida CarPlay al Abrir Mapa",
+                        subtitle = "Muestra el widget de música reducido y velocímetro a un costado del mapa",
+                        checked = AppSettings.navSplitMode.value,
+                        onCheckedChange = { AppSettings.setNavSplitMode(it) }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsRow(
+                        icon = Icons.Default.Map,
+                        title = "Estilo Visual del Mapa",
+                        subtitle = when (AppSettings.mapStyle.value) {
+                            "DARK" -> "Modo Noche"
+                            "NEON" -> "Neon Electric"
+                            "SATELLITE" -> "Vista Satelital"
+                            else -> "Modo Día"
+                        },
+                        isExpanded = expandedSection == "map_style",
+                        onClick = { expandedSection = if (expandedSection == "map_style") "" else "map_style" }
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                            listOf("LIGHT" to "Día", "DARK" to "Noche", "NEON" to "Neon", "SATELLITE" to "Satélite").forEach { (style, label) ->
+                                FilterChip(
+                                    selected = AppSettings.mapStyle.value == style,
+                                    onClick = { AppSettings.setMapStyle(style) },
+                                    label = { Text(label) }
                                 )
                             }
                         }
-                        SettingsDivider()
-                        SettingsRow(Icons.Default.LocationOn, "Color del Icono en Mapa", "Color independiente al de la interfaz",
-                            isExpanded = expandedSection == "map_icon_color",
-                            onClick = { expandedSection = if (expandedSection == "map_icon_color") "" else "map_icon_color" }
-                        ) { ColorPicker(AppSettings.mapIconColor.value) { AppSettings.setMapIconColor(it) } }
-                        
-                        SettingsDivider()
-                        SettingsRow(
-                            icon = Icons.Default.Tune,
-                            title = "Ajustar Luces y Dimensiones",
-                            subtitle = "Calibración fina de faros, escala y brillos en el mapa",
-                            onClick = onNavigateToMap
+                    }
+
+                    SettingsDivider()
+
+                    SettingsRow(
+                        Icons.Default.CloudDownload,
+                        "Mapas Offline Inteligentes",
+                        "Gestión automática de caché Mapbox 3D",
+                        isExpanded = expandedSection == "offline_maps",
+                        onClick = { expandedSection = if (expandedSection == "offline_maps") "" else "offline_maps" }
+                    ) {
+                        OfflineMapDownloader(context, coroutineScope)
+                    }
+
+                    SettingsDivider()
+
+                    SettingsRowSwitch(
+                        icon = Icons.Default.DirectionsCar,
+                        title = "Modo Simulación de Movimiento GPS",
+                        subtitle = "Prueba en vivo velocímetros, luces de freno y cámara 3D",
+                        checked = AppSettings.isGpsSimulationMode.value,
+                        onCheckedChange = { AppSettings.setGpsSimulationMode(it) }
+                    )
+                }
+
+                // ── VELOCÍMETROS (18 ESTILOS) ──
+                SettingsGroupCard("Velocímetro (18 Estilos)") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp)
+                            .padding(12.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(if (AppSettings.isDarkMode.value) Color(0xFF141B2D) else Color(0xFFF1F5FB)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SpeedometerWidget()
+                        Text(
+                            "Vista Previa · ${AppSettings.speedoStyle.value}",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 4.dp)
                         )
                     }
 
-                    // ── NAVEGACIÓN ──
-                    SettingsGroupCard("Navegación") {
-                        SettingsRow(
-                            icon = Icons.Default.Map,
-                            title = "Estilo de Mapa",
-                            subtitle = when(AppSettings.mapStyle.value) {
-                                "DARK" -> "Modo Noche"
-                                "NEON" -> "Neon Electric"
-                                "SATELLITE" -> "Vista Satelital"
-                                else -> "Modo Día"
-                            },
-                            isExpanded = expandedSection == "map_style",
-                            onClick = { expandedSection = if (expandedSection == "map_style") "" else "map_style" }
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                                listOf("LIGHT" to "Día", "DARK" to "Noche", "NEON" to "Neon", "SATELLITE" to "Sat.").forEach { (style, label) ->
-                                    FilterChip(
-                                        selected = AppSettings.mapStyle.value == style,
-                                        onClick = { AppSettings.setMapStyle(style) },
-                                        label = { Text(label) }
-                                    )
+                    SettingsDivider()
+
+                    SettingsRow(
+                        Icons.Default.Speed,
+                        "Estilo del Tablero",
+                        AppSettings.speedoStyle.value,
+                        isExpanded = expandedSection == "speedo_style",
+                        onClick = { expandedSection = if (expandedSection == "speedo_style") "" else "speedo_style" }
+                    ) {
+                        val opts = listOf(
+                            "PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX",
+                            "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON",
+                            "SHONEN", "MECHA", "OVERDRIVE", "DEMONIC", "NEBULA", "CUSTOM"
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            opts.chunked(3).forEach { row ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    row.forEach { o ->
+                                        FilterChip(
+                                            selected = AppSettings.speedoStyle.value == o,
+                                            onClick = { AppSettings.setSpeedoStyle(o) },
+                                            label = { Text(o, fontSize = 11.sp, maxLines = 1) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                                 }
                             }
                         }
-
-                        SettingsDivider()
-                        SettingsRowSwitch(
-                            icon = Icons.Default.DirectionsCar,
-                            title = "Modo Test de Movimiento",
-                            checked = AppSettings.isGpsSimulationMode.value,
-                            onCheckedChange = { AppSettings.setGpsSimulationMode(it) }
-                        )
                     }
 
-                    // ── VELOCÍMETRO ──
-                    SettingsGroupCard("Velocímetro") {
-                        // Vista previa en vivo del velocímetro
-                        val configuration = LocalConfiguration.current
-                        val previewIsLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-                        val previewHeight = if (previewIsLandscape) 280.dp else 200.dp
-                        
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(previewHeight)
-                                .padding(12.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(
-                                    if (AppSettings.isDarkMode.value) Color(0xFF1A1A2E) 
-                                    else Color(0xFFF0F0F5)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            SpeedometerWidget()
-                            // Etiqueta
-                            Text(
-                                "Vista Previa • ${AppSettings.speedoStyle.value}",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)
-                            )
-                        }
+                    SettingsDivider()
 
-                        SettingsDivider()
+                    SettingsRow(
+                        Icons.Default.Lightbulb,
+                        "Color de Retroiluminación",
+                        "Color principal del velocímetro",
+                        isExpanded = expandedSection == "speedo_color",
+                        onClick = { expandedSection = if (expandedSection == "speedo_color") "" else "speedo_color" }
+                    ) {
+                        ColorPicker(AppSettings.speedoColor.value) { AppSettings.setSpeedoColor(it) }
+                    }
 
-                        SettingsRow(Icons.Default.Speed, "Estilo del Tablero", AppSettings.speedoStyle.value,
-                            isExpanded = expandedSection == "speedo_style",
-                            onClick = { expandedSection = if (expandedSection == "speedo_style") "" else "speedo_style" }
-                        ) {
-                            val opts = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "OVERDRIVE", "DEMONIC", "NEBULA", "CUSTOM")
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                opts.chunked(3).forEach { row ->
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        row.forEach { o -> FilterChip(selected = AppSettings.speedoStyle.value == o, onClick = { AppSettings.setSpeedoStyle(o) }, label = { Text(o, fontSize = 11.sp, maxLines = 1) }, modifier = Modifier.weight(1f), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) }
-                                        repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    AnimatedVisibility(visible = AppSettings.speedoStyle.value == "CUSTOM") {
+                        Column {
+                            SettingsDivider()
+                            SettingsRow(
+                                Icons.Default.Category,
+                                "Forma Base",
+                                AppSettings.customSpeedoShape.value,
+                                isExpanded = expandedSection == "custom_shape",
+                                onClick = { expandedSection = if (expandedSection == "custom_shape") "" else "custom_shape" }
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("ARC", "CIRCLE", "LINE").forEach { s ->
+                                        FilterChip(
+                                            selected = AppSettings.customSpeedoShape.value == s,
+                                            onClick = { AppSettings.setCustomSpeedoShape(s) },
+                                            label = { Text(s) }
+                                        )
                                     }
                                 }
                             }
-                        }
 
-                        SettingsDivider()
-                        SettingsRow(Icons.Default.Lightbulb, "Color Retroiluminación", "Color independiente",
-                            isExpanded = expandedSection == "speedo_color",
-                            onClick = { expandedSection = if (expandedSection == "speedo_color") "" else "speedo_color" }
-                        ) { ColorPicker(AppSettings.speedoColor.value) { AppSettings.setSpeedoColor(it) } }
-
-                        AnimatedVisibility(visible = AppSettings.speedoStyle.value == "CUSTOM") {
-                            Column {
-                                SettingsDivider()
-                                SettingsRow(Icons.Default.Category, "Forma Base", AppSettings.customSpeedoShape.value,
-                                    isExpanded = expandedSection == "custom_shape",
-                                    onClick = { expandedSection = if (expandedSection == "custom_shape") "" else "custom_shape" }
-                                ) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("ARC", "CIRCLE", "LINE").forEach { s -> FilterChip(selected = AppSettings.customSpeedoShape.value == s, onClick = { AppSettings.setCustomSpeedoShape(s) }, label = { Text(s) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) } } }
-
-                                SettingsDivider()
-                                // Selector moderno de agujas con descripciones
-                                SettingsRow(Icons.Default.Straighten, "Estilo de Aguja", AppSettings.customSpeedoNeedle.value,
-                                    isExpanded = expandedSection == "custom_needle",
-                                    onClick = { expandedSection = if (expandedSection == "custom_needle") "" else "custom_needle" }
-                                ) {
-                                    val needleOptions = listOf(
-                                        Triple("PLASMA", "🔥 Flama", "Aguja ondulante de fuego"),
-                                        Triple("KATANA", "⚔️ Katana", "Hoja afilada japonesa"),
-                                        Triple("ARROW", "➤ Flecha", "Punto + línea clásica"),
-                                        Triple("NEON", "💡 Neón", "Barra con halo brillante"),
-                                        Triple("LASER", "✨ Láser", "Rayo con partículas"),
-                                        Triple("BOLT", "⚡ Rayo", "Zigzag eléctrico")
-                                    )
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        needleOptions.chunked(2).forEach { row ->
-                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                row.forEach { (key, icon, desc) ->
-                                                    val isSelected = AppSettings.customSpeedoNeedle.value == key
-                                                    Card(
-                                                        modifier = Modifier.weight(1f).clickable { AppSettings.setCustomSpeedoNeedle(key) },
-                                                        shape = RoundedCornerShape(12.dp),
-                                                        colors = CardDefaults.cardColors(
-                                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) 
-                                                                           else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                                        ),
-                                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
-                                                    ) {
-                                                        Column(modifier = Modifier.padding(10.dp)) {
-                                                            Text(icon, fontSize = 16.sp)
-                                                            Spacer(modifier = Modifier.height(2.dp))
-                                                            Text(key, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, fontSize = 13.sp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                                                            Text(desc, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                                                        }
+                            SettingsDivider()
+                            SettingsRow(
+                                Icons.Default.Straighten,
+                                "Estilo de Aguja",
+                                AppSettings.customSpeedoNeedle.value,
+                                isExpanded = expandedSection == "custom_needle",
+                                onClick = { expandedSection = if (expandedSection == "custom_needle") "" else "custom_needle" }
+                            ) {
+                                val needleOptions = listOf(
+                                    Triple("PLASMA", "Flama", "Aguja ondulante"),
+                                    Triple("KATANA", "Katana", "Hoja afilada"),
+                                    Triple("ARROW", "Flecha", "Clásica"),
+                                    Triple("NEON", "Neón", "Halo brillante"),
+                                    Triple("LASER", "Láser", "Partículas"),
+                                    Triple("BOLT", "Rayo", "Eléctrico")
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    needleOptions.chunked(2).forEach { row ->
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            row.forEach { (key, title, desc) ->
+                                                val isSel = AppSettings.customSpeedoNeedle.value == key
+                                                Card(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clickable { AppSettings.setCustomSpeedoNeedle(key) },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    border = if (isSel) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+                                                ) {
+                                                    Column(modifier = Modifier.padding(10.dp)) {
+                                                        Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                        Text(desc, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                     }
                                                 }
-                                                repeat(2 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                                             }
+                                            repeat(2 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                                         }
                                     }
                                 }
+                            }
 
-                                SettingsDivider()
-                                SettingsRow(Icons.Default.LineWeight, "Grosor", "Ajusta el grosor del arco",
-                                    isExpanded = expandedSection == "custom_thickness",
-                                    onClick = { expandedSection = if (expandedSection == "custom_thickness") "" else "custom_thickness" }
-                                ) { Slider(value = AppSettings.customSpeedoThickness.value, onValueChange = { AppSettings.setCustomSpeedoThickness(it) }, valueRange = 0.02f..0.15f) }
+                            SettingsDivider()
+                            SettingsRow(
+                                Icons.Default.LineWeight,
+                                "Grosor del Arco",
+                                String.format("%.2f", AppSettings.customSpeedoThickness.value),
+                                isExpanded = expandedSection == "custom_thickness",
+                                onClick = { expandedSection = if (expandedSection == "custom_thickness") "" else "custom_thickness" }
+                            ) {
+                                Slider(
+                                    value = AppSettings.customSpeedoThickness.value,
+                                    onValueChange = { AppSettings.setCustomSpeedoThickness(it) },
+                                    valueRange = 0.02f..0.15f
+                                )
+                            }
 
-                                SettingsDivider()
-                                SettingsRow(Icons.Default.Image, "Imagen de Fondo",
-                                    if (AppSettings.customSpeedoBgPath.value.isNotEmpty()) "Imagen configurada ✓" else "Selecciona imagen o GIF",
-                                    onClick = { speedoBgPicker.launch("image/*") })
-                                if (AppSettings.customSpeedoBgPath.value.isNotEmpty()) {
-                                    Column(modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 8.dp)) {
-                                        Text("Opacidad del fondo", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Slider(value = AppSettings.customSpeedoBgOpacity.value, onValueChange = { AppSettings.setCustomSpeedoBgOpacity(it) }, valueRange = 0.1f..1.0f)
-                                        TextButton(onClick = { AppSettings.setCustomSpeedoBgPath(""); AppSettings.setCustomSpeedoBgUri("") }) {
-                                            Text("Quitar imagen", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                                        }
+                            SettingsDivider()
+                            SettingsRow(
+                                Icons.Default.Image,
+                                "Imagen o GIF de Fondo",
+                                if (AppSettings.customSpeedoBgPath.value.isNotEmpty()) "Configurada ✓" else "Seleccionar imagen o GIF",
+                                onClick = { speedoBgPicker.launch("image/*") }
+                            )
+                            if (AppSettings.customSpeedoBgPath.value.isNotEmpty()) {
+                                Column(modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 8.dp)) {
+                                    Text("Opacidad", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Slider(
+                                        value = AppSettings.customSpeedoBgOpacity.value,
+                                        onValueChange = { AppSettings.setCustomSpeedoBgOpacity(it) },
+                                        valueRange = 0.1f..1.0f
+                                    )
+                                    TextButton(onClick = {
+                                        AppSettings.setCustomSpeedoBgPath("")
+                                        AppSettings.setCustomSpeedoBgUri("")
+                                    }) {
+                                        Text("Quitar imagen", color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }
                         }
                     }
-
-                    // ── MAPA ──
-                    SettingsGroupCard("Mapa") {
-                        SettingsRowSwitch(
-                            icon = if (AppSettings.isMapDarkMode.value) Icons.Default.DarkMode else Icons.Default.LightMode,
-                            title = "Modo Oscuro del Mapa",
-                            checked = AppSettings.isMapDarkMode.value,
-                            onCheckedChange = { AppSettings.setMapDarkMode(it) }
-                        )
-                        SettingsDivider()
-                        SettingsRow(Icons.Default.CloudDownload, "Mapas Offline", "Descargar zona actual",
-                            isExpanded = expandedSection == "offline_maps",
-                            onClick = { expandedSection = if (expandedSection == "offline_maps") "" else "offline_maps" }
-                        ) { OfflineMapDownloader(context, coroutineScope) }
-                        SettingsDivider()
-                    }
-
-                    // ── ASISTENTE DE VOZ SARA ──
-                    SettingsGroupCard("Asistente de Voz Sara") {
-                        SettingsRowSwitch(
-                            icon = Icons.Default.RecordVoiceOver,
-                            title = "Activación por Voz Manos Libres (\"Sara\" / \"Oye Sara\")",
-                            subtitle = "Escuchar continuamente y activar comandos por voz diciendo 'Sara' u 'Oye Sara'",
-                            checked = AppSettings.arletVoiceWakeEnabled.value,
-                            onCheckedChange = { enabled ->
-                                AppSettings.setArletVoiceWakeEnabled(enabled)
-                                if (enabled) {
-                                    ArletAssistant.startContinuousListening()
-                                } else {
-                                    ArletAssistant.stopContinuousListening()
-                                }
-                            }
-                        )
-                        SettingsDivider()
-                        SettingsRow(
-                            icon = Icons.Default.HelpOutline,
-                            title = "Probar Voz y Comandos",
-                            subtitle = "Escuchar ejemplo de voz y comandos disponibles",
-                            onClick = {
-                                ArletAssistant.speak("Hola, soy Sara. Puedes decir 'Oye Sara comienza a grabar', 'Sara pon música' o tocar mi botón en pantalla.")
-                            }
-                        )
-                    }
-
-                    // ── SISTEMA ──
-                    SettingsGroupCard("Sistema") {
-                        SettingsRowSwitch(
-                            icon = Icons.Default.BatterySaver,
-                            title = "Ahorro de Batería",
-                            checked = AppSettings.batterySaverMode.value,
-                            onCheckedChange = { AppSettings.setBatterySaverMode(it) }
-                        )
-                        SettingsDivider()
-                        SettingsRow(Icons.Default.BatteryAlert, "Optimización de Batería de Android", "Música en segundo plano",
-                            onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) })
-                        
-                    }
-
-                    // ── NOTIFICACIONES / PRUEBA ──
-                    SettingsGroupCard("Notificaciones") {
-                        SettingsRow(
-                            icon     = Icons.Default.Speed,
-                            title    = "Probar logro — Récord del día",
-                            subtitle = "Muestra la notificación de prueba (no guarda datos)",
-                            onClick  = {
-                                com.tuusuario.carlauncher.services.SpeedRecordTracker.triggerTestAlert(isAllTime = false)
-                            }
-                        )
-                        SettingsDivider()
-                        SettingsRow(
-                            icon     = Icons.Default.EmojiEvents,
-                            title    = "Probar logro — Récord histórico",
-                            subtitle = "Muestra la notificación dorada de prueba",
-                            onClick  = {
-                                com.tuusuario.carlauncher.services.SpeedRecordTracker.triggerTestAlert(isAllTime = true)
-                            }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
+
+                // ── ASISTENTE DE VOZ SARA / ARLET ──
+                SettingsGroupCard("Asistente de Voz Sara") {
+                    SettingsRowSwitch(
+                        icon = Icons.Default.RecordVoiceOver,
+                        title = "Activación por Voz Offline (\"Sara\" / \"Oye Sara\")",
+                        subtitle = "Escucha continua sin internet ni bips de sistema mediante Vosk",
+                        checked = AppSettings.arletVoiceWakeEnabled.value,
+                        onCheckedChange = { enabled ->
+                            AppSettings.setArletVoiceWakeEnabled(enabled)
+                            if (enabled) ArletAssistant.startContinuousListening()
+                            else ArletAssistant.stopContinuousListening()
+                        }
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = Icons.Default.HelpOutline,
+                        title = "Probar Voz y Comandos",
+                        subtitle = "Escuchar demostración del copiloto virtual",
+                        onClick = {
+                            ArletAssistant.speak("Hola, soy Sara. Puedes decir 'Oye Sara llévame a casa', 'Sara graba video' o 'Sara pon música'.")
+                        }
+                    )
+                }
+
+                // ── SISTEMA Y PRUEBAS ──
+                SettingsGroupCard("Sistema y Récords") {
+                    SettingsRowSwitch(
+                        icon = Icons.Default.BatterySaver,
+                        title = "Modo Ahorro de Batería GPS",
+                        subtitle = "Reduce frecuencia de muestreo GPS cuando no requieres máxima respuesta",
+                        checked = AppSettings.batterySaverMode.value,
+                        onCheckedChange = { AppSettings.setBatterySaverMode(it) }
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        Icons.Default.BatteryAlert,
+                        "Optimización de Batería de Android",
+                        "Evitar cierre de música o asistente en segundo plano",
+                        onClick = {
+                            try {
+                                context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            } catch (_: Exception) {}
+                        }
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = Icons.Default.Speed,
+                        title = "Probar Logro — Récord del Día",
+                        subtitle = "Muestra animación estilo Xbox sin alterar tus datos",
+                        onClick = { SpeedRecordTracker.triggerTestAlert(isAllTime = false) }
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = Icons.Default.EmojiEvents,
+                        title = "Probar Logro — Récord Histórico",
+                        subtitle = "Muestra notificación dorada de récord histórico",
+                        onClick = { SpeedRecordTracker.triggerTestAlert(isAllTime = true) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
             }
         }
+    }
 
-
-
-    // Croppers
     if (showSpeedoCropper && pendingCropUri != null) {
-        com.tuusuario.carlauncher.ui.widgets.ImageCropperDialog(
-            imageUri = pendingCropUri!!, outputFileName = "custom_speedo_bg.png",
-            initialCropShape = com.tuusuario.carlauncher.ui.widgets.CropShape.CIRCLE,
-            onCropped = { path -> AppSettings.setCustomSpeedoBgPath(path); AppSettings.setCustomSpeedoBgUri(path); showSpeedoCropper = false; pendingCropUri = null },
-            onDismiss = { showSpeedoCropper = false; pendingCropUri = null }
+        ImageCropperDialog(
+            imageUri = pendingCropUri!!,
+            outputFileName = "custom_speedo_bg.png",
+            initialCropShape = CropShape.CIRCLE,
+            onCropped = { path ->
+                AppSettings.setCustomSpeedoBgPath(path)
+                AppSettings.setCustomSpeedoBgUri(path)
+                showSpeedoCropper = false
+                pendingCropUri = null
+            },
+            onDismiss = {
+                showSpeedoCropper = false
+                pendingCropUri = null
+            }
+        )
+    }
+
+    if (showCarPhotoCropper && pendingCropUri != null) {
+        ImageCropperDialog(
+            imageUri = pendingCropUri!!,
+            outputFileName = "custom_home_car.png",
+            initialCropShape = CropShape.SQUARE,
+            onCropped = { path ->
+                AppSettings.setCustomHomeCarPhotoPath(path)
+                showCarPhotoCropper = false
+                pendingCropUri = null
+            },
+            onDismiss = {
+                showCarPhotoCropper = false
+                pendingCropUri = null
+            }
         )
     }
 }
 
 @Composable
 fun RouteHistoryScreen() {
-    val allRoutes = remember { mutableStateOf(com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()) }
-    val routes = allRoutes.value.filter { !it.isDeleted }
-    val availableDates = routes.map { it.date }.distinct().sorted()
-    
-    var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
+    val scope = rememberCoroutineScope()
+    var allRoutes by remember { mutableStateOf<List<com.tuusuario.carlauncher.services.DailyRoute>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    val routes = remember(allRoutes) { allRoutes.filter { !it.isDeleted } }
+    val availableDates = remember(routes) { routes.map { it.date }.distinct().sorted() }
+
+    var selectedDateIndex by remember { mutableStateOf(0) }
     var showingTrash by remember { mutableStateOf(false) }
     val activeUiColor = Color(AppSettings.uiColor.value)
 
-    // Refresh when coming back
+    fun refreshRoutesAsync(selectLatest: Boolean = false) {
+        scope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                RouteTracker.getAllRoutes()
+            }
+            allRoutes = loaded
+            if (selectLatest) {
+                val activeDates = loaded.filter { !it.isDeleted }.map { it.date }.distinct().sorted()
+                selectedDateIndex = activeDates.lastIndex.coerceAtLeast(0)
+            }
+            isLoading = false
+        }
+    }
+
     LaunchedEffect(Unit) {
-        allRoutes.value = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
+        refreshRoutesAsync(selectLatest = true)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ── HEADER ──
         Row(
-            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(28.dp))
-                Spacer(modifier = Modifier.width(12.dp))
+                Icon(
+                    Icons.Default.History,
+                    null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(26.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    if (showingTrash) "Papelera" else "Historial de Rutas",
-                    fontWeight = FontWeight.Bold, fontSize = 22.sp,
+                    if (showingTrash) "Papelera de Rutas" else "Historial de Rutas",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
             IconButton(onClick = { showingTrash = !showingTrash }) {
-                Icon(if (showingTrash) Icons.Default.List else Icons.Default.DeleteOutline, "Alternar Papelera", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Icon(
+                    if (showingTrash) Icons.Default.List else Icons.Default.DeleteOutline,
+                    "Alternar Papelera",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             }
         }
 
-        if (showingTrash) {
-            // ── TRASH VIEW (unchanged logic) ──
-            val trashRoutes = allRoutes.value.filter { it.isDeleted }
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = activeUiColor)
+            }
+        } else if (showingTrash) {
+            val trashRoutes = allRoutes.filter { it.isDeleted }
             if (trashRoutes.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(64.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Icon(
+                            Icons.Default.DeleteOutline,
+                            null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(60.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text("La papelera está vacía", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
-                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     items(trashRoutes.size) { i ->
                         val route = trashRoutes[i]
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            )
                         ) {
-                            Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(32.dp))
-                                Spacer(modifier = Modifier.width(16.dp))
+                            Row(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Map, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(30.dp))
+                                Spacer(modifier = Modifier.width(14.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Ruta del ${route.date}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     val totalPts = route.segments.sumOf { it.points.size }
-                                    Text("$totalPts puntos · ${route.segments.size} segmentos", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    route.deletedAt?.let {
-                                        Text("Borrado: ${it.split("T").getOrElse(0) { it }}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                                    }
+                                    Text(
+                                        "$totalPts puntos · ${route.segments.size} segmentos",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                                 IconButton(onClick = {
-                                    route.isDeleted = false; route.deletedAt = null
-                                    com.tuusuario.carlauncher.services.RouteTracker.saveRoute(route)
-                                    allRoutes.value = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
-                                }) { Icon(Icons.Default.Restore, "Restaurar", tint = MaterialTheme.colorScheme.primary) }
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            route.isDeleted = false
+                                            route.deletedAt = null
+                                            RouteTracker.saveRoute(route)
+                                        }
+                                        refreshRoutesAsync()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Restore, "Restaurar", tint = MaterialTheme.colorScheme.primary)
+                                }
                             }
                         }
                     }
                 }
             }
         } else {
-            // ── MAIN VIEW: Day Navigation + Segments ──
             if (availableDates.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(64.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Icon(
+                            Icons.Default.History,
+                            null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(60.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text("No hay rutas registradas", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Conduce al menos 10 metros para empezar", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                        Text(
+                            "Conduce al menos 10 metros para empezar",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
                     }
                 }
             } else {
@@ -885,14 +1185,19 @@ fun RouteHistoryScreen() {
                 val currentDate = availableDates[safeIndex]
                 val currentRoute = routes.find { it.date == currentDate }
 
-                // ── DAY NAVIGATION BAR ──
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -900,16 +1205,23 @@ fun RouteHistoryScreen() {
                             onClick = { if (safeIndex > 0) selectedDateIndex = safeIndex - 1 },
                             enabled = safeIndex > 0
                         ) {
-                            Icon(Icons.Default.ChevronLeft, "Día anterior",
+                            Icon(
+                                Icons.Default.ChevronLeft,
+                                "Día anterior",
                                 tint = if (safeIndex > 0) activeUiColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(32.dp))
+                                modifier = Modifier.size(30.dp)
+                            )
                         }
 
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(currentDate, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = activeUiColor)
+                            Text(currentDate, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = activeUiColor)
                             currentRoute?.let { r ->
                                 val totalPts = r.segments.sumOf { it.points.size }
-                                Text("${r.segments.size} segmentos · $totalPts puntos", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "${r.segments.size} segmentos · $totalPts puntos",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -917,146 +1229,127 @@ fun RouteHistoryScreen() {
                             onClick = { if (safeIndex < availableDates.lastIndex) selectedDateIndex = safeIndex + 1 },
                             enabled = safeIndex < availableDates.lastIndex
                         ) {
-                            Icon(Icons.Default.ChevronRight, "Día siguiente",
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                "Día siguiente",
                                 tint = if (safeIndex < availableDates.lastIndex) activeUiColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(32.dp))
+                                modifier = Modifier.size(30.dp)
+                            )
                         }
                     }
                 }
 
-                // ── SEGMENTS LIST ──
                 if (currentRoute != null && currentRoute.segments.isNotEmpty()) {
                     val reversedSegments = currentRoute.segments.reversed()
-                    
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        // Tarjeta de resumen de todo el día
                         item {
                             Card(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    NavigationState.selectedHistorySegment.value = null
-                                    NavigationState.selectedHistoryRoute.value = currentRoute
-                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        NavigationState.selectedHistorySegment.value = null
+                                        NavigationState.speedRecordPin.value = null
+                                        NavigationState.selectedHistoryRoute.value = currentRoute
+                                    },
                                 shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = activeUiColor.copy(alpha = 0.15f)
-                                )
+                                colors = CardDefaults.cardColors(containerColor = activeUiColor.copy(alpha = 0.14f))
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.size(48.dp)
+                                        modifier = Modifier
+                                            .size(46.dp)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .background(activeUiColor.copy(alpha = 0.25f)),
+                                            .background(activeUiColor.copy(alpha = 0.22f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(Icons.Default.Map, null, tint = activeUiColor, modifier = Modifier.size(24.dp))
                                     }
                                     Spacer(modifier = Modifier.width(14.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "Resumen de todo el día",
-                                            fontWeight = FontWeight.Bold, fontSize = 16.sp,
-                                            color = activeUiColor
-                                        )
-                                        Text(
-                                            "Ruta completa con todas las horas",
-                                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Text("Resumen de todo el día", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = activeUiColor)
+                                        Text("Ver recorrido completo en el mapa", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Icon(Icons.Default.ChevronRight, null, tint = activeUiColor)
                                 }
                             }
                         }
 
-                        // Lista de segmentos
                         items(reversedSegments.size) { segIndex ->
                             val segment = reversedSegments[segIndex]
                             Card(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    // Open this segment's route on the map
-                                    NavigationState.selectedHistorySegment.value = segment
-                                    NavigationState.selectedHistoryRoute.value = currentRoute
-                                    NavigationState.speedRecordPin.value = null
-                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        NavigationState.selectedHistorySegment.value = segment
+                                        NavigationState.selectedHistoryRoute.value = currentRoute
+                                        NavigationState.speedRecordPin.value = null
+                                    },
                                 shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    // Icono
                                     Box(
-                                        modifier = Modifier.size(44.dp)
+                                        modifier = Modifier
+                                            .size(42.dp)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .background(activeUiColor.copy(alpha = 0.15f)),
+                                            .background(activeUiColor.copy(alpha = 0.14f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(Icons.Default.Timeline, null, tint = activeUiColor, modifier = Modifier.size(22.dp))
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    // Hora inicio — fin
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "${segment.startTime} — ${segment.endTime}",
-                                            fontWeight = FontWeight.Bold, fontSize = 15.sp
-                                        )
-                                        Text(
-                                            "${segment.points.size} pts",
-                                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Text("${segment.startTime} — ${segment.endTime}", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Text("${segment.points.size} puntos GPS", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    // Puntos alineados a la derecha (número grande)
-                                    Column(
-                                        horizontalAlignment = Alignment.End,
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
-                                        Text(
-                                            "${segment.points.size}",
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 22.sp,
-                                            color = activeUiColor
-                                        )
-                                        Text(
-                                            "puntos",
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
+                                    Text("${segment.points.size}", fontWeight = FontWeight.Black, fontSize = 20.sp, color = activeUiColor)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Icon(Icons.Default.ChevronRight, null, tint = activeUiColor.copy(alpha = 0.6f))
                                 }
                             }
                         }
 
-                        // Delete day button at bottom
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
                                 onClick = {
-                                    currentRoute.isDeleted = true
-                                    currentRoute.deletedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                                    com.tuusuario.carlauncher.services.RouteTracker.saveRoute(currentRoute)
-                                    allRoutes.value = com.tuusuario.carlauncher.services.RouteTracker.getAllRoutes()
-                                    // Adjust index
-                                    val newDates = allRoutes.value.filter { !it.isDeleted }.map { it.date }.distinct().sorted()
-                                    selectedDateIndex = (selectedDateIndex - 1).coerceAtLeast(0)
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            currentRoute.isDeleted = true
+                                            currentRoute.deletedAt = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                            RouteTracker.saveRoute(currentRoute)
+                                        }
+                                        selectedDateIndex = (selectedDateIndex - 1).coerceAtLeast(0)
+                                        refreshRoutesAsync()
+                                    }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
                             ) {
                                 Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Eliminar este día")
+                                Text("Mover este día a la papelera")
                             }
                         }
                     }
@@ -1070,30 +1363,53 @@ fun RouteHistoryScreen() {
     }
 }
 
-// ── Componentes de Settings ──
+// ── Componentes Auxiliares de Settings ──
 
 @Composable
 fun SettingsGroupCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column {
-        Text(title.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), letterSpacing = 1.sp, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.animateContentSize(animationSpec = tween(300))) { content() }
+        Text(
+            title.uppercase(),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+            letterSpacing = 1.sp,
+            modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
+        )
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.animateContentSize(animationSpec = tween(240))) { content() }
         }
     }
 }
 
 @Composable
 fun SettingsRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String,
-    isExpanded: Boolean = false, onClick: (() -> Unit)? = null,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    isExpanded: Boolean = false,
+    onClick: (() -> Unit)? = null,
     expandedContent: (@Composable () -> Unit)? = null
 ) {
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable { onClick() } else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
                 Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             }
             Spacer(modifier = Modifier.width(14.dp))
@@ -1102,13 +1418,21 @@ fun SettingsRow(
                 Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (expandedContent != null) {
-                Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Expandir", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                Icon(
+                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    "Expandir",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
             } else if (onClick != null) {
                 Icon(Icons.Default.ChevronRight, "Ir", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
             }
         }
         if (expandedContent != null) {
-            AnimatedVisibility(visible = isExpanded, enter = fadeIn(tween(200)) + expandVertically(tween(300)), exit = fadeOut(tween(150)) + shrinkVertically(tween(250))) {
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = fadeIn(tween(180)) + expandVertically(tween(240)),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(200))
+            ) {
                 Box(modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp)) { expandedContent() }
             }
         }
@@ -1116,12 +1440,27 @@ fun SettingsRow(
 }
 
 @Composable
-fun SettingsRowSwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, subtitle: String? = null) {
+fun SettingsRowSwitch(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    subtitle: String? = null
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) }.padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         }
         Spacer(modifier = Modifier.width(14.dp))
@@ -1130,49 +1469,63 @@ fun SettingsRowSwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, tit
             if (subtitle != null) {
                 Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(if (checked) "Activado" else "Desactivado", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
 @Composable
 fun SettingsDivider() {
-    Divider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
+    )
 }
 
 @Composable
 fun ColorPicker(selectedColor: Int, onColorSelected: (Int) -> Unit) {
-    val colors = listOf(Color(0xFF007AFF), Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF4CAF50), Color(0xFFFF5722), Color.White, Color(0xFF00BCD4), Color.Yellow, Color.Cyan, Color(0xFFFFA500))
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val colors = listOf(
+        Color(0xFF1A6BFF),
+        Color(0xFF007AFF),
+        Color(0xFFE91E63),
+        Color(0xFF9C27B0),
+        Color(0xFF10B981),
+        Color(0xFFFF5722),
+        Color(0xFF00BCD4),
+        Color(0xFFFFC107),
+        Color(0xFFFFA500),
+        Color(0xFF334155)
+    )
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         colors.forEach { color ->
-            Box(modifier = Modifier.size(28.dp).clip(RoundedCornerShape(50)).background(color).border(if (selectedColor == color.toArgb()) 3.dp else 1.dp, if (selectedColor == color.toArgb()) MaterialTheme.colorScheme.onSurface else Color.Transparent, RoundedCornerShape(50)).clickable { onColorSelected(color.toArgb()) })
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(color)
+                    .border(
+                        if (selectedColor == color.toArgb()) 3.dp else 1.dp,
+                        if (selectedColor == color.toArgb()) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                        CircleShape
+                    )
+                    .clickable { onColorSelected(color.toArgb()) }
+            )
         }
     }
 }
 
-
-
 @Composable
 fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.CoroutineScope) {
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.Map, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("Zonas Seguras (Offline)", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Mapbox gestiona el caché de los mapas vectoriales y satelitales automáticamente en 3D de manera súper eficiente. Solo navega una vez por tu zona y quedará guardada sin necesidad de descargas manuales pesadas.", 
-            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Button(
-            onClick = {
-                Toast.makeText(context, "Caché Automático Activado por Mapbox", Toast.LENGTH_SHORT).show()
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
-        ) {
-            Icon(Icons.Default.CloudDownload, null)
+        Text(
+            "Mapbox gestiona automáticamente el caché vectorial y satelital 3D en almacenamiento local. Las zonas recorridas quedan guardadas automáticamente.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(onClick = { Toast.makeText(context, "Caché Inteligente Mapbox Activo ✓", Toast.LENGTH_SHORT).show() }) {
+            Icon(Icons.Default.CloudDone, null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text("Caché Inteligente Activo", fontWeight = FontWeight.Bold)
         }
@@ -1180,147 +1533,61 @@ fun OfflineMapDownloader(context: Context, coroutineScope: kotlinx.coroutines.Co
 }
 
 @Composable
-fun MainContentArea(currentScreen: String, isLandscape: Boolean, youtubeContent: @Composable () -> Unit, showYoutubeInDashboard: Boolean, onToggleYoutubeInDashboard: (Boolean) -> Unit, isDarkMode: Boolean) {
-    var swipeOffsetX by remember { mutableStateOf(0f) }
-    val speedoOptions = listOf("PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "OVERDRIVE", "NEBULA", "DEMONIC", "CUSTOM")
-    
-    val context = LocalContext.current
-    val speedoSwipeModifier = Modifier.pointerInput(Unit) {
-        detectHorizontalDragGestures(
-            onDragEnd = {
-                if (swipeOffsetX > 100f) {
-                    val idx = speedoOptions.indexOf(AppSettings.speedoStyle.value)
-                    val newIdx = if (idx - 1 < 0) speedoOptions.size - 1 else idx - 1
-                    AppSettings.setSpeedoStyle(speedoOptions[newIdx])
-                } else if (swipeOffsetX < -100f) {
-                    val idx = speedoOptions.indexOf(AppSettings.speedoStyle.value)
-                    val newIdx = (idx + 1) % speedoOptions.size
-                    AppSettings.setSpeedoStyle(speedoOptions[newIdx])
-                }
-                swipeOffsetX = 0f
-            }
-        ) { change, dragAmount -> 
-            change.consume()
-            swipeOffsetX += dragAmount
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Crossfade(targetState = currentScreen, animationSpec = tween(400), label = "ScreenTransition") { targetScreen ->
-            when (targetScreen) {
-                "MAPA_FULL" -> {
-                    Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) {
-                        NavigationMap(isFullScreen = true, isDarkMode = isDarkMode)
-                    }
-                }
-                "YOUTUBE" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(Color.Black)) { youtubeContent() }
-                "RUTAS"   -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RouteHistoryScreen() }
-                "VIDEOS"  -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { com.tuusuario.carlauncher.ui.widgets.DashcamGalleryScreen() }
-                "RECORDS" -> Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)) { RecordsScreen() }
-                "DASHBOARD" -> {
-                    if (isLandscape) {
-                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.60f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                            Column(modifier = Modifier.weight(0.40f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { 
-                                    Crossfade(targetState = AppSettings.speedoStyle.value, animationSpec = tween(350), label = "SpeedoTransition") { _ ->
-                                        SpeedometerWidget() 
-                                    }
-                                }
-                                Box(modifier = Modifier.weight(0.5f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
-                                    DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
-                                }
-                            }
-                        }
-                    } else {
-                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Box(modifier = Modifier.weight(0.55f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha=0.1f), RoundedCornerShape(24.dp))) { NavigationMap(isDarkMode = isDarkMode) }
-                            Row(modifier = Modifier.weight(0.45f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f)).then(speedoSwipeModifier)) { 
-                                    Crossfade(targetState = AppSettings.speedoStyle.value, animationSpec = tween(350), label = "SpeedoTransition") { _ ->
-                                        SpeedometerWidget() 
-                                    }
-                                }
-                                Box(modifier = Modifier.weight(0.5f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f))) {
-                                    DashboardMediaWidget(showYoutubeInDashboard, youtubeContent, onToggleYoutubeInDashboard)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DashboardMediaWidget(showYoutubeInDashboard: Boolean, youtubeContent: @Composable () -> Unit, onToggle: (Boolean) -> Unit) {
-    if (showYoutubeInDashboard) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            youtubeContent()
-            IconButton(onClick = { onToggle(false) }, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha=0.6f), RoundedCornerShape(50))) { Icon(Icons.Default.MusicNote, null, tint = Color.White) }
-        }
-    } else {
-        Box(modifier = Modifier.fillMaxSize()) {
-            MusicPlayerWidget()
-            IconButton(onClick = { onToggle(true) }, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.8f), RoundedCornerShape(50))) { Icon(Icons.Default.OndemandVideo, null, tint = MaterialTheme.colorScheme.onSurface) }
-        }
-    }
-}
-
-@Composable
 fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val historyRoute   = NavigationState.selectedHistoryRoute.value
+    val historyRoute = NavigationState.selectedHistoryRoute.value
     val historySegment = NavigationState.selectedHistorySegment.value
-    val dashcamRoute   = NavigationState.selectedDashcamRoute.value
+    val dashcamRoute = NavigationState.selectedDashcamRoute.value
 
     val routePoints: List<Point> = remember(historyRoute, historySegment, dashcamRoute) {
         when {
             historySegment != null -> historySegment.points.map { Point.fromLngLat(it.lon, it.lat) }
-            historyRoute   != null -> historyRoute.segments.flatMap { seg -> seg.points.map { Point.fromLngLat(it.lon, it.lat) } }
-            dashcamRoute   != null -> dashcamRoute.map { Point.fromLngLat(it.lon, it.lat) }
+            historyRoute != null -> historyRoute.segments.flatMap { seg -> seg.points.map { Point.fromLngLat(it.lon, it.lat) } }
+            dashcamRoute != null -> dashcamRoute.map { Point.fromLngLat(it.lon, it.lat) }
             else -> emptyList()
         }
     }
 
-    val routeColorHex = if (historyRoute != null) "#4CAF50" else "#FF9800"
-
-    // Pin del récord de velocidad (dorado) si hay uno seleccionado
+    val routeColorHex = if (historyRoute != null) "#10B981" else "#F59E0B"
     val speedRecordPinPoint = NavigationState.speedRecordPin.value
 
     val routeTitle = when {
-        historySegment != null -> "Segmento ${historySegment.startTime}\u2014${historySegment.endTime} \u00b7 ${historySegment.points.size} puntos"
-        historyRoute   != null -> {
-            val totalPts = historyRoute.segments.sumOf { it.points.size }
-            "Ruta del ${historyRoute.date} \u00b7 $totalPts puntos"
-        }
-        dashcamRoute != null -> "Ruta de Video \u00b7 ${dashcamRoute.size} puntos"
+        historySegment != null -> "Segmento ${historySegment.startTime}—${historySegment.endTime} · ${historySegment.points.size} puntos"
+        historyRoute != null -> "Ruta del ${historyRoute.date} · ${historyRoute.segments.sumOf { it.points.size }} puntos"
+        dashcamRoute != null -> "Ruta de Video · ${dashcamRoute.size} puntos"
         else -> ""
     }
 
-    // MapView de Mapbox para el diálogo
-    val mapView = remember { MapView(context) }
+    val dialogMapView = remember {
+        MapView(context, MapInitOptions(context = context, textureView = true))
+    }
 
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = {
-            NavigationState.speedRecordPin.value = null
-            onDismiss()
-        },
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    DisposableEffect(Unit) {
+        dialogMapView.onStart()
+        onDispose {
+            dialogMapView.onStop()
+            dialogMapView.onDestroy()
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.88f),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.88f),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        mapView.apply {
-                            mapboxMap.loadStyle(Style.MAPBOX_STREETS) { style ->
-                                // Fuente de ruta
+                    factory = {
+                        dialogMapView.apply {
+                            val styleToUse = if (AppSettings.isDarkMode.value) Style.DARK else Style.MAPBOX_STREETS
+                            mapboxMap.loadStyle(styleToUse) { style ->
                                 style.addSource(geoJsonSource("dialog-route-src") {
                                     if (routePoints.size >= 2) {
                                         featureCollection(
@@ -1332,52 +1599,36 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                                         featureCollection(FeatureCollection.fromFeatures(emptyList()))
                                     }
                                 })
-                                // Capa de ruta
                                 style.addLayer(lineLayer("dialog-route-layer", "dialog-route-src") {
                                     lineColor(routeColorHex)
-                                    lineWidth(5.0)
+                                    lineWidth(5.5)
                                     lineCap(LineCap.ROUND)
                                     lineJoin(LineJoin.ROUND)
                                 })
 
-                                // Marcadores inicio (verde) y fin (rojo) diferenciados
+                                val pm = annotations.createPointAnnotationManager()
                                 if (routePoints.isNotEmpty()) {
-                                    val pm = annotations.createPointAnnotationManager()
-
-                                    // PIN INICIO — verde
-                                    val startPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(
-                                        android.graphics.Color.parseColor("#2ECC71")
-                                    )
+                                    val startPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#10B981"))
                                     pm.create(PointAnnotationOptions().withPoint(routePoints.first()).withIconImage(startPin))
 
-                                    // PIN FIN — rojo (solo si hay al menos 2 puntos)
                                     if (routePoints.size > 1) {
-                                        val endPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(
-                                            android.graphics.Color.parseColor("#E74C3C")
-                                        )
+                                        val endPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#EF4444"))
                                         pm.create(PointAnnotationOptions().withPoint(routePoints.last()).withIconImage(endPin))
                                     }
+                                }
 
-                                    // PIN RÉCORD DE VELOCIDAD — dorado (si existe)
-                                    speedRecordPinPoint?.let { recPin ->
-                                        val goldPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(
-                                            android.graphics.Color.parseColor("#FFD700")
-                                        )
-                                        pm.create(PointAnnotationOptions().withPoint(recPin).withIconImage(goldPin))
-                                    }
+                                speedRecordPinPoint?.let { recPin ->
+                                    val goldPin = com.tuusuario.carlauncher.ui.map.drawCustomPin(android.graphics.Color.parseColor("#FFD700"))
+                                    pm.create(PointAnnotationOptions().withPoint(recPin).withIconImage(goldPin))
+                                }
 
-                                    // Ajustar cámara a la ruta
-                                    val allPoints = if (speedRecordPinPoint != null)
-                                        routePoints + speedRecordPinPoint
-                                    else
-                                        routePoints
-                                    val lngValues = allPoints.map { it.longitude() }
-                                    val latValues = allPoints.map { it.latitude() }
-                                    val centerLng = (lngValues.min() + lngValues.max()) / 2.0
-                                    val centerLat = (latValues.min() + latValues.max()) / 2.0
+                                val allPoints = if (speedRecordPinPoint != null) routePoints + speedRecordPinPoint else routePoints
+                                if (allPoints.isNotEmpty()) {
+                                    val centerLng = (allPoints.minOf { it.longitude() } + allPoints.maxOf { it.longitude() }) / 2.0
+                                    val centerLat = (allPoints.minOf { it.latitude() } + allPoints.maxOf { it.latitude() }) / 2.0
                                     mapboxMap.setCamera(cameraOptions {
                                         center(Point.fromLngLat(centerLng, centerLat))
-                                        zoom(14.0)
+                                        zoom(14.2)
                                         pitch(0.0)
                                     })
                                 }
@@ -1386,11 +1637,10 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                     }
                 )
 
-                // Header overlay
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
                         .align(Alignment.TopCenter)
                 ) {
                     Row(
@@ -1405,35 +1655,8 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(routeTitle, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
-                        IconButton(onClick = {
-                            NavigationState.speedRecordPin.value = null
-                            onDismiss()
-                        }) {
-                            Icon(Icons.Default.Close, "Cerrar", tint = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
-                    // Leyenda de marcadores
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(10.dp).background(Color(0xFF2ECC71), androidx.compose.foundation.shape.CircleShape))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Inicio", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(10.dp).background(Color(0xFFE74C3C), androidx.compose.foundation.shape.CircleShape))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Fin", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (speedRecordPinPoint != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(10.dp).background(Color(0xFFFFD700), androidx.compose.foundation.shape.CircleShape))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Récord de velocidad", fontSize = 11.sp, color = Color(0xFFFFD700))
-                            }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, "Cerrar")
                         }
                     }
                 }
@@ -1444,10 +1667,10 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
 
 @Composable
 fun DashcamPreviewOverlay() {
-    val preview = com.tuusuario.carlauncher.services.DashcamManager.activePreview.value ?: return
+    val preview = DashcamManager.activePreview.value ?: return
 
-    var offsetX by remember { mutableStateOf(40f) }
-    var offsetY by remember { mutableStateOf(120f) }
+    var offsetX by remember { mutableStateOf(36f) }
+    var offsetY by remember { mutableStateOf(96f) }
 
     Card(
         modifier = Modifier
@@ -1459,182 +1682,46 @@ fun DashcamPreviewOverlay() {
                     offsetY += dragAmount.y
                 }
             }
-            .width(220.dp)
-            .height(160.dp),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(12.dp)
+            .width(210.dp)
+            .height(150.dp),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(10.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
                     PreviewView(ctx).also { pv ->
+                        pv.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         pv.scaleType = PreviewView.ScaleType.FILL_CENTER
                         preview.setSurfaceProvider(pv.surfaceProvider)
                     }
                 }
             )
-            // REC badge
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)
-                    .background(Color.Red.copy(alpha = 0.88f), RoundedCornerShape(5.dp))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                    .background(Color(0xFFE53935).copy(alpha = 0.9f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(Color.White, androidx.compose.foundation.shape.CircleShape)
-                )
+                Box(modifier = Modifier.size(7.dp).background(Color.White, CircleShape))
                 Spacer(modifier = Modifier.width(5.dp))
                 Text("REC", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
-            // Drag hint
-            Text(
-                "⠿",
-                modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 16.sp
-            )
         }
     }
 }
-
-@Composable
-fun SystemStatusRow() {
-    val context = LocalContext.current
-    var batteryLevel by remember { mutableStateOf(100) }
-    var isCharging by remember { mutableStateOf(false) }
-    var signalStatus by remember { mutableStateOf("...") }
-    var signalIcon by remember { mutableStateOf(Icons.Default.SignalCellularAlt) }
-
-    DisposableEffect(context) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
-                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                    if (level != -1 && scale != -1) {
-                        batteryLevel = (level * 100 / scale.toFloat()).toInt()
-                    }
-                    
-                    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-                    isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                                 status == BatteryManager.BATTERY_STATUS_FULL
-                }
-            }
-        }
-        context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        onDispose { try { context.unregisterReceiver(receiver) } catch(_: Exception) {} }
-    }
-
-    LaunchedEffect(Unit) {
-        while(true) {
-            try {
-                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                val activeNetwork = cm.activeNetwork
-                val caps = cm.getNetworkCapabilities(activeNetwork)
-                
-                if (caps == null) {
-                    signalStatus = "Sin señal"
-                    signalIcon = Icons.Default.SignalCellularConnectedNoInternet0Bar
-                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    signalStatus = "WIFI"
-                    signalIcon = Icons.Default.Wifi
-                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                    // Detección simplificada de generación (4G/5G)
-                    signalStatus = "Red Móvil"
-                    signalIcon = Icons.Default.SignalCellular4Bar
-                }
-            } catch (_: Exception) {}
-            delay(10000)
-        }
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .padding(top = 10.dp)
-            .background(Color.Black.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        // Batería
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                if (isCharging) Icons.Default.BatteryChargingFull else if (batteryLevel < 20) Icons.Default.BatteryAlert else Icons.Default.BatteryFull, 
-                null, 
-                modifier = Modifier.size(15.dp),
-                tint = if (batteryLevel < 20 && !isCharging) Color(0xFFFF5252) else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("${batteryLevel}%", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-        }
-        
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Señal
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(signalIcon, null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(if (signalStatus == "WIFI") "WIFI" else "LTE", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-// ── Pantalla de Bienvenida Cinemática ───────────────────────────────────────
-
-private data class WelcomeParticle(
-    val x: Float,          // posición horizontal (0-1 relativo al ancho)
-    val startY: Float,     // Y inicial (0-1 relativo al alto, empieza desde abajo)
-    val speed: Float,      // velocidad de subida (0.05 - 0.2 por segundo)
-    val size: Float,       // tamaño en dp
-    val alpha: Float,      // opacidad base
-    val twinkle: Float     // frecuencia de parpadeo
-)
 
 @Composable
 fun CinematicWelcomeScreen(
-    accentColor:   Color,
+    accentColor: Color,
     settingsReady: Boolean = false,
-    mapReady:      Boolean = false,
-    gpsReady:      Boolean = false
+    mapReady: Boolean = false,
+    gpsReady: Boolean = false
 ) {
-    // Generar partículas estables (no se recrean en cada frame)
-    val particles = remember {
-        List(55) {
-            WelcomeParticle(
-                x       = Math.random().toFloat(),
-                startY  = Math.random().toFloat(),
-                speed   = (0.04f + Math.random().toFloat() * 0.12f),
-                size    = (2f + Math.random().toFloat() * 4f),
-                alpha   = (0.3f + Math.random().toFloat() * 0.6f),
-                twinkle = (3f + Math.random().toFloat() * 8f)
-            )
-        }
-    }
-
-    // Acumulador de tiempo para todas las animaciones visuales
     var time by remember { mutableStateOf(0f) }
-
-    // ── Progreso REAL por fases ───────────────────────────────────────────────
-    // Fase 1 → Settings (0.00 – 0.33):  mínimo 0.5s de animación de llegada
-    // Fase 2 → Mapa     (0.33 – 0.66):  mínimo 0.5s adicional
-    // Fase 3 → GPS      (0.66 – 1.00):  mínimo 0.5s adicional
-    //
-    // Cada fase tiene un "suelo" de avance lento (~0.06/s) para que la barra
-    // nunca esté completamente estática, y un "techo" determinado por el flag real.
-    // Cuando el flag real llega, la barra acelera hasta el siguiente hito.
-
-    val phase1Target = if (settingsReady) 0.33f else 0.15f   // Settings
-    val phase2Target = if (mapReady)      0.66f else (if (settingsReady) 0.45f else 0.15f)
-    val phase3Target = if (gpsReady)      1.00f else (if (mapReady)      0.82f else phase2Target)
-
-    val realTarget = phase3Target
-
-    // Progreso animado: avanza suavemente hacia realTarget
-    var barProgress by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         var lastNanos = withFrameNanos { it }
@@ -1642,288 +1729,79 @@ fun CinematicWelcomeScreen(
             withFrameNanos { nanos ->
                 val dt = (nanos - lastNanos) / 1_000_000_000f
                 lastNanos = nanos
-                time = (time + dt).coerceAtMost(60f) // sin límite — espera GPS real
-
-                // Velocidad de avance de la barra:
-                // Rápida cuando el sistema ya está listo, lenta cuando espera
-                val speed = if (barProgress < realTarget) {
-                    if (realTarget - barProgress > 0.1f) 0.35f else 0.12f
-                } else 0f
-                barProgress = (barProgress + speed * dt).coerceAtMost(realTarget)
+                time += dt
             }
         }
     }
 
-    // ── Fase activa y texto de estado ─────────────────────────────────────────
-    data class PhaseInfo(val label: String, val done: Boolean, val progress: Float)
+    val alpha = (time / 0.35f).coerceIn(0f, 1f)
+    val ringAngle = time * 110f
 
-    val phases = listOf(
-        PhaseInfo("AJUSTES",  settingsReady, if (settingsReady) 1f else (barProgress / 0.33f).coerceIn(0f, 1f)),
-        PhaseInfo("MAPA",     mapReady,      if (mapReady)      1f else ((barProgress - 0.33f) / 0.33f).coerceIn(0f, 1f)),
-        PhaseInfo("GPS",      gpsReady,      if (gpsReady)      1f else ((barProgress - 0.66f) / 0.34f).coerceIn(0f, 1f))
-    )
-
-    val allDone = settingsReady && mapReady && gpsReady
-    val activePhaseLabel = when {
-        allDone        -> "SISTEMA LISTO  ✓"
-        !settingsReady -> "CARGANDO AJUSTES..."
-        !mapReady      -> "CARGANDO MAPA..."
-        else           -> "ESPERANDO GPS..."
-    }
-
-    // Pulso de escaneo (scanner line que sube y baja sobre la barra)
-    val scannerPos = (sin(time * 2.5f).toFloat() * 0.5f + 0.5f)  // 0→1→0
-
-    // ── Texto typewriter ─────────────────────────────────────────────────────
-    val fullTitle  = "CAR LAUNCHER"
-    val fullSub    = "BIENVENIDO"
-    val titleChars = ((time - 1.2f).coerceAtLeast(0f) / 0.08f).toInt().coerceIn(0, fullTitle.length)
-    val subChars   = ((time - 0.6f).coerceAtLeast(0f) / 0.06f).toInt().coerceIn(0, fullSub.length)
-    val visibleTitle = fullTitle.substring(0, titleChars)
-    val visibleSub   = fullSub.substring(0, subChars)
-
-    val iconAlpha  = ((time - 0.3f) / 0.5f).coerceIn(0f, 1f)
-    val ringPulse  = 0.85f + sin(time * 4.5f).toFloat() * 0.15f
-
-    // ─────────────────────────────────────────────────────────────────────────
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF070B14)),
         contentAlignment = Alignment.Center
     ) {
-
-        // ── Capa 1: Partículas flotantes ──────────────────────────
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width; val h = size.height
-            particles.forEach { p ->
-                val rawY   = p.startY - (time * p.speed) % 1f
-                val yNorm  = if (rawY < 0f) rawY + 1f else rawY
-                val twinkA = (0.4f + sin(time * p.twinkle + p.x * 10f).toFloat() * 0.4f).coerceIn(0f, 1f)
-                drawCircle(
-                    color  = accentColor.copy(alpha = p.alpha * twinkA * iconAlpha),
-                    radius = p.size,
-                    center = Offset(p.x * w, yNorm * h)
+        Canvas(modifier = Modifier.size(220.dp)) {
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(accentColor.copy(alpha = 0.28f * alpha), Color.Transparent),
+                    center = Offset(cx, cy),
+                    radius = 110f
+                ),
+                radius = 110f,
+                center = Offset(cx, cy)
+            )
+            rotate(ringAngle, Offset(cx, cy)) {
+                drawArc(
+                    color = accentColor.copy(alpha = 0.75f * alpha),
+                    startAngle = 0f,
+                    sweepAngle = 110f,
+                    useCenter = false,
+                    style = Stroke(width = 3.5f, cap = StrokeCap.Round)
+                )
+                drawArc(
+                    color = accentColor.copy(alpha = 0.35f * alpha),
+                    startAngle = 180f,
+                    sweepAngle = 90f,
+                    useCenter = false,
+                    style = Stroke(width = 2f, cap = StrokeCap.Round)
                 )
             }
         }
 
-        // ── Capa 2: Speed-lines + anillos ──────────────────────────
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val cx = size.width / 2f; val cy = size.height / 2f
-            val burst = ((time - 0.2f) / 0.7f).coerceIn(0f, 1f)
-
-            if (burst > 0f) {
-                rotate(degrees = time * 18f, pivot = Offset(cx, cy)) {
-                    for (i in 0 until 24) {
-                        val rad  = Math.toRadians((i.toFloat() / 24f * 360f).toDouble())
-                        val lA   = if (i % 3 == 0) 0.35f else 0.15f
-                        val ls   = 90f + (if (i % 2 == 0) 20f else 0f)
-                        val le   = ls + burst * (200f + (i % 5) * 40f)
-                        drawLine(
-                            color = accentColor.copy(alpha = lA * burst),
-                            start = Offset(cx + cos(rad).toFloat() * ls, cy + sin(rad).toFloat() * ls),
-                            end   = Offset(cx + cos(rad).toFloat() * le, cy + sin(rad).toFloat() * le),
-                            strokeWidth = if (i % 3 == 0) 2.5f else 1f, cap = StrokeCap.Round
-                        )
-                    }
-                }
-            }
-            if (burst > 0.3f) {
-                val r = 110f * ringPulse
-                drawCircle(accentColor.copy(alpha = 0.25f * burst), r,       Offset(cx,cy), style = Stroke(2f))
-                drawCircle(accentColor.copy(alpha = 0.10f * burst), r + 18f, Offset(cx,cy), style = Stroke(1f))
-            }
-            if (burst > 0.5f) {
-                val aA = ((burst - 0.5f) / 0.5f).coerceIn(0f, 1f)
-                rotate(time * -35f, Offset(cx, cy)) {
-                    for (a in 0 until 4)
-                        drawArc(accentColor.copy(alpha = 0.45f * aA), a * 90f + 10f, 65f, false,
-                            Offset(cx-78f,cy-78f), androidx.compose.ui.geometry.Size(156f,156f),
-                            style = Stroke(3f, cap = StrokeCap.Round))
-                }
-                rotate(time * 25f, Offset(cx, cy)) {
-                    for (a in 0 until 3)
-                        drawArc(accentColor.copy(alpha = 0.25f * aA), a * 120f + 20f, 50f, false,
-                            Offset(cx-95f,cy-95f), androidx.compose.ui.geometry.Size(190f,190f),
-                            style = Stroke(1.5f, cap = StrokeCap.Round))
-                }
-            }
-            if (iconAlpha > 0f) {
-                drawCircle(
-                    brush  = Brush.radialGradient(
-                        listOf(accentColor.copy(0.35f * iconAlpha), accentColor.copy(0.10f * iconAlpha), Color.Transparent),
-                        Offset(cx,cy), 130f),
-                    radius = 130f, center = Offset(cx,cy))
-            }
-        }
-
-        // ── Capa 3: Contenido UI ──────────────────────────────────
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.DirectionsCar, null,
-                tint = accentColor.copy(alpha = iconAlpha), modifier = Modifier.size(100.dp))
-
-            Spacer(Modifier.height(28.dp))
-            Text(visibleSub, color = Color.White.copy(alpha = 0.55f * iconAlpha),
-                fontSize = 13.sp, fontWeight = FontWeight.Light, letterSpacing = 6.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(visibleTitle, color = accentColor.copy(alpha = iconAlpha.coerceAtLeast(0.01f)),
-                    fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp)
-                if (titleChars < fullTitle.length) {
-                    val cA = (0.5f + sin(time * 8f).toFloat() * 0.5f).coerceIn(0f, 1f)
-                    Text("|", color = accentColor.copy(alpha = cA), fontSize = 36.sp, fontWeight = FontWeight.Black)
-                }
-            }
-
-            Spacer(Modifier.height(40.dp))
-
-            // ── HUD de carga por fases ─────────────────────────────
-            val hudAlpha = ((time - 0.4f) / 0.4f).coerceIn(0f, 1f)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.alpha(hudAlpha)
-            ) {
-                // ── Tres mini-indicadores de fase ─────────────────
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 10.dp)
-                ) {
-                    phases.forEach { phase ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            // Ícono de check o spinner
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(
-                                        if (phase.done) accentColor.copy(alpha = 0.2f)
-                                        else Color.White.copy(alpha = 0.05f),
-                                        CircleShape
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (phase.done) accentColor.copy(alpha = 0.8f)
-                                                else accentColor.copy(alpha = 0.3f),
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (phase.done) {
-                                    Text("✓", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                                } else {
-                                    // Mini arc giratorio mientras carga
-                                    Canvas(Modifier.size(16.dp)) {
-                                        val a = (sin(time * 4f + phases.indexOf(phase).toFloat()).toFloat() * 0.5f + 0.5f) * 0.6f + 0.2f
-                                        drawArc(
-                                            color = accentColor.copy(alpha = a),
-                                            startAngle = time * 180f,
-                                            sweepAngle = 220f,
-                                            useCenter = false,
-                                            style = Stroke(2f, cap = StrokeCap.Round)
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = phase.label,
-                                fontSize = 8.sp,
-                                color = if (phase.done) accentColor.copy(alpha = 0.9f)
-                                        else Color.White.copy(alpha = 0.35f),
-                                fontWeight = if (phase.done) FontWeight.Bold else FontWeight.Normal,
-                                letterSpacing = 1.sp
-                            )
-                        }
-                    }
-                }
-
-                // ── Etiqueta de estado activo ──────────────────────
-                Text(
-                    text = activePhaseLabel,
-                    color = if (allDone) accentColor else accentColor.copy(alpha = 0.7f),
-                    fontSize = 10.sp,
-                    fontWeight = if (allDone) FontWeight.Bold else FontWeight.Medium,
-                    letterSpacing = 3.sp
-                )
-                Spacer(Modifier.height(10.dp))
-
-                // ── Barra principal HUD con scanner ───────────────
-                Box(
-                    modifier = Modifier.width(240.dp).height(5.dp)
-                ) {
-                    // Track de fondo
-                    Box(
-                        Modifier.fillMaxSize()
-                            .background(accentColor.copy(alpha = 0.12f), RoundedCornerShape(3.dp))
-                    )
-                    // Relleno real
-                    Box(
-                        Modifier.fillMaxHeight().fillMaxWidth(barProgress)
-                            .background(
-                                Brush.horizontalGradient(listOf(
-                                    accentColor.copy(alpha = 0.5f),
-                                    accentColor,
-                                    Color.White.copy(alpha = 0.85f)
-                                )),
-                                RoundedCornerShape(3.dp)
-                            )
-                    )
-                    // Línea de escaneo ("scanner") que recorre el relleno
-                    if (barProgress > 0.02f) {
-                        Box(
-                            Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth((barProgress * scannerPos).coerceIn(0f, 1f))
-                                .padding(end = 0.dp)
-                        ) {
-                            Box(
-                                Modifier
-                                    .align(Alignment.CenterEnd)
-                                    .width(2.dp)
-                                    .fillMaxHeight(1.5f)
-                                    .background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(1.dp))
-                            )
-                        }
-                    }
-                    // Divisores de fases (en 33% y 66%)
-                    listOf(0.333f, 0.666f).forEach { mark ->
-                        Box(
-                            Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(start = (240 * mark).dp)
-                                .width(1.dp)
-                                .fillMaxHeight()
-                                .background(
-                                    if (barProgress >= mark) Color.White.copy(alpha = 0.5f)
-                                    else accentColor.copy(alpha = 0.25f)
-                                )
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(6.dp))
-                // Porcentaje y texto de fases completadas
-                Row(
-                    modifier = Modifier.width(240.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "${(barProgress * 100).toInt()}%",
-                        color = accentColor.copy(alpha = 0.6f),
-                        fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp
-                    )
-                    val donePhasesCount = phases.count { it.done }
-                    Text(
-                        "$donePhasesCount / 3 SISTEMAS",
-                        color = Color.White.copy(alpha = 0.25f),
-                        fontSize = 9.sp, letterSpacing = 1.sp
-                    )
-                }
-            }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.alpha(alpha)
+        ) {
+            Icon(
+                Icons.Default.DirectionsCar,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = "${AppSettings.carBrandName.value} · ${AppSettings.carModelName.value}",
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 3.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = if (mapReady && settingsReady) "SISTEMA LISTO" else "INICIANDO SISTEMA...",
+                color = accentColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.5.sp
+            )
         }
     }
 }
 
-// Extensión para controlar opacidad en Modifier desde el contexto de DashboardScreen
 private fun Modifier.alpha(value: Float): Modifier =
     this.modifierAlpha(value.coerceIn(0f, 1f))
-

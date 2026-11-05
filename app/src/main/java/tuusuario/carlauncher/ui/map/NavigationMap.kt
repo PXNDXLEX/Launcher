@@ -36,8 +36,10 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
@@ -49,7 +51,9 @@ import com.mapbox.geojson.FeatureCollection
 import com.mapbox.geojson.LineString
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapView
+import com.tuusuario.carlauncher.services.LocationEngine
 import com.mapbox.maps.Style
 import com.mapbox.maps.dsl.cameraOptions
 import com.mapbox.maps.extension.style.expressions.generated.Expression
@@ -177,8 +181,22 @@ class MockLocationProvider : LocationProvider {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, isDarkMode: Boolean = true) {
+fun NavigationMap(
+    modifier: Modifier = Modifier,
+    isFullScreen: Boolean = false,
+    isDarkMode: Boolean = true,
+    isVisible: Boolean = true,
+    startOverlayPadding: Dp = 0.dp,
+    endOverlayPadding: Dp = 0.dp
+) {
     val context         = LocalContext.current
+    val density         = LocalDensity.current
+    val isVisibleState  = rememberUpdatedState(isVisible)
+    val leftInsetPx     = with(density) { startOverlayPadding.toPx().toDouble() }
+    val rightInsetPx    = with(density) { endOverlayPadding.toPx().toDouble() }
+    val leftInsetRef    = rememberUpdatedState(leftInsetPx)
+    val rightInsetRef   = rememberUpdatedState(rightInsetPx)
+
     val mockLocationProvider = remember { MockLocationProvider() }
     val lifecycleOwner  = LocalLifecycleOwner.current
     val focusManager    = LocalFocusManager.current
@@ -188,8 +206,11 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
     val favManager      = remember { FavoritesManager(context) }
     val coroutineScope  = rememberCoroutineScope()
 
-    // MapView instance — persiste entre recomposiciones
-    val mapView = remember { MapView(context) }
+    // MapView con TextureView habilitado: permite transiciones Compose a 120 FPS,
+    // esquinas redondeadas limpias y cero parpadeos negros al entrar/salir de Navegación.
+    val mapView = remember {
+        MapView(context, MapInitOptions(context = context, textureView = true))
+    }
 
     // Estado
     val isMapDarkMode = AppSettings.isMapDarkMode.value
@@ -630,23 +651,28 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                 )
             }
 
-            // ── Heading-up SIEMPRE activo: brujula + GPS bearing ──────────────
+            // ── Heading-up SIEMPRE activo: brujula + GPS bearing (con throttle a 15 FPS) ──
             var lastIndicatorPos: com.mapbox.geojson.Point? = null
             var lastIndicatorBearing: Double = 0.0
+            var lastGlowUpdateMs: Long = 0L
             val updateGlow = {
-                lastIndicatorPos?.let { pos ->
-                    mapView.mapboxMap.getStyle { style ->
-                        val featureCollection = com.mapbox.geojson.FeatureCollection.fromFeature(
-                            com.mapbox.geojson.Feature.fromGeometry(
-                                pos,
-                                com.google.gson.JsonObject().apply {
-                                    addProperty("bearing", lastIndicatorBearing)
-                                    addProperty("iconSize", AppSettings.glowIconSize.value.toDouble())
-                                }
+                val nowMs = System.currentTimeMillis()
+                if (isNightMode && isVisibleState.value && (nowMs - lastGlowUpdateMs >= 66L)) {
+                    lastGlowUpdateMs = nowMs
+                    lastIndicatorPos?.let { pos ->
+                        mapView.mapboxMap.getStyle { style ->
+                            val featureCollection = com.mapbox.geojson.FeatureCollection.fromFeature(
+                                com.mapbox.geojson.Feature.fromGeometry(
+                                    pos,
+                                    com.google.gson.JsonObject().apply {
+                                        addProperty("bearing", lastIndicatorBearing)
+                                        addProperty("iconSize", AppSettings.glowIconSize.value.toDouble())
+                                    }
+                                )
                             )
-                        )
-                        style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
-                        style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_TAILLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
+                            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
+                            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_TAILLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
+                        }
                     }
                 }
             }
@@ -768,15 +794,14 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     autoCenterJob?.cancel()
                     updateRouteOnMap()
 
-                    // Activar viewport 3D de seguimiento tipo videojuego
-                    // El padding inferior empuja el puck al 25% inferior de la pantalla
+                    // Activar viewport 3D de seguimiento tipo videojuego respetando barra lateral CarPlay
                     val vp = mapView.viewport
                     val followState = vp.makeFollowPuckViewportState(
                         FollowPuckViewportStateOptions.Builder()
                             .pitch(70.0)
                             .zoom(18.5)
                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                             .build()
                     )
                     vp.transitionTo(followState,
@@ -821,268 +846,167 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── Callbacks de GPS y Simulación ─────────────────────────────────────────
-    val locationCallback = remember {
-        object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                // Si la simulación está activa y este resultado NO es mock (no tiene proveedor "mock")
-                // ignoramos el GPS real para que la simulación tome el control.
-                val isMock = result.lastLocation?.provider == "mock"
-                if (AppSettings.isGpsSimulationMode.value && !isMock) return 
-                
-                val loc = result.lastLocation ?: return
-                if (loc.hasAccuracy() && loc.accuracy > 40f && !isMock) return
-
-                // Servicios de rastreo
-                com.tuusuario.carlauncher.services.RouteTracker.onLocationUpdate(loc)
-                com.tuusuario.carlauncher.services.DashcamRouteTracker.onLocationUpdate(loc)
-
-                NavigationState.currentLocation.value = loc
-                if (loc.hasSpeed()) {
-                    val spd = loc.speed * 3.6f
-                    NavigationState.currentSpeedKmH.value = spd
-                    if (spd < 1f) {
-                        if (NavigationState.lastZeroSpeedTime == 0L) {
-                            NavigationState.lastZeroSpeedTime = System.currentTimeMillis()
-                        } else if (System.currentTimeMillis() - NavigationState.lastZeroSpeedTime > 2000L) {
-                            NavigationState.isBraking.value = true
-                        }
-                    } else {
-                        NavigationState.lastZeroSpeedTime = 0L
-                        NavigationState.isBraking.value = false
-                    }
-                }
-
-                // Propagar ubicación al provider de Mapbox (asegura movimiento del auto 3D)
-                mockLocationProvider.updateLocation(
-                    com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
-                    if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
-                )
-
-                // ── Almacenar posición para la intro cinematográfica ─────────
-                if (!hasInitializedPosition && loc.latitude != 0.0) {
-                    hasInitializedPosition = true
-                    val carPos     = Point.fromLngLat(loc.longitude, loc.latitude)
+    // ── Sincronizar visibilidad e insets CarPlay sin recrear el MapView ──────
+    LaunchedEffect(isVisible, leftInsetPx, rightInsetPx, mapReady) {
+        if (!mapReady) return@LaunchedEffect
+        mapView.visibility = if (isVisible) android.view.View.VISIBLE else android.view.View.INVISIBLE
+        if (isVisible) {
+            NavigationState.currentLocation.value?.let { loc ->
+                if (loc.latitude != 0.0) {
+                    val carPos = Point.fromLngLat(loc.longitude, loc.latitude)
                     val carBearing = if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
-
-                    if (!hasPlayedIntro) {
-                        hasPlayedIntro = true
-                        // Bloquear INMEDIATAMENTE cualquier camera move del GPS
-                        // antes de que el LaunchedEffect tenga oportunidad de arrancar
-                        isIntroAnimating = true
-                        pendingIntroPos = Pair(carPos, carBearing)
-                    } else {
-                        // Si ya se jugó el intro (rotación de pantalla), centrar directamente
-                        val vp = mapView.viewport
-                        val followState = vp.makeFollowPuckViewportState(
-                            FollowPuckViewportStateOptions.Builder()
-                                .pitch(70.0).zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                .build()
-                        )
-                        vp.transitionTo(followState, vp.makeImmediateViewportTransition())
-                    }
-                }
-
-                // Animar el LocationComponent del mapa es automático via el plugin;
-                // aquí actualizamos la cámara si estamos en modo seguimiento sin ruta activa
-                val isRouteActive = NavigationState.isRouteActive.value
-
-                // ── Reactivar seguimiento automático cada 1 metro ─────────
-                val userInteracting = isSavingFavorite || isPlacingDestination
-                if (!isFollowingLocation && hasInitializedPosition && !userInteracting) {
-                    val refLoc = locationWhenFollowDisabled
-                    if (refLoc != null && loc.distanceTo(refLoc) >= 1f) {
-                        isFollowingLocation = true
-                        locationWhenFollowDisabled = null
-                        autoCenterJob?.cancel()
-                        val vp = mapView.viewport
-                        val followState = vp.makeFollowPuckViewportState(
-                            FollowPuckViewportStateOptions.Builder()
-                                .pitch(70.0)
-                                .zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                .build()
-                        )
-                        vp.transitionTo(followState, vp.makeDefaultViewportTransition())
-                    }
-                }
-
-                // No activar follow-mode durante la intro — interrumpiría la animación
-                if (!isIntroAnimating && !isRouteActive && isFollowingLocation && hasInitializedPosition) {
-                    val vp = mapView.viewport
-                    if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
-                        val followState = vp.makeFollowPuckViewportState(
-                            FollowPuckViewportStateOptions.Builder()
-                                .pitch(70.0)
-                                .zoom(18.5)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
-                                .build()
-                        )
-                        vp.transitionTo(followState, vp.makeDefaultViewportTransition())
-                    }
-                }
-
-                // ── Lógica de ruta activa ────────────────────────────────
-                if (currentRoutePoints.isNotEmpty() && selectedDestination != null) {
-                    var minDistance  = Float.MAX_VALUE
-                    var closestIndex = 0
-                    val searchLimit  = minOf(100, currentRoutePoints.size)
-
-                    for (i in 0 until searchLimit) {
-                        val pt = currentRoutePoints[i]
-                        // Point usa .latitude() y .longitude() con paréntesis
-                        val dist = FloatArray(1).also {
-                            android.location.Location.distanceBetween(loc.latitude, loc.longitude, pt.latitude(), pt.longitude(), it)
-                        }[0]
-                        if (dist < minDistance) { minDistance = dist; closestIndex = i }
-                    }
-
-                    // Auto-recálculo si se desvía >100m
-                    if (minDistance > 100f && !isCalculatingRoute) {
-                        val destPt = NavigationState.activeDestination.value!!
-                        calculateRoute(
-                            Point.fromLngLat(loc.longitude, loc.latitude),
-                            destPt  // ya es Point
-                        )
-                    }
-                    // Seguimiento: borrar puntos ya recorridos (la ruta se "consume")
-                    else if (closestIndex > 0 && minDistance < 60f) {
-                        for (i in 0 until closestIndex) {
-                            if (currentRoutePoints.isNotEmpty()) currentRoutePoints.removeAt(0)
-                        }
-                        updateRouteOnMap() // actualizar polyline en tiempo real
-                    }
-
-                    // Pasar steps
-                    if (activeRouteSteps.isNotEmpty()) {
-                        val nextStep = activeRouteSteps[0]
-                        val distToStep = FloatArray(1).also {
-                            android.location.Location.distanceBetween(loc.latitude, loc.longitude, nextStep.maneuverLat, nextStep.maneuverLon, it)
-                        }[0]
-                        if (distToStep < 20f) activeRouteSteps.removeAt(0)
-                    }
-
-                    // Llegada
-                    if (currentRoutePoints.size < 10) {
-                        val endPt = currentRoutePoints.last()
-                        val distToDest = FloatArray(1).also {
-                            android.location.Location.distanceBetween(loc.latitude, loc.longitude, endPt.latitude(), endPt.longitude(), it)
-                        }[0]
-                        if (distToDest < 30f) {
-                            showArrivalAlert = true
-                            NavigationState.clearActiveRoute()
-                            updateRouteOnMap()
-                            // Volver a vista normal
-                            mapView.viewport.idle()
-                        }
-                    }
+                    mockLocationProvider.updateLocation(carPos, carBearing)
+                    hasInitializedPosition = true
                 }
             }
-        }
-    } // Cierra el remember { ... }
-
-    LaunchedEffect(AppSettings.isGpsSimulationMode.value) {
-        if (AppSettings.isGpsSimulationMode.value) {
-            var angle = 0.0
-            // Usamos la posición actual como centro del círculo, o un valor por defecto si no hay fix
-            val centerLat = NavigationState.currentLocation.value?.latitude ?: 10.998
-            val centerLon = NavigationState.currentLocation.value?.longitude ?: -63.998
-            val radiusDegrees = 0.002 // Aprox 200m de radio
-            val speedMps = 15f / 3.6f // 15 km/h a metros/segundo
-
-            var iteration = 0
-            while (isActive && AppSettings.isGpsSimulationMode.value) {
-                // Calcular posición en el círculo
-                val newLat = centerLat + radiusDegrees * Math.sin(angle)
-                val newLon = centerLon + radiusDegrees * Math.cos(angle)
-                
-                // Calcular posición un poco atrás para obtener el bearing correcto
-                val prevLat = centerLat + radiusDegrees * Math.sin(angle - 0.05)
-                val prevLon = centerLon + radiusDegrees * Math.cos(angle - 0.05)
-                
-                val bearing = android.location.Location("").apply {
-                    latitude = prevLat
-                    longitude = prevLon
-                }.bearingTo(android.location.Location("").apply {
-                    latitude = newLat
-                    longitude = newLon
-                })
-
-                // Simular semáforos: detenerse por 5 iteraciones (5 seg) cada 20 iteraciones (20 seg)
-                val isSimBraking = (iteration % 20 < 5)
-                val currentSimSpeed = if (isSimBraking) 0f else speedMps
-
-                val mockLoc = android.location.Location("mock").apply {
-                    latitude = newLat
-                    longitude = newLon
-                    speed = currentSimSpeed
-                    this.bearing = bearing
-                    accuracy = 5f
-                    time = System.currentTimeMillis()
-                }
-
-                // Inyectar en el callback como si fuera real
-                locationCallback.onLocationResult(LocationResult.create(listOf(mockLoc)))
-                
-                // Si no está frenando, avanzar en el círculo
-                if (!isSimBraking) {
-                    angle += 0.035
-                }
-                
-                iteration++
-                // Intentar forzar la actualización del puck de Mapbox si el método existe
-                try {
-                    mapView.location.javaClass.getMethod("forceLocationUpdate", android.location.Location::class.java)
-                        .invoke(mapView.location, mockLoc)
-                } catch (e: Exception) {
-                    // Ignorar si el método no existe en esta versión de Mapbox
-                }
-                
-                // Pausa de simulación: 1000ms igual que GPS real de Android
-                delay(1000)
+            if (isFollowingLocation && !isIntroAnimating) {
+                val vp = mapView.viewport
+                val followState = vp.makeFollowPuckViewportState(
+                    FollowPuckViewportStateOptions.Builder()
+                        .pitch(68.0)
+                        .zoom(18.5)
+                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                        .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetPx, 0.0, rightInsetPx))
+                        .build()
+                )
+                vp.transitionTo(
+                    followState,
+                    vp.makeDefaultViewportTransition(
+                        DefaultViewportTransitionOptions.Builder().maxDurationMs(650).build()
+                    )
+                )
             }
         }
     }
 
-    // ── Mover la cámara manualmente durante simulación ──────────────────────
-    LaunchedEffect(NavigationState.currentLocation.value) {
-        if (AppSettings.isGpsSimulationMode.value && !isIntroAnimating && isFollowingLocation) {
+    // ── Suscripción al motor GPS unificado (LocationEngine) ──────────────────
+    DisposableEffect(Unit) {
+        val listener = LocationEngine.Listener { loc, _, _ ->
+            // Lógica de ruta activa funciona siempre (incluso en pantalla Home)
+            if (currentRoutePoints.isNotEmpty() && selectedDestination != null) {
+                var minDistance = Float.MAX_VALUE
+                var closestIndex = 0
+                val searchLimit = minOf(100, currentRoutePoints.size)
+                val distBuf = FloatArray(1)
+
+                for (i in 0 until searchLimit) {
+                    val pt = currentRoutePoints[i]
+                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, pt.latitude(), pt.longitude(), distBuf)
+                    if (distBuf[0] < minDistance) {
+                        minDistance = distBuf[0]
+                        closestIndex = i
+                    }
+                }
+
+                if (minDistance > 100f && !isCalculatingRoute) {
+                    val destPt = NavigationState.activeDestination.value
+                    if (destPt != null) {
+                        calculateRoute(Point.fromLngLat(loc.longitude, loc.latitude), destPt)
+                    }
+                } else if (closestIndex > 0 && minDistance < 60f) {
+                    for (i in 0 until closestIndex) {
+                        if (currentRoutePoints.isNotEmpty()) currentRoutePoints.removeAt(0)
+                    }
+                    if (isVisibleState.value) updateRouteOnMap()
+                }
+
+                if (activeRouteSteps.isNotEmpty()) {
+                    val nextStep = activeRouteSteps[0]
+                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, nextStep.maneuverLat, nextStep.maneuverLon, distBuf)
+                    if (distBuf[0] < 20f) activeRouteSteps.removeAt(0)
+                }
+
+                if (currentRoutePoints.isNotEmpty() && currentRoutePoints.size < 10) {
+                    val endPt = currentRoutePoints.last()
+                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, endPt.latitude(), endPt.longitude(), distBuf)
+                    if (distBuf[0] < 30f) {
+                        showArrivalAlert = true
+                        NavigationState.clearActiveRoute()
+                        updateRouteOnMap()
+                        mapView.viewport.idle()
+                    }
+                }
+            }
+
+            // Si el mapa está oculto tras el menú Home, evitamos renderizado GPU innecesario
+            if (!isVisibleState.value) return@Listener
+
+            mockLocationProvider.updateLocation(
+                Point.fromLngLat(loc.longitude, loc.latitude),
+                if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
+            )
+
+            if (!hasInitializedPosition && loc.latitude != 0.0) {
+                hasInitializedPosition = true
+                val vp = mapView.viewport
+                val followState = vp.makeFollowPuckViewportState(
+                    FollowPuckViewportStateOptions.Builder()
+                        .pitch(68.0)
+                        .zoom(18.5)
+                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                        .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                        .build()
+                )
+                vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+            }
+
+            val userInteracting = isSavingFavorite || isPlacingDestination
+            if (!isFollowingLocation && hasInitializedPosition && !userInteracting) {
+                val refLoc = locationWhenFollowDisabled
+                if (refLoc != null && loc.distanceTo(refLoc) >= 1f) {
+                    isFollowingLocation = true
+                    locationWhenFollowDisabled = null
+                    autoCenterJob?.cancel()
+                    val vp = mapView.viewport
+                    val followState = vp.makeFollowPuckViewportState(
+                        FollowPuckViewportStateOptions.Builder()
+                            .pitch(68.0)
+                            .zoom(18.5)
+                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                            .build()
+                    )
+                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                }
+            }
+
+            if (!isIntroAnimating && !NavigationState.isRouteActive.value && isFollowingLocation && hasInitializedPosition) {
+                val vp = mapView.viewport
+                if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
+                    val followState = vp.makeFollowPuckViewportState(
+                        FollowPuckViewportStateOptions.Builder()
+                            .pitch(68.0)
+                            .zoom(18.5)
+                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
+                            .build()
+                    )
+                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                }
+            }
+        }
+
+        LocationEngine.addListener(listener)
+        onDispose {
+            LocationEngine.removeListener(listener)
+            animator?.cancel()
+        }
+    }
+
+    // ── Mover cámara suavemente en modo simulación cuando el mapa es visible ──
+    LaunchedEffect(NavigationState.currentLocation.value, isVisible) {
+        if (isVisible && AppSettings.isGpsSimulationMode.value && !isIntroAnimating && isFollowingLocation) {
             val loc = NavigationState.currentLocation.value ?: return@LaunchedEffect
             mapView.camera.easeTo(
                 cameraOptions {
                     center(Point.fromLngLat(loc.longitude, loc.latitude))
                     bearing(loc.bearing.toDouble())
-                    pitch(70.0)
+                    pitch(68.0)
                     zoom(18.5)
+                    padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetPx, 0.0, rightInsetPx))
                 },
-                com.mapbox.maps.plugin.animation.MapAnimationOptions
-                    .mapAnimationOptions { duration(150) }
+                MapAnimationOptions.mapAnimationOptions { duration(250) }
             )
-        }
-    }
-
-    // ── GPS y seguimiento ────────────────────────────────────────────────────
-    DisposableEffect(context) {
-        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val isBatterySaver = AppSettings.batterySaverMode.value
-        val interval    = if (isBatterySaver) 3000L else 100L
-        val minInterval = if (isBatterySaver) 2000L else 50L
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
-            .setMinUpdateIntervalMillis(minInterval)
-            .setMinUpdateDistanceMeters(0.5f)
-            .setMaxUpdateDelayMillis(if (isBatterySaver) 4000L else 200L)
-            .build()
-
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-        }
-        onDispose {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
-            animator?.cancel()
         }
     }
 
@@ -1167,7 +1091,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     .pitch(70.0)
                     .zoom(18.5)
                     .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                    .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                     .build()
             )
             vp.transitionTo(
@@ -1198,7 +1122,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                     .pitch(55.0)
                     .zoom(18.5)
                     .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                    .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                     .build()
             )
             vp.transitionTo(followState, vp.makeImmediateViewportTransition())
@@ -1368,7 +1292,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                             .pitch(55.0)
                                             .zoom(18.5)
                                             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.Constant(gpsBearing))
-                                            .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                                             .build()
                                     )
                                     vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -1416,6 +1340,12 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             }
         )
 
+        // ── Contenedor de controles HUD (respeta paneles laterales CarPlay) ──
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = startOverlayPadding, end = endOverlayPadding)
+        ) {
         // ── Barra de búsqueda (oculta en modo ruta) ──────────────────────────
         AnimatedVisibility(
             visible = !NavigationState.isRouteActive.value,
@@ -1639,7 +1569,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                 .pitch(0.0)
                                 .zoom(17.0)
                                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                .padding(com.mapbox.maps.EdgeInsets(0.0, 0.0, 0.0, 0.0))
+                                .padding(com.mapbox.maps.EdgeInsets(0.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                                 .build()
                         )
                         vp.transitionTo(aerialState, vp.makeDefaultViewportTransition())
@@ -1652,7 +1582,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     .pitch(70.0)
                                     .zoom(18.5)
                                     .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                    .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                    .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                                     .build()
                             )
                             vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -1865,7 +1795,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
                                     FollowPuckViewportStateOptions.Builder()
                                         .pitch(55.0).zoom(18.5)
                                         .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                        .padding(com.mapbox.maps.EdgeInsets(400.0, 0.0, 0.0, 0.0))
+                                        .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
                                         .build()
                                 )
                                 vp.transitionTo(followState, vp.makeDefaultViewportTransition())
@@ -1882,8 +1812,7 @@ fun NavigationMap(modifier: Modifier = Modifier, isFullScreen: Boolean = false, 
             )
         }
 
-        // ── Botón guardar favorito en long-press desde ruta (pequeño, integrado en FABs) ──
-        // (movido a la columna de FABs, eliminado el botón flotante central)
+        } // Cierra Box de HUD con padding CarPlay
     }
 }
 
@@ -1940,15 +1869,13 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
 // ── Helper para LocationPuck (3D o 2D) ───────────────────────────────────
 fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int, scale: Float = 4f): com.mapbox.maps.plugin.LocationPuck {
     val modelAsset = when (vehicleType) {
-        "FLECHA"    -> "asset://models/Arrow.glb"
         "SEDAN"     -> "asset://models/Sedan.glb"
         "HATCHBACK" -> "asset://models/Hatchback.glb"
         "SPORT"     -> "asset://models/Sports.glb"
-        // Si tienes "TAXI" en tus opciones futuras, aquí se mapeará
         "TAXI"      -> "asset://models/Taxi.glb"
         "STYLUS"    -> "asset://models/Stylus.glb"
         "CORSA"     -> "asset://models/Corsa.glb"
-        else        -> null
+        else        -> null // FLECHA, TRUCK o CUSTOM usan el renderizador 2D vectorial de alta nitidez
     }
 
     if (modelAsset != null) {

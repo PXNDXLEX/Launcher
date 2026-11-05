@@ -2,24 +2,36 @@ name: Compilar Car Launcher
 
 on:
   push:
-    branches: [ "main", "beta" ]
+    branches: [ "main", "beta", "remake" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Configurar Java 17
+
+    - name: Configurar Java 17 y Cache Gradle
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
-        
+        cache: 'gradle'
+
     - name: Reparar Motor Gradle
       run: gradle wrapper --gradle-version 8.7
 
+    - name: Cache Modelo Vosk Español
+      id: cache-vosk
+      uses: actions/cache@v4
+      with:
+        path: app/src/main/assets/model-es
+        key: vosk-model-small-es-0.42-v1
+
     - name: Descargar Modelo Vosk Español
+      if: steps.cache-vosk.outputs.cache-hit != 'true'
       run: |
         mkdir -p app/src/main/assets
         if [ ! -d "app/src/main/assets/model-es" ]; then
@@ -28,20 +40,21 @@ jobs:
           unzip -q model-es.zip
           mv vosk-model-small-es-0.42 app/src/main/assets/model-es
           rm model-es.zip
-          git rev-parse HEAD | tr -d '\r\n' > app/src/main/assets/model-es/uuid
-          ls -la app/src/main/assets/model-es/ivector
-          echo "Modelo Vosk descargado y preparado con exito"
+          echo "Modelo Vosk descargado con exito"
         fi
 
-    - name: Compilar APK
-      env:
-        MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+    - name: Sellar UUID Modelo Vosk
+      run: |
+        git rev-parse HEAD | tr -d '\r\n' > app/src/main/assets/model-es/uuid
+        ls -la app/src/main/assets/model-es/ivector
+
+    - name: Compilar APK Release Optimizado (R8 + AOT)
       run: |
         chmod +x gradlew
-        ./gradlew :app:assembleDebug
-        
-    - name: Subir APK
+        ./gradlew :app:assembleRelease --no-daemon
+
+    - name: Subir APK Optimizado
       uses: actions/upload-artifact@v4
       with:
         name: CarLauncher-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
+        path: app/build/outputs/apk/release/app-release.apk

@@ -59,55 +59,8 @@ import androidx.compose.foundation.shape.CircleShape
 @Composable
 fun SpeedometerWidget() {
     val context = LocalContext.current
-    var speed by remember { mutableStateOf(0f) }
-
-    DisposableEffect(context) {
-        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-        val isBatterySaver = AppSettings.batterySaverMode.value
-        // 100ms en modo normal para máxima respuesta del velocímetro
-        val interval = if (isBatterySaver) 3000L else 100L
-        val minInterval = if (isBatterySaver) 2000L else 50L
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
-            .setMinUpdateIntervalMillis(minInterval)
-            // NO usar setMinUpdateDistanceMeters aquí: el filtro de distancia
-            // hace que el chipset promedia entre puntos más lejanos y subestima
-            // la velocidad instantánea (causa los ~10 km/h de diferencia).
-            .build()
-
-        val locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                for (location in result.locations) {
-                    if (location.hasSpeed()) {
-                        // Android GPS Kalman filter suaviza la velocidad, lo que la hace
-                        // aparecer unos ~8-12% más baja que la real a velocidades altas.
-                        // Se aplica un factor de corrección proporcional a la velocidad:
-                        // a bajas velocidades (0-30) no se aplica para no inventar movimiento.
-                        val rawSpeed = location.speed * 3.6f
-                        val correctedSpeed = when {
-                            rawSpeed < 10f  -> rawSpeed                    // Parado/muy lento: sin corr.
-                            rawSpeed < 30f  -> rawSpeed * 1.04f            // Ciudad lenta: +4%
-                            rawSpeed < 70f  -> rawSpeed * 1.07f            // Ciudad/carretera: +7%
-                            else            -> rawSpeed * 1.10f            // Autopista: +10%
-                        }
-                        speed = correctedSpeed
-                        NavigationState.currentSpeedKmH.value = correctedSpeed
-                        // Primer fix de GPS → completar la fase 3 de la pantalla de bienvenida
-                        if (!NavigationState.isGpsReady.value) {
-                            NavigationState.isGpsReady.value = true
-                        }
-                        // Actualizar récord de velocidad máxima del día / histórico
-                        com.tuusuario.carlauncher.services.SpeedRecordTracker
-                            .onSpeedUpdate(correctedSpeed, location)
-                    }
-                }
-            }
-        }
-
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-        }
-        onDispose { fusedLocationClient.removeLocationUpdates(locationCallback) }
-    }
+    // Leemos directamente del motor GPS unificado (LocationEngine) sin crear un listener duplicado
+    val speed = NavigationState.currentSpeedKmH.value
 
     val animatedSpeed by animateFloatAsState(
         targetValue = speed,
@@ -386,17 +339,27 @@ fun SpeedometerDraw(
     }
 
     var omnimonBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            try {
-                val url = URL("https://64.media.tumblr.com/f819cb1a7b6d638ba8664f94745895c3/e5e9f1553298cb87-3f/s540x810/f8d14b50b74aa05278975dce67ba7afbcaa9a950.png")
-                val connection = url.openConnection()
-                connection.doInput = true
-                connection.connect()
-                val input = connection.inputStream
-                omnimonBitmap = BitmapFactory.decodeStream(input).asImageBitmap()
-            } catch (e: Exception) {
-                e.printStackTrace()
+    LaunchedEffect(style) {
+        if (style == "OMNIMON" && omnimonBitmap == null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val cacheFile = java.io.File(context.cacheDir, "omnimon_speedo_cache.png")
+                    val bmp = if (cacheFile.exists() && cacheFile.length() > 0L) {
+                        BitmapFactory.decodeFile(cacheFile.absolutePath)
+                    } else {
+                        val url = URL("https://64.media.tumblr.com/f819cb1a7b6d638ba8664f94745895c3/e5e9f1553298cb87-3f/s540x810/f8d14b50b74aa05278975dce67ba7afbcaa9a950.png")
+                        val connection = url.openConnection().apply {
+                            connectTimeout = 7000
+                            readTimeout = 7000
+                            doInput = true
+                        }
+                        connection.connect()
+                        val bytes = connection.inputStream.use { it.readBytes() }
+                        cacheFile.writeBytes(bytes)
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    }
+                    omnimonBitmap = bmp?.asImageBitmap()
+                } catch (_: Exception) {}
             }
         }
     }
@@ -408,9 +371,15 @@ fun SpeedometerDraw(
     var cumWave by remember { mutableStateOf(0f) }
     var cumPulse by remember { mutableStateOf(0f) }
 
-    LaunchedEffect(style) {
-        val animatedStyles = listOf("AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA", "CUSTOM", "OVERDRIVE", "NEBULA", "DEMONIC", "PREMIUM", "NEON", "RACING", "CYBER")
-        if (style in animatedStyles) {
+    LaunchedEffect(style, customNeedle) {
+        // Solo ejecutamos el bucle VSYNC continuo en estilos que realmente animan partículas/ondas
+        val needsTimeAnimation = style in setOf(
+            "AURA", "VORTEX", "QUANTUM", "PULSAR", "PLASMA",
+            "ANIME", "KAIJU", "OMNIMON", "SHONEN", "MECHA",
+            "OVERDRIVE", "NEBULA", "DEMONIC"
+        ) || (style == "CUSTOM" && customNeedle in setOf("PLASMA", "LASER", "BOLT"))
+
+        if (needsTimeAnimation) {
             var lastFrameTime = withFrameNanos { it }
             while (true) {
                 withFrameNanos { frameTimeNanos ->

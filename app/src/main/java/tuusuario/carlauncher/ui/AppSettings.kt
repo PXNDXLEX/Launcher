@@ -6,108 +6,123 @@ import android.graphics.Color
 import androidx.compose.runtime.mutableStateOf
 
 object AppSettings {
-    // Variables de estado que la UI observa
+    // Variables de estado reactivas para toda la UI
     val speedoStyle = mutableStateOf("PREMIUM")
-    val speedoColor = mutableStateOf(Color.parseColor("#007AFF"))
-    val vehicleType = mutableStateOf("SEDAN") // Universal vehicle type
-    val vehicle3DScale = mutableStateOf(0.15f) // Escala del modelo 3D
-    val uiColor = mutableStateOf(Color.parseColor("#007AFF"))
-    val mapIconColor = mutableStateOf(Color.parseColor("#007AFF")) // Color independiente para el icono en el mapa
-    val isDarkMode = mutableStateOf(true)
-    val isMapDarkMode = mutableStateOf(true)
-    val mapStyle = mutableStateOf("DARK") // LIGHT, DARK, NEON, SATELLITE
+    val speedoColor = mutableStateOf(Color.parseColor("#1A6BFF"))
+    val vehicleType = mutableStateOf("STYLUS") // Modelo 3D por defecto acorde al Kia Rio Stylus
+    val vehicle3DScale = mutableStateOf(0.012f) // Escala del modelo 3D
+    val uiColor = mutableStateOf(Color.parseColor("#1A6BFF"))
+    val mapIconColor = mutableStateOf(Color.parseColor("#FFD600"))
+    val isDarkMode = mutableStateOf(false) // Estilo claro moderno por defecto (como referencia)
+    val autoThemeByTime = mutableStateOf(false) // Cambio automático día/noche opcional
+    val isMapDarkMode = mutableStateOf(false)
+    val mapStyle = mutableStateOf("LIGHT") // LIGHT, DARK, NEON, SATELLITE
     val batterySaverMode = mutableStateOf(false)
     val dashcamCameraIndex = mutableStateOf(0)
-    // Asistente de voz Arlet
+    // Asistente de voz Sara / Arlet
     val arletVoiceWakeEnabled = mutableStateOf(true)
     // Modo simulación GPS — no se persiste (solo para testing)
     val isGpsSimulationMode = mutableStateOf(false)
-    
+    // Modo dividido CarPlay en Navegación (Mapa + Música reducida al costado)
+    val navSplitMode = mutableStateOf(true)
+
+    // Personalización de la tarjeta principal del vehículo (Home Bento)
+    val carBrandName = mutableStateOf("KIA")
+    val carModelName = mutableStateOf("RIO STYLUS")
+    val carYearOrPlate = mutableStateOf("AD513IM")
+    val customHomeCarPhotoPath = mutableStateOf("") // Vacío = usa Kia Rio amarillo integrado
+
     // Custom Speedometer settings
     val customSpeedoShape = mutableStateOf("ARC")
     val customSpeedoNeedle = mutableStateOf("PLASMA")
     val customSpeedoThickness = mutableStateOf(0.08f)
-    val customSpeedoBgUri = mutableStateOf("")    // URI de imagen de fondo (legacy)
-    val customSpeedoBgPath = mutableStateOf("")    // Ruta del archivo recortado
-    val customSpeedoBgOpacity = mutableStateOf(0.5f) // opacidad del fondo
-    
-    // Custom Vehicle Icon
-    val customVehicleIconPath = mutableStateOf("") // Ruta del ícono personalizado del vehículo
+    val customSpeedoBgUri = mutableStateOf("")
+    val customSpeedoBgPath = mutableStateOf("")
+    val customSpeedoBgOpacity = mutableStateOf(0.5f)
+
+    // Custom Vehicle Icon (2D fallback en mapa)
+    val customVehicleIconPath = mutableStateOf("")
 
     // ── Ajuste fino de luces del auto (debug/tuning) ─────────────────────────
-    // Todos los valores son coordenadas en el bitmap 512×512 del glow
-    val glowCarHalfW   = mutableStateOf(22f)   // semiancho visual del modelo (px en bitmap)
-    val glowHeadY      = mutableStateOf(240f)  // Y de origen de los faros delanteros
-    val glowHeadReach  = mutableStateOf(40f)   // Y hasta donde llega el haz de luz
-    val glowHeadSpread = mutableStateOf(50f)   // cuánto se abre el cono lateralmente
-    val glowTailY      = mutableStateOf(272f)  // Y de las luces traseras
-    val glowTailRadius = mutableStateOf(14f)   // radio del glow trasero
-    val glowIconSize   = mutableStateOf(1.5f)  // escala del símbolo en el mapa
+    val glowCarHalfW   = mutableStateOf(22f)
+    val glowHeadY      = mutableStateOf(240f)
+    val glowHeadReach  = mutableStateOf(40f)
+    val glowHeadSpread = mutableStateOf(50f)
+    val glowTailY      = mutableStateOf(272f)
+    val glowTailRadius = mutableStateOf(14f)
+    val glowIconSize   = mutableStateOf(1.5f)
 
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
 
-    // Función para leer lo guardado al abrir la app
     fun init(context: Context) {
         if (isInitialized) return
-        prefs = context.getSharedPreferences("CarLauncherPrefs", Context.MODE_PRIVATE)
-        
-        speedoStyle.value = prefs?.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
-        speedoColor.value = prefs?.getInt("speedoColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
-        vehicleType.value = prefs?.getString("vehicleType", "SEDAN") ?: "SEDAN"
-        
+        val p = context.getSharedPreferences("CarLauncherPrefs", Context.MODE_PRIVATE)
+        prefs = p
+
+        speedoStyle.value = p.getString("speedoStyle", "PREMIUM") ?: "PREMIUM"
+        speedoColor.value = p.getInt("speedoColor", Color.parseColor("#1A6BFF"))
+        vehicleType.value = p.getString("vehicleType", "STYLUS") ?: "STYLUS"
+
         loadVehicleSpecificSettings(vehicleType.value)
 
-        uiColor.value = prefs?.getInt("uiColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
-        mapIconColor.value = prefs?.getInt("mapIconColor", Color.parseColor("#007AFF")) ?: Color.parseColor("#007AFF")
+        uiColor.value = p.getInt("uiColor", Color.parseColor("#1A6BFF"))
+        mapIconColor.value = p.getInt("mapIconColor", Color.parseColor("#FFD600"))
+        autoThemeByTime.value = p.getBoolean("autoThemeByTime", false)
+        navSplitMode.value = p.getBoolean("navSplitMode", true)
 
-        // Calcular el modo noche basado en la hora (19:00 - 04:59 es de noche)
-        val calendar = java.util.Calendar.getInstance()
-        val hourOfDay = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-        val isNightTime = hourOfDay >= 19 || hourOfDay < 5
+        carBrandName.value = p.getString("carBrandName", "KIA") ?: "KIA"
+        carModelName.value = p.getString("carModelName", "RIO STYLUS") ?: "RIO STYLUS"
+        carYearOrPlate.value = p.getString("carYearOrPlate", "AD513IM") ?: "AD513IM"
+        customHomeCarPhotoPath.value = p.getString("customHomeCarPhotoPath", "") ?: ""
 
-        isDarkMode.value = isNightTime
-        isMapDarkMode.value = isNightTime
-        mapStyle.value = if (isNightTime) "DARK" else "LIGHT"
-
-        // Guardar los valores calculados en prefs para que estén sincronizados
-        prefs?.edit()?.apply {
-            putBoolean("isDarkMode", isNightTime)
-            putBoolean("isMapDarkMode", isNightTime)
-            putString("mapStyle", mapStyle.value)
-            apply()
+        if (autoThemeByTime.value) {
+            val calendar = java.util.Calendar.getInstance()
+            val hourOfDay = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+            val isNightTime = hourOfDay >= 19 || hourOfDay < 5
+            isDarkMode.value = isNightTime
+            isMapDarkMode.value = isNightTime
+            val savedStyle = p.getString("mapStyle", "LIGHT") ?: "LIGHT"
+            if (savedStyle == "LIGHT" || savedStyle == "DARK") {
+                mapStyle.value = if (isNightTime) "DARK" else "LIGHT"
+            } else {
+                mapStyle.value = savedStyle
+            }
+        } else {
+            // Respetar siempre la preferencia elegida por el usuario (por defecto modo claro moderno)
+            isDarkMode.value = p.getBoolean("remakeDarkMode", false)
+            isMapDarkMode.value = p.getBoolean("isMapDarkMode", false)
+            mapStyle.value = p.getString("mapStyle", if (isDarkMode.value) "DARK" else "LIGHT") ?: "LIGHT"
         }
 
-        batterySaverMode.value = prefs?.getBoolean("batterySaverMode", false) ?: false
-        dashcamCameraIndex.value = prefs?.getInt("dashcamCameraIndex", 0) ?: 0
-        customSpeedoShape.value = prefs?.getString("customSpeedoShape", "ARC") ?: "ARC"
-        customSpeedoNeedle.value = prefs?.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
-        customSpeedoThickness.value = prefs?.getFloat("customSpeedoThickness", 0.08f) ?: 0.08f
-        customSpeedoBgUri.value = prefs?.getString("customSpeedoBgUri", "") ?: ""
-        customSpeedoBgPath.value = prefs?.getString("customSpeedoBgPath", "") ?: ""
-        customSpeedoBgOpacity.value = prefs?.getFloat("customSpeedoBgOpacity", 0.5f) ?: 0.5f
-        customVehicleIconPath.value = prefs?.getString("customVehicleIconPath", "") ?: ""
-        arletVoiceWakeEnabled.value = prefs?.getBoolean("arletVoiceWakeEnabled", true) ?: true
-        
+        batterySaverMode.value = p.getBoolean("batterySaverMode", false)
+        dashcamCameraIndex.value = p.getInt("dashcamCameraIndex", 0)
+        customSpeedoShape.value = p.getString("customSpeedoShape", "ARC") ?: "ARC"
+        customSpeedoNeedle.value = p.getString("customSpeedoNeedle", "PLASMA") ?: "PLASMA"
+        customSpeedoThickness.value = p.getFloat("customSpeedoThickness", 0.08f)
+        customSpeedoBgUri.value = p.getString("customSpeedoBgUri", "") ?: ""
+        customSpeedoBgPath.value = p.getString("customSpeedoBgPath", "") ?: ""
+        customSpeedoBgOpacity.value = p.getFloat("customSpeedoBgOpacity", 0.5f)
+        customVehicleIconPath.value = p.getString("customVehicleIconPath", "") ?: ""
+        arletVoiceWakeEnabled.value = p.getBoolean("arletVoiceWakeEnabled", true)
+
         isInitialized = true
-        // Notificar a la pantalla de bienvenida que los ajustes ya están listos
-        // (NavigationState importado late-bound para evitar dependencia circular)
         try { NavigationState.isSettingsLoaded.value = true } catch (_: Exception) {}
     }
 
     private fun loadVehicleSpecificSettings(type: String) {
-        val p = "${type}_"
-        vehicle3DScale.value = prefs?.getFloat(p + "vehicle3DScale", 0.15f) ?: 0.15f
-        glowCarHalfW.value   = prefs?.getFloat(p + "glowCarHalfW",   22f)  ?: 22f
-        glowHeadY.value      = prefs?.getFloat(p + "glowHeadY",      240f) ?: 240f
-        glowHeadReach.value  = prefs?.getFloat(p + "glowHeadReach",  40f)  ?: 40f
-        glowHeadSpread.value = prefs?.getFloat(p + "glowHeadSpread", 50f)  ?: 50f
-        glowTailY.value      = prefs?.getFloat(p + "glowTailY",      272f) ?: 272f
-        glowTailRadius.value = prefs?.getFloat(p + "glowTailRadius", 14f)  ?: 14f
-        glowIconSize.value   = prefs?.getFloat(p + "glowIconSize",   1.5f) ?: 1.5f
+        val prefix = "${type}_"
+        val defaultScale = if (type == "STYLUS" || type == "CORSA") 0.012f else 0.15f
+        vehicle3DScale.value = prefs?.getFloat(prefix + "vehicle3DScale", defaultScale) ?: defaultScale
+        glowCarHalfW.value   = prefs?.getFloat(prefix + "glowCarHalfW",   22f)  ?: 22f
+        glowHeadY.value      = prefs?.getFloat(prefix + "glowHeadY",      240f) ?: 240f
+        glowHeadReach.value  = prefs?.getFloat(prefix + "glowHeadReach",  40f)  ?: 40f
+        glowHeadSpread.value = prefs?.getFloat(prefix + "glowHeadSpread", 50f)  ?: 50f
+        glowTailY.value      = prefs?.getFloat(prefix + "glowTailY",      272f) ?: 272f
+        glowTailRadius.value = prefs?.getFloat(prefix + "glowTailRadius", 14f)  ?: 14f
+        glowIconSize.value   = prefs?.getFloat(prefix + "glowIconSize",   1.5f) ?: 1.5f
     }
 
-    // Funciones elegantes para cambiar y GUARDAR al mismo tiempo
     fun setSpeedoStyle(style: String) {
         speedoStyle.value = style
         prefs?.edit()?.putString("speedoStyle", style)?.apply()
@@ -149,7 +164,37 @@ object AppSettings {
 
     fun setDarkMode(isDark: Boolean) {
         isDarkMode.value = isDark
-        prefs?.edit()?.putBoolean("isDarkMode", isDark)?.apply()
+        prefs?.edit()?.putBoolean("remakeDarkMode", isDark)?.putBoolean("isDarkMode", isDark)?.apply()
+    }
+
+    fun setAutoThemeByTime(enabled: Boolean) {
+        autoThemeByTime.value = enabled
+        prefs?.edit()?.putBoolean("autoThemeByTime", enabled)?.apply()
+    }
+
+    fun setNavSplitMode(split: Boolean) {
+        navSplitMode.value = split
+        prefs?.edit()?.putBoolean("navSplitMode", split)?.apply()
+    }
+
+    fun setCarBrandName(brand: String) {
+        carBrandName.value = brand
+        prefs?.edit()?.putString("carBrandName", brand)?.apply()
+    }
+
+    fun setCarModelName(model: String) {
+        carModelName.value = model
+        prefs?.edit()?.putString("carModelName", model)?.apply()
+    }
+
+    fun setCarYearOrPlate(value: String) {
+        carYearOrPlate.value = value
+        prefs?.edit()?.putString("carYearOrPlate", value)?.apply()
+    }
+
+    fun setCustomHomeCarPhotoPath(path: String) {
+        customHomeCarPhotoPath.value = path
+        prefs?.edit()?.putString("customHomeCarPhotoPath", path)?.apply()
     }
 
     fun setMapDarkMode(isDark: Boolean) {
@@ -174,7 +219,6 @@ object AppSettings {
 
     fun setGpsSimulationMode(enabled: Boolean) {
         isGpsSimulationMode.value = enabled
-        // No se persiste — siempre inicia desactivado
     }
 
     fun setCustomSpeedoShape(shape: String) {

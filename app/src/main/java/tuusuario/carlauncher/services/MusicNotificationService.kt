@@ -40,6 +40,7 @@ object GlobalState {
     val songTitle = mutableStateOf("Música detenida")
     val songArtist = mutableStateOf("")
     val songAlbumArt = mutableStateOf<Bitmap?>(null)
+    val playerAppName = mutableStateOf("Multimedia")
 
     val isPlaying = mutableStateOf(false)
     var mediaController: MediaController? = null
@@ -74,6 +75,7 @@ object GlobalState {
                 songArtist.value = savedArtist.orEmpty()
                 if (savedDuration > 0) songDuration.value = savedDuration
                 lastPackageName = savedPackage
+                updatePlayerLabel(context, savedPackage)
                 Log.i(TAG, "Pista previa restaurada: '$savedTitle' - '$savedArtist' (app: $savedPackage)")
             }
 
@@ -157,6 +159,7 @@ object GlobalState {
         if (!pkg.isNullOrBlank() && !pkg.contains("chrome") && !pkg.contains("browser")) {
             lastPackageName = pkg
         }
+        updatePlayerLabel(context ?: appContext, pkg)
 
         val callback = object : MediaController.Callback() {
             override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -288,6 +291,33 @@ object GlobalState {
 
     fun seekTo(positionMs: Long) {
         mediaController?.transportControls?.seekTo(positionMs)
+    }
+
+    private fun updatePlayerLabel(context: Context?, pkg: String?) {
+        if (pkg.isNullOrBlank()) return
+        val known = when {
+            pkg.contains("spotify") -> "Spotify"
+            pkg.contains("youtube.music") || pkg.contains("apps.youtube.music") -> "YT Music"
+            pkg.contains("youtube") -> "YouTube"
+            pkg.contains("claromusica") -> "Claro música"
+            pkg.contains("apple") -> "Apple Music"
+            pkg.contains("deezer") -> "Deezer"
+            pkg.contains("tidal") -> "Tidal"
+            pkg.contains("poweramp") -> "Poweramp"
+            pkg.contains("bluetooth") -> "BT Music"
+            else -> null
+        }
+        if (known != null) {
+            playerAppName.value = known
+            return
+        }
+        if (context != null) {
+            try {
+                val appInfo = context.packageManager.getApplicationInfo(pkg, 0)
+                val label = context.packageManager.getApplicationLabel(appInfo).toString()
+                if (label.isNotBlank()) playerAppName.value = label
+            } catch (_: Exception) {}
+        }
     }
 
     private fun getValidContext(): Context? {

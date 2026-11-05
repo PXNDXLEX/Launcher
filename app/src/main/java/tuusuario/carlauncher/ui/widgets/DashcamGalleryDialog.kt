@@ -10,9 +10,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -70,46 +72,53 @@ fun DashcamGalleryScreen() {
     var playingVideo by remember { mutableStateOf<File?>(null) }
 
     fun reloadVideos() {
-        val dir = DashcamManager.getVideosDir()
-        videos = dir.listFiles { file -> file.extension == "mp4" }
-            ?.sortedByDescending { it.lastModified() } ?: emptyList()
+        scope.launch {
+            val (loadedVideos, loadedRefs) = withContext(Dispatchers.IO) {
+                val dir = DashcamManager.getVideosDir()
+                val vids = dir.listFiles { file -> file.extension == "mp4" }
+                    ?.sortedByDescending { it.lastModified() } ?: emptyList()
 
-        // Leer .ref.json de cada video para mostrar info inicial
-        val refs = mutableMapOf<String, VideoRefInfo>()
-        videos.forEach { video ->
-            val videoId = video.nameWithoutExtension.removePrefix("VID_")
-            val refFile = File(DashcamManager.getMetadataDir(), "VID_${videoId}.ref.json")
-            if (refFile.exists()) {
-                try {
-                    val json = JSONObject(refFile.readText())
-                    refs[videoId] = VideoRefInfo(
-                        date = json.optString("date", ""),
-                        startTime = json.optString("startTime", ""),
-                        endTime = json.optString("endTime", "").ifEmpty { null },
-                        startLat = if (json.has("startLat")) json.getDouble("startLat") else null,
-                        startLon = if (json.has("startLon")) json.getDouble("startLon") else null
-                    )
-                } catch (_: Exception) {}
+                val refs = mutableMapOf<String, VideoRefInfo>()
+                vids.forEach { video ->
+                    val videoId = video.nameWithoutExtension.removePrefix("VID_")
+                    val refFile = File(DashcamManager.getMetadataDir(), "VID_${videoId}.ref.json")
+                    if (refFile.exists()) {
+                        try {
+                            val json = JSONObject(refFile.readText())
+                            refs[videoId] = VideoRefInfo(
+                                date = json.optString("date", ""),
+                                startTime = json.optString("startTime", ""),
+                                endTime = json.optString("endTime", "").ifEmpty { null },
+                                startLat = if (json.has("startLat")) json.getDouble("startLat") else null,
+                                startLon = if (json.has("startLon")) json.getDouble("startLon") else null
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
+                vids to refs
             }
+            videos = loadedVideos
+            videoRefs = loadedRefs
         }
-        videoRefs = refs
     }
 
     fun deleteFiles(filePaths: Set<String>) {
-        filePaths.forEach { path ->
-            val videoFile = File(path)
-            val videoId = videoFile.nameWithoutExtension.removePrefix("VID_")
-            videoFile.delete()
-            // Borrar el .ref.json asociado
-            val refFile = File(DashcamManager.getMetadataDir(), "VID_${videoId}.ref.json")
-            if (refFile.exists()) refFile.delete()
-            // Borrar también el JSON legacy si existiera
-            val legacyMeta = File(DashcamManager.getMetadataDir(), "VID_${videoId}.json")
-            if (legacyMeta.exists()) legacyMeta.delete()
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                filePaths.forEach { path ->
+                    val videoFile = File(path)
+                    val videoId = videoFile.nameWithoutExtension.removePrefix("VID_")
+                    videoFile.delete()
+                    File(videoFile.parentFile, "${videoFile.nameWithoutExtension}.vtt").let { if (it.exists()) it.delete() }
+                    File(videoFile.parentFile, "${videoFile.nameWithoutExtension}.srt").let { if (it.exists()) it.delete() }
+                    File(DashcamManager.getMetadataDir(), "VID_${videoId}.ref.json").let { if (it.exists()) it.delete() }
+                    File(DashcamManager.getMetadataDir(), "VID_${videoId}.json").let { if (it.exists()) it.delete() }
+                }
+            }
+            selectedVideos = emptySet()
+            selectionMode = false
+            reloadVideos()
         }
-        selectedVideos = emptySet()
-        selectionMode = false
-        reloadVideos()
     }
 
     fun shareVideo(video: File) {
@@ -487,6 +496,7 @@ data class VideoRefInfo(
 }
 
 // ── Card de video ──
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VideoCard(
     video: File,
@@ -526,7 +536,10 @@ private fun VideoCard(
                 color = borderColor,
                 shape = RoundedCornerShape(12.dp)
             )
-            .clickable(onClick = onPlayClick),
+            .combinedClickable(
+                onClick = onPlayClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {

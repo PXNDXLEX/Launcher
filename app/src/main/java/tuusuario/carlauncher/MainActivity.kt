@@ -4,22 +4,28 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
-import android.net.Uri
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -29,29 +35,22 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.tuusuario.carlauncher.ui.DashboardScreen
-import com.tuusuario.carlauncher.ui.AppSettings
+import com.tuusuario.carlauncher.services.AppLauncherRepository
+import com.tuusuario.carlauncher.services.ArletAssistant
+import com.tuusuario.carlauncher.services.GlobalState
+import com.tuusuario.carlauncher.services.LocationEngine
 import com.tuusuario.carlauncher.services.MusicNotificationService
-import android.os.Environment
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
+import com.tuusuario.carlauncher.services.RouteTracker
+import com.tuusuario.carlauncher.services.SpeedRecordTracker
+import com.tuusuario.carlauncher.services.WeatherService
+import com.tuusuario.carlauncher.ui.AppSettings
+import com.tuusuario.carlauncher.ui.DashboardScreen
+import com.tuusuario.carlauncher.ui.LocalBentoPalette
+import com.tuusuario.carlauncher.ui.buildBentoPalette
+import com.tuusuario.carlauncher.ui.buildMaterialColorScheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
-import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
 
@@ -62,7 +61,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         instance = this
-        
+
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -75,36 +74,40 @@ class MainActivity : ComponentActivity() {
             MusicNotificationService.reconnect(this)
         }
 
-        // Mapbox SDK v11 se inicializa automáticamente via com.mapbox.token en AndroidManifest
-
+        // Inicialización ligera y asíncrona de subsistemas
         AppSettings.init(this)
-        
-        // Inicializar persistencia de música para restaurar de inmediato la última canción y carátula
-        com.tuusuario.carlauncher.services.GlobalState.init(this)
+        GlobalState.init(this)
+        WeatherService.init(this)
+        AppLauncherRepository.preload(this)
+        ArletAssistant.init(applicationContext, this)
+        RouteTracker.init(this)
+        RouteTracker.cleanupOldTrash()
+        SpeedRecordTracker.init(this)
 
-        // Inicializar ArletAssistant inmediatamente para que el modelo offline cargue en segundo plano
-        com.tuusuario.carlauncher.services.ArletAssistant.init(applicationContext, this)
-
-        // Limpiar rutas antiguas de la papelera
-        com.tuusuario.carlauncher.services.RouteTracker.init(this)
-        com.tuusuario.carlauncher.services.RouteTracker.cleanupOldTrash()
-        // Inicializar tracker de récords de velocidad
-        com.tuusuario.carlauncher.services.SpeedRecordTracker.init(this)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 
         setContent {
-            // Ahora leemos el estado directamente de nuestro AppSettings permanente
             val isDarkMode by AppSettings.isDarkMode
+            val accentColor = Color(AppSettings.uiColor.value)
 
-            // MAGIA SENSORIAL: "FULL_SENSOR" lee el hardware del teléfono ignorando el candado de Android
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            val bentoPalette = remember(isDarkMode, accentColor) {
+                buildBentoPalette(isDark = isDarkMode, accentColor = accentColor)
+            }
+            val colorScheme = remember(isDarkMode, accentColor) {
+                buildMaterialColorScheme(isDark = isDarkMode, accentColor = accentColor)
+            }
 
-            MaterialTheme(colorScheme = if (isDarkMode) darkColorScheme() else lightColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    MainAppFlow(
-                        isDarkMode = isDarkMode,
-                        // Al hacer clic, guardamos la configuración para siempre
-                        onToggleTheme = { AppSettings.setDarkMode(!isDarkMode) }
-                    )
+            CompositionLocalProvider(LocalBentoPalette provides bentoPalette) {
+                MaterialTheme(colorScheme = colorScheme) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = bentoPalette.canvasBg
+                    ) {
+                        MainAppFlow(
+                            isDarkMode = isDarkMode,
+                            onToggleTheme = { AppSettings.setDarkMode(!isDarkMode) }
+                        )
+                    }
                 }
             }
         }
@@ -112,19 +115,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        LocationEngine.refreshHardwareRequest()
         if (AppSettings.arletVoiceWakeEnabled.value) {
-            com.tuusuario.carlauncher.services.ArletAssistant.startContinuousListening()
+            ArletAssistant.startContinuousListening()
         }
     }
 
     override fun onPause() {
         super.onPause()
-        com.tuusuario.carlauncher.services.ArletAssistant.stopContinuousListening()
+        ArletAssistant.stopContinuousListening()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        com.tuusuario.carlauncher.services.ArletAssistant.destroy()
+        LocationEngine.stop()
+        ArletAssistant.destroy()
         if (instance == this) instance = null
     }
 }
@@ -133,46 +138,54 @@ class MainActivity : ComponentActivity() {
 fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    
-    // FIX: Inicializar con el valor REAL para evitar el parpadeo. Si ya está concedido, nace en true.
-    var locationGranted by rememberSaveable { 
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) 
+
+    var locationGranted by rememberSaveable {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        )
     }
-    var notificationsGranted by rememberSaveable { 
-        mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) 
+    var notificationsGranted by rememberSaveable {
+        mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName))
     }
     var cameraGranted by rememberSaveable {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
     }
     var audioGranted by rememberSaveable {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
     }
-    // Android 13+ requiere READ_MEDIA_VIDEO para leer videos del almacenamiento externo
     var mediaGranted by rememberSaveable {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                 ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
-            else true // Android ≤ 12: cubierto por READ_EXTERNAL_STORAGE
+            else true
         )
     }
     var manageStorageGranted by rememberSaveable {
         mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) android.os.Environment.isExternalStorageManager() else true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else true
         )
     }
 
     val checkPermissions = {
         locationGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        cameraGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         notificationsGranted = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         val audioWasGranted = audioGranted
         audioGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (locationGranted) {
+            LocationEngine.start(context)
+        }
         if (!audioWasGranted && audioGranted && AppSettings.arletVoiceWakeEnabled.value) {
-            com.tuusuario.carlauncher.services.ArletAssistant.startContinuousListening()
+            ArletAssistant.startContinuousListening()
         }
         mediaGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
         else true
-        manageStorageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) android.os.Environment.isExternalStorageManager() else true
+        manageStorageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else true
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -181,7 +194,6 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                 checkPermissions()
                 if (notificationsGranted) {
                     MusicNotificationService.reconnect(context)
-                    // Resucitamos el control de música si el teléfono estaba bloqueado
                     MusicNotificationService.instance?.refreshCurrentMedia()
                 }
             }
@@ -190,19 +202,32 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { checkPermissions() }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { checkPermissions() }
 
     if (!locationGranted || !notificationsGranted || !cameraGranted || !audioGranted || !mediaGranted || !manageStorageGranted) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Configuración de Launcher", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Configuración Inicial del Launcher",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
             Spacer(modifier = Modifier.height(24.dp))
             if (!locationGranted || !cameraGranted || !audioGranted || !mediaGranted) {
-                Text("1. Necesitamos acceso al GPS, Cámara, Micrófono (para el Asistente Arlet y Dashcam) y Archivos de Video.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "1. Necesitamos acceso a GPS, Cámara, Micrófono (Asistente Sara y Dashcam) y Archivos Multimedia.",
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(12.dp))
                 Button(onClick = {
                     val perms = mutableListOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -215,22 +240,34 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                     permissionLauncher.launch(perms.toTypedArray())
                 }) { Text("Permitir Accesos") }
             } else if (!manageStorageGranted) {
-                Text("2. Da permiso de acceso a Todos los Archivos para recuperar tus rutas antiguas de instalaciones previas.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { 
+                Text(
+                    "2. Concede permiso de Todos los Archivos para conservar tus rutas, récords y videos.",
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        )
                         context.startActivity(intent)
                     }
                 }) { Text("Conceder Acceso Total") }
             } else if (!notificationsGranted) {
-                Text("3. Todo Listo. Ahora da acceso a las Notificaciones para la música.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Abrir Ajustes") }
+                Text(
+                    "3. Activa el Acceso a Notificaciones para controlar Spotify, YouTube Music y reproductores Bluetooth.",
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = {
+                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }) { Text("Abrir Ajustes de Música") }
             }
         }
     } else {
-        // Detectar primera apertura (en esta instalación) y datos previos
         val prefs = context.getSharedPreferences("CarLauncherPrefs", android.content.Context.MODE_PRIVATE)
         var showMigrationDialog by rememberSaveable { mutableStateOf(false) }
         var migrationVideoCount by rememberSaveable { mutableStateOf(0) }
@@ -239,22 +276,20 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
         LaunchedEffect(Unit) {
             val isFirstLaunch = !prefs.getBoolean("welcomeShown", false)
             if (isFirstLaunch) {
-                val baseDir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                    "CarLauncher"
-                )
-                // Contar datos existentes
-                val videosDir = File(baseDir, "Videos")
-                val rutasDir = File(baseDir, "Rutas")
-                val videoCount = videosDir.listFiles { f -> f.extension == "mp4" }?.size ?: 0
-                val routeDays = rutasDir.listFiles { f -> f.name.startsWith("ruta_") && f.name.endsWith(".json") }?.size ?: 0
-
+                val (videoCount, routeDays) = withContext(Dispatchers.IO) {
+                    val baseDir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                        "CarLauncher"
+                    )
+                    val vCount = File(baseDir, "Videos").listFiles { f -> f.extension == "mp4" }?.size ?: 0
+                    val rDays = File(baseDir, "Rutas").listFiles { f -> f.name.startsWith("ruta_") && f.name.endsWith(".json") }?.size ?: 0
+                    vCount to rDays
+                }
                 if (videoCount > 0 || routeDays > 0) {
                     migrationVideoCount = videoCount
                     migrationRouteDays = routeDays
                     showMigrationDialog = true
                 } else {
-                    // Marcar como visto si no hay datos
                     prefs.edit().putBoolean("welcomeShown", true).apply()
                 }
             }
@@ -274,16 +309,13 @@ fun MainAppFlow(isDarkMode: Boolean, onToggleTheme: () -> Unit) {
                         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
                         "CarLauncher"
                     )
-                    // Borrar todo el contenido
-                    baseDir.listFiles()?.forEach { child ->
-                        child.deleteRecursively()
-                    }
+                    baseDir.listFiles()?.forEach { child -> child.deleteRecursively() }
                     prefs.edit().putBoolean("welcomeShown", true).apply()
                 }
             )
         }
 
-        DashboardScreen(onToggleTheme, isDarkMode)
+        DashboardScreen(onToggleTheme = onToggleTheme, isDarkMode = isDarkMode)
     }
 }
 
@@ -298,15 +330,12 @@ fun DataMigrationDialog(
 
     if (!confirmWipe) {
         AlertDialog(
-            onDismissRequest = { onKeep() }, // Cerrar = conservar
+            onDismissRequest = { onKeep() },
             icon = { Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp)) },
-            title = { Text("¡Datos anteriores encontrados!", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            title = { Text("¡Datos anteriores encontrados!", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text(
-                        "Se encontraron datos compatibles de una instalación anterior:",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Text("Se encontraron datos compatibles de una instalación anterior:", style = MaterialTheme.typography.bodyMedium)
                     Spacer(modifier = Modifier.height(12.dp))
                     if (videoCount > 0) {
                         Text("🎥  $videoCount video${if (videoCount != 1) "s" else ""} de Dashcam", style = MaterialTheme.typography.bodyMedium)
@@ -314,36 +343,25 @@ fun DataMigrationDialog(
                     if (routeDays > 0) {
                         Text("🗺️  $routeDays día${if (routeDays != 1) "s" else ""} de historial de rutas", style = MaterialTheme.typography.bodyMedium)
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "¿Qué deseas hacer con estos datos?",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             },
             confirmButton = {
-                Button(onClick = onKeep) {
-                    Text("✅ Conservar todo")
-                }
+                Button(onClick = onKeep) { Text("Conservar todo") }
             },
             dismissButton = {
                 OutlinedButton(
                     onClick = { confirmWipe = true },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("🗑️ Borrar todo y empezar de cero")
+                    Text("Borrar todo")
                 }
             }
         )
     } else {
-        // Segunda confirmación antes de borrar
         AlertDialog(
             onDismissRequest = { confirmWipe = false },
-            title = { Text("¿Estás seguro?", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-            text = { Text("Esta acción borrará permanentemente todos los videos y rutas guardadas. No se puede deshacer.") },
+            title = { Text("¿Estás seguro?", fontWeight = FontWeight.Bold) },
+            text = { Text("Esta acción borrará permanentemente todos los videos y rutas guardadas.") },
             confirmButton = {
                 Button(
                     onClick = onWipeAll,
