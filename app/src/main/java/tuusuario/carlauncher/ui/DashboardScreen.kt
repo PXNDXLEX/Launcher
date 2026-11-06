@@ -217,17 +217,24 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     val isSubScreenVisible = currentScreen !in setOf("HOME", "NAVIGATION")
 
     // Padding dinámico sincronizado con el slider (25%..50% máx) y el dock ergonómico (80.dp)
-    val availLandscapeWidth = (configuration.screenWidthDp.dp - 20.dp).coerceAtLeast(320.dp)
-    val rightPanelWidthDp = (availLandscapeWidth * (navPanelPct / 100f)).coerceIn(220.dp, availLandscapeWidth * 0.50f)
-
-    val availPortraitHeight = (configuration.screenHeightDp.dp - 16.dp).coerceAtLeast(400.dp)
-    val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
-    val bottomRowHeightDp = (availPortraitHeight * portraitFraction).coerceIn(168.dp, 310.dp)
-
     val mapStartPadding = if (isLandscape) 96.dp else 0.dp
-    val mapEndPadding = if (isLandscape && isNavSplit) rightPanelWidthDp + 18.dp else 0.dp
+    val mapEndPadding = if (isLandscape && isNavSplit) {
+        val availLandscapeWidth = (configuration.screenWidthDp.dp - 20.dp).coerceAtLeast(240.dp)
+        val maxPanelW = (availLandscapeWidth * 0.50f).coerceAtLeast(140.dp)
+        val minPanelW = 220.dp.coerceAtMost(maxPanelW)
+        val rightPanelWidthDp = (availLandscapeWidth * (navPanelPct / 100f)).coerceIn(minPanelW, maxPanelW)
+        rightPanelWidthDp + 18.dp
+    } else 0.dp
+
     val mapBottomPadding = if (!isLandscape && isNavigationVisible) {
-        if (isNavSplit) bottomRowHeightDp + 76.dp else 70.dp
+        if (isNavSplit) {
+            val availPortraitHeight = (configuration.screenHeightDp.dp - 16.dp).coerceAtLeast(280.dp)
+            val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
+            val maxRowH = 310.dp.coerceAtMost((availPortraitHeight * 0.48f).coerceAtLeast(130.dp))
+            val minRowH = 168.dp.coerceAtMost(maxRowH)
+            val bottomRowHeightDp = (availPortraitHeight * portraitFraction).coerceIn(minRowH, maxRowH)
+            bottomRowHeightDp + 76.dp
+        } else 70.dp
     } else 0.dp
 
     Box(

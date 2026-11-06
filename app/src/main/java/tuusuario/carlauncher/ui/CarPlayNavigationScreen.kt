@@ -84,8 +84,10 @@ fun CarPlayNavigationOverlay(
                 .fillMaxSize()
                 .padding(10.dp)
         ) {
-            // Ancho dinámico del panel Música + Velocímetro (25%..50% máx del ancho disponible)
-            val targetPanelWidth = (maxWidth * (navPanelPct / 100f)).coerceIn(220.dp, maxWidth * 0.50f)
+            // Ancho dinámico del panel Música + Velocímetro (25%..50% máx del ancho disponible, siempre min <= max)
+            val maxPanelW = (maxWidth * 0.50f).coerceAtLeast(0.dp)
+            val minPanelW = 220.dp.coerceAtMost(maxPanelW)
+            val targetPanelWidth = (maxWidth * (navPanelPct / 100f)).coerceIn(minPanelW, maxPanelW)
             val animatedPanelWidth by animateDpAsState(
                 targetValue = targetPanelWidth,
                 animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
@@ -153,9 +155,11 @@ fun CarPlayNavigationOverlay(
                 .fillMaxSize()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
-            // Altura adaptable según el slider (manteniendo máximo razonable vertical sin deformar)
+            // Altura adaptable según el slider (manteniendo siempre min <= max incluso en ventanas reducidas)
             val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
-            val targetRowHeight = (maxHeight * portraitFraction).coerceIn(168.dp, 310.dp)
+            val maxRowH = 310.dp.coerceAtMost((maxHeight * 0.48f).coerceAtLeast(0.dp))
+            val minRowH = 168.dp.coerceAtMost(maxRowH)
+            val targetRowHeight = (maxHeight * portraitFraction).coerceIn(minRowH, maxRowH)
             val animatedRowHeight by animateDpAsState(
                 targetValue = targetRowHeight,
                 animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
