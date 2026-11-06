@@ -227,6 +227,7 @@ object GlobalState {
     }
 
     fun togglePlayPause() {
+        com.tuusuario.carlauncher.ui.NavigationState.notifyUserInteraction()
         if (isPlaying.value) {
             pause()
         } else {
@@ -235,6 +236,7 @@ object GlobalState {
     }
 
     fun play() {
+        com.tuusuario.carlauncher.ui.NavigationState.notifyUserInteraction()
         val controller = mediaController
         if (controller != null) {
             try {
@@ -252,6 +254,7 @@ object GlobalState {
     }
 
     fun pause() {
+        com.tuusuario.carlauncher.ui.NavigationState.notifyUserInteraction()
         val controller = mediaController
         if (controller != null) {
             try {
@@ -268,6 +271,7 @@ object GlobalState {
     }
 
     fun skipToNext() {
+        com.tuusuario.carlauncher.ui.NavigationState.notifyUserInteraction()
         val controller = mediaController
         if (controller != null) {
             try {
@@ -279,6 +283,7 @@ object GlobalState {
     }
 
     fun skipToPrevious() {
+        com.tuusuario.carlauncher.ui.NavigationState.notifyUserInteraction()
         val controller = mediaController
         if (controller != null) {
             try {
@@ -290,6 +295,7 @@ object GlobalState {
     }
 
     fun seekTo(positionMs: Long) {
+        com.tuusuario.carlauncher.ui.NavigationState.notifyUserInteraction()
         mediaController?.transportControls?.seekTo(positionMs)
     }
 

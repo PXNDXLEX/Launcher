@@ -57,6 +57,7 @@ object AppSettings {
 
     private var prefs: SharedPreferences? = null
     private var isInitialized = false
+    private var lastAutoAppliedNightState: Boolean? = null
 
     fun init(context: Context) {
         if (isInitialized) return
@@ -81,18 +82,10 @@ object AppSettings {
         customHomeCarPhotoPath.value = p.getString("customHomeCarPhotoPath", "") ?: ""
         homeCarScale.value = p.getFloat("homeCarScale", 1.14f)
 
+        val savedStyle = p.getString("mapStyle", "LIGHT") ?: "LIGHT"
         if (autoThemeByTime.value) {
-            val calendar = java.util.Calendar.getInstance()
-            val hourOfDay = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-            val isNightTime = hourOfDay >= 19 || hourOfDay < 5
-            isDarkMode.value = isNightTime
-            isMapDarkMode.value = isNightTime
-            val savedStyle = p.getString("mapStyle", "LIGHT") ?: "LIGHT"
-            if (savedStyle == "LIGHT" || savedStyle == "DARK") {
-                mapStyle.value = if (isNightTime) "DARK" else "LIGHT"
-            } else {
-                mapStyle.value = savedStyle
-            }
+            mapStyle.value = savedStyle
+            evaluateAutoThemeByTime(force = true)
         } else {
             // Respetar siempre la preferencia elegida por el usuario (por defecto modo claro moderno)
             isDarkMode.value = p.getBoolean("remakeDarkMode", false)
@@ -167,14 +160,69 @@ object AppSettings {
         prefs?.edit()?.putInt("mapIconColor", color)?.apply()
     }
 
+    /**
+     * Aplica de forma coordinada el estado Día / Noche tanto a la interfaz como al Mapa 3D
+     * (respetando estilos especiales como NEON o SATELLITE si el usuario los seleccionó).
+     */
+    fun applyDayNightState(isDark: Boolean, persistManualPreference: Boolean) {
+        if (isDarkMode.value != isDark) {
+            isDarkMode.value = isDark
+        }
+        if (isMapDarkMode.value != isDark) {
+            isMapDarkMode.value = isDark
+        }
+        val currentMap = mapStyle.value
+        val targetMap = if (currentMap == "LIGHT" || currentMap == "DARK") {
+            if (isDark) "DARK" else "LIGHT"
+        } else {
+            currentMap
+        }
+        if (mapStyle.value != targetMap) {
+            mapStyle.value = targetMap
+        }
+
+        if (persistManualPreference) {
+            val editor = prefs?.edit()
+                ?.putBoolean("remakeDarkMode", isDark)
+                ?.putBoolean("isDarkMode", isDark)
+                ?.putBoolean("isMapDarkMode", isDark)
+            if (currentMap == "LIGHT" || currentMap == "DARK") {
+                editor?.putString("mapStyle", targetMap)
+            }
+            editor?.apply()
+        }
+    }
+
+    /**
+     * Evalúa en vivo la hora actual del sistema (Modo Noche entre 19:00 / 7:00 PM y 05:00 AM)
+     * y aplica el cambio dinámicamente con animación suave sin necesidad de reiniciar la app.
+     */
+    fun evaluateAutoThemeByTime(force: Boolean = false) {
+        if (!autoThemeByTime.value) {
+            lastAutoAppliedNightState = null
+            return
+        }
+        val hourOfDay = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val isNightTime = hourOfDay >= 19 || hourOfDay < 5
+
+        if (force || lastAutoAppliedNightState == null || lastAutoAppliedNightState != isNightTime) {
+            lastAutoAppliedNightState = isNightTime
+            applyDayNightState(isDark = isNightTime, persistManualPreference = false)
+        }
+    }
+
     fun setDarkMode(isDark: Boolean) {
-        isDarkMode.value = isDark
-        prefs?.edit()?.putBoolean("remakeDarkMode", isDark)?.putBoolean("isDarkMode", isDark)?.apply()
+        applyDayNightState(isDark = isDark, persistManualPreference = true)
     }
 
     fun setAutoThemeByTime(enabled: Boolean) {
         autoThemeByTime.value = enabled
         prefs?.edit()?.putBoolean("autoThemeByTime", enabled)?.apply()
+        if (enabled) {
+            evaluateAutoThemeByTime(force = true)
+        } else {
+            lastAutoAppliedNightState = null
+        }
     }
 
     fun setNavSplitMode(split: Boolean) {

@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -1389,6 +1390,16 @@ internal fun ExpandedMusicModal(onDismiss: () -> Unit) {
     var isSeeking by remember { mutableStateOf(false) }
     var seekFraction by remember { mutableStateOf(0f) }
 
+    DisposableEffect(Unit) {
+        NavigationState.activeModalCount += 1
+        NavigationState.notifyUserInteraction()
+        onDispose {
+            NavigationState.activeModalCount = (NavigationState.activeModalCount - 1).coerceAtLeast(0)
+            NavigationState.isTouchingScreen.value = false
+            NavigationState.notifyUserInteraction()
+        }
+    }
+
     val sliderValue = if (isSeeking) seekFraction else if (duration > 0) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
 
     Dialog(
@@ -1398,6 +1409,16 @@ internal fun ExpandedMusicModal(onDismiss: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val anyPressed = event.changes.any { it.pressed }
+                            NavigationState.isTouchingScreen.value = anyPressed
+                            NavigationState.notifyUserInteraction()
+                        }
+                    }
+                }
                 .background(Color.Black.copy(alpha = 0.65f))
                 .clickable(onClick = onDismiss),
             contentAlignment = Alignment.Center

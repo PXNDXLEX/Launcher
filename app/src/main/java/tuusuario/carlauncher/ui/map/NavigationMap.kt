@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -97,6 +98,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import com.mapbox.maps.plugin.locationcomponent.LocationProvider
 import com.mapbox.maps.plugin.locationcomponent.LocationConsumer
+import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
+import com.mapbox.maps.plugin.locationcomponent.OnIndicatorBearingChangedListener
+import com.tuusuario.carlauncher.ui.LocalBentoPalette
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -279,9 +283,29 @@ fun NavigationMap(
     var gpsBearing by remember { mutableStateOf(0.0) }
 
     var searchQuery      by remember { mutableStateOf("") }
+    var isSearchFocused  by remember { mutableStateOf(false) }
     var searchResults    by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
     var showFavorites    by remember { mutableStateOf(false) }
     var isSearching      by remember { mutableStateOf(false) }
+    var isStyleTransitioning by remember { mutableStateOf(false) }
+    var prevIndicatorPosListener by remember { mutableStateOf<OnIndicatorPositionChangedListener?>(null) }
+    var prevIndicatorBearingListener by remember { mutableStateOf<OnIndicatorBearingChangedListener?>(null) }
+
+    // Mientras se ejecuta una búsqueda de red activa mantenemos vivo el temporizador;
+    // cada toque o tecla restablece los 30 segundos exactos al dejar de interactuar
+    val uiBusyNow = isVisible && isSearching
+    LaunchedEffect(uiBusyNow) {
+        NavigationState.isNavigatingUiBusy = uiBusyNow
+        if (uiBusyNow) {
+            NavigationState.notifyUserInteraction()
+        }
+    }
+    LaunchedEffect(isVisible) {
+        if (!isVisible) {
+            isSearchFocused = false
+            focusManager.clearFocus()
+        }
+    }
 
     // Punto de destino como Mapbox Point
     var destAnnotation   by remember { mutableStateOf<PointAnnotation?>(null) }
@@ -352,8 +376,11 @@ fun NavigationMap(
         }
     }
 
-    // ── Función para aplicar estilo Mapbox ───────────────────────────────────
+    // ── Función para aplicar estilo Mapbox (con fundido suave al cambiar Día/Noche en vivo) ──
     fun applyMapStyle(style: String) {
+        if (lastAppliedStyle.isNotEmpty() && lastAppliedStyle != style && isVisibleState.value) {
+            isStyleTransitioning = true
+        }
         val styleUri = when (style) {
             "SATELLITE" -> Style.SATELLITE_STREETS
             "DARK"      -> Style.DARK
@@ -363,6 +390,7 @@ fun NavigationMap(
         mapView.mapboxMap.loadStyle(styleUri) { loadedStyle ->
             mapReady = true
             lastAppliedStyle = style
+            isStyleTransitioning = false
             // Notificar a la pantalla de bienvenida que el mapa ya cargó
             NavigationState.isMapStyleReady.value = true
 
@@ -686,25 +714,23 @@ fun NavigationMap(
                 }
             }
 
-            locPlugin.addOnIndicatorPositionChangedListener { point ->
+            prevIndicatorPosListener?.let { locPlugin.removeOnIndicatorPositionChangedListener(it) }
+            val posListener = OnIndicatorPositionChangedListener { point ->
                 lastIndicatorPos = point
                 updateGlow()
             }
+            prevIndicatorPosListener = posListener
+            locPlugin.addOnIndicatorPositionChangedListener(posListener)
 
-            // addOnIndicatorBearingChangedListener usa GPS bearing cuando el auto
-            // se mueve Y brujula del dispositivo cuando esta parado. Funciona siempre.
-            // El mapa rota bajo el icono del auto, que siempre apunta hacia arriba.
-            // IMPORTANTE: NO llamar easeTo aquí cuando el FollowPuckViewportState está activo
-            // (SyncWithLocationPuck ya gestiona bearing/pitch automáticamente). Dos sistemas
-            // controlando la cámara al mismo tiempo causan el efecto de "glitch/temblor".
-            locPlugin.addOnIndicatorBearingChangedListener { newBearing ->
+            prevIndicatorBearingListener?.let { locPlugin.removeOnIndicatorBearingChangedListener(it) }
+            val bearingListener = OnIndicatorBearingChangedListener { newBearing ->
                 lastIndicatorBearing = newBearing
                 updateGlow()
                 gpsBearing = newBearing
                 lastKnownBearing = newBearing.toFloat()
-                // El viewport FollowPuckViewportState con SyncWithLocationPuck
-                // ya rota la cámara automáticamente — no hacer easeTo aquí.
             }
+            prevIndicatorBearingListener = bearingListener
+            locPlugin.addOnIndicatorBearingChangedListener(bearingListener)
 
             // Recrear anotaciones si ya hay destino activo
             val activeDest = NavigationState.activeDestination.value
@@ -1334,6 +1360,20 @@ fun NavigationMap(
             }
         )
 
+        // Velo de fundido suave al alternar estilo Día <-> Noche en tiempo real mientras conduces
+        val styleVeilAlpha by animateFloatAsState(
+            targetValue = if (isStyleTransitioning) 0.55f else 0f,
+            animationSpec = tween(durationMillis = 420),
+            label = "mapStyleVeil"
+        )
+        if (styleVeilAlpha > 0.01f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(LocalBentoPalette.current.canvasBg.copy(alpha = styleVeilAlpha))
+            )
+        }
+
         // ── Contenedor de controles HUD (respeta paneles laterales e inferiores CarPlay) ──
         Box(
             modifier = Modifier
@@ -1365,8 +1405,16 @@ fun NavigationMap(
                                 if (searchQuery.isEmpty()) Text("¿A dónde vamos?", color = Color.Gray, fontSize = 14.sp)
                                 androidx.compose.foundation.text.BasicTextField(
                                     value         = searchQuery,
-                                    onValueChange = { searchQuery = it },
-                                    modifier      = Modifier.fillMaxWidth(),
+                                    onValueChange = {
+                                        searchQuery = it
+                                        NavigationState.notifyUserInteraction()
+                                    },
+                                    modifier      = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { focusState ->
+                                            isSearchFocused = focusState.isFocused
+                                            NavigationState.notifyUserInteraction()
+                                        },
                                     textStyle     = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface),
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                     keyboardActions = KeyboardActions(onSearch = {
@@ -1749,7 +1797,10 @@ fun NavigationMap(
                         }
                         TextField(
                             value         = favoriteNameToSave,
-                            onValueChange = { favoriteNameToSave = it },
+                            onValueChange = {
+                                favoriteNameToSave = it
+                                NavigationState.notifyUserInteraction()
+                            },
                             label         = { Text("Nombre del lugar") },
                             singleLine    = true,
                             modifier      = Modifier.fillMaxWidth()

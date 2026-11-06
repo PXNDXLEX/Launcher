@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -46,8 +47,9 @@ import com.tuusuario.carlauncher.services.WeatherService
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.DashboardScreen
 import com.tuusuario.carlauncher.ui.LocalBentoPalette
-import com.tuusuario.carlauncher.ui.buildBentoPalette
-import com.tuusuario.carlauncher.ui.buildMaterialColorScheme
+import com.tuusuario.carlauncher.ui.NavigationState
+import com.tuusuario.carlauncher.ui.rememberAnimatedBentoPalette
+import com.tuusuario.carlauncher.ui.rememberAnimatedMaterialColorScheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -90,12 +92,14 @@ class MainActivity : ComponentActivity() {
             val isDarkMode by AppSettings.isDarkMode
             val accentColor = Color(AppSettings.uiColor.value)
 
-            val bentoPalette = remember(isDarkMode, accentColor) {
-                buildBentoPalette(isDark = isDarkMode, accentColor = accentColor)
-            }
-            val colorScheme = remember(isDarkMode, accentColor) {
-                buildMaterialColorScheme(isDark = isDarkMode, accentColor = accentColor)
-            }
+            val bentoPalette = rememberAnimatedBentoPalette(
+                isDark = isDarkMode,
+                accentColor = accentColor
+            )
+            val colorScheme = rememberAnimatedMaterialColorScheme(
+                isDark = isDarkMode,
+                accentColor = accentColor
+            )
 
             CompositionLocalProvider(LocalBentoPalette provides bentoPalette) {
                 MaterialTheme(colorScheme = colorScheme) {
@@ -113,8 +117,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        when (ev?.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (!NavigationState.isTouchingScreen.value) {
+                    NavigationState.isTouchingScreen.value = true
+                }
+                NavigationState.notifyUserInteraction()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!NavigationState.isTouchingScreen.value) {
+                    NavigationState.isTouchingScreen.value = true
+                }
+            }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                if (NavigationState.isTouchingScreen.value) {
+                    NavigationState.isTouchingScreen.value = false
+                }
+                NavigationState.notifyUserInteraction()
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onResume() {
         super.onResume()
+        AppSettings.evaluateAutoThemeByTime()
         LocationEngine.refreshHardwareRequest()
         if (AppSettings.arletVoiceWakeEnabled.value) {
             ArletAssistant.startContinuousListening()

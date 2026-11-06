@@ -1,11 +1,14 @@
 package com.tuusuario.carlauncher.ui
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -139,6 +142,16 @@ object NavigationState {
     // Permite que el asistente de voz abra automáticamente el Modo Navegación al iniciar una ruta
     val requestedScreen = mutableStateOf<String?>(null)
 
+    // Seguimiento global sin sobrecarga de toques e interacciones para cambio automático Inicio <-> Navegación
+    val isTouchingScreen = mutableStateOf(false)
+    @Volatile var lastInteractionElapsedMs: Long = 0L
+    @Volatile var activeModalCount: Int = 0
+    @Volatile var isNavigatingUiBusy: Boolean = false
+
+    fun notifyUserInteraction() {
+        lastInteractionElapsedMs = SystemClock.elapsedRealtime()
+    }
+
     fun startRoute(dest: Point) {
         activeDestination.value = dest
         pendingRouteTrigger.value = System.currentTimeMillis()
@@ -213,8 +226,145 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         }
     }
 
+    // ── Cambio dinámico y fluido Día / Noche por hora mientras la app permanece abierta ──
+    val autoThemeEnabled = AppSettings.autoThemeByTime.value
+    DisposableEffect(context, autoThemeEnabled) {
+        if (!autoThemeEnabled) {
+            onDispose { }
+        } else {
+            AppSettings.evaluateAutoThemeByTime(force = true)
+            val timeReceiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    AppSettings.evaluateAutoThemeByTime()
+                }
+            }
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_TIME_TICK)
+                addAction(Intent.ACTION_TIME_CHANGED)
+                addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            }
+            context.registerReceiver(timeReceiver, filter)
+            onDispose {
+                try { context.unregisterReceiver(timeReceiver) } catch (_: Exception) {}
+            }
+        }
+    }
+
+    LaunchedEffect(autoThemeEnabled) {
+        if (autoThemeEnabled) {
+            while (true) {
+                AppSettings.evaluateAutoThemeByTime()
+                delay(10_000L)
+            }
+        }
+    }
+
+    // ── Transición automática inteligente por conducción (Inicio <-> Modo Navegación) ──
+    //  • En Menú Principal (sin Ajustes ni modales abiertos y sin estar tocando/pasando el dedo):
+    //    si velocidad >= 10 km/h por más de 3 segundos -> pasa fluidamente a Modo Navegación.
+    //  • En Modo Navegación: si velocidad < 10 km/h (o estacionado) por 30 segundos -> vuelve a Inicio.
+    //    Si el usuario toca la pantalla, cambia música o busca un destino estando < 10 km/h,
+    //    el conteo de 30 segundos se pausa y se restablece a 0 al dejar de tocar la pantalla.
+    LaunchedEffect(Unit) {
+        var homeAbove10AccumMs = 0L
+        var navBelow10IdleStartMs = 0L
+        var prevTickElapsedMs = SystemClock.elapsedRealtime()
+
+        while (true) {
+            delay(100L)
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val dtMs = (nowElapsed - prevTickElapsedMs).coerceIn(50L, 400L)
+            prevTickElapsedMs = nowElapsed
+
+            val speedKmH = NavigationState.currentSpeedKmH.value
+
+            when (currentScreen) {
+                "HOME" -> {
+                    navBelow10IdleStartMs = 0L
+                    val canAutoEnterNavigation =
+                        !showWelcome &&
+                        !showSettingsDialog &&
+                        !NavigationState.isTouchingScreen.value &&
+                        NavigationState.activeModalCount <= 0 &&
+                        NavigationState.selectedHistoryRoute.value == null &&
+                        NavigationState.selectedDashcamRoute.value == null &&
+                        youtubeOverlayMode != "FULL" &&
+                        !ArletAssistant.isListening.value &&
+                        !ArletAssistant.isSpeaking.value
+
+                    if (canAutoEnterNavigation && speedKmH >= 10f) {
+                        homeAbove10AccumMs += dtMs
+                        if (homeAbove10AccumMs >= 3100L) {
+                            homeAbove10AccumMs = 0L
+                            currentScreen = "NAVIGATION"
+                        }
+                    } else {
+                        homeAbove10AccumMs = 0L
+                    }
+                }
+
+                "NAVIGATION" -> {
+                    homeAbove10AccumMs = 0L
+                    if (speedKmH >= 10f) {
+                        // Conduciendo a >= 10 km/h: no corre el temporizador de salida
+                        navBelow10IdleStartMs = 0L
+                    } else {
+                        // Por debajo de 10 km/h o estacionado
+                        val isUserInteractingNow =
+                            NavigationState.isTouchingScreen.value ||
+                            showSettingsDialog ||
+                            NavigationState.activeModalCount > 0 ||
+                            NavigationState.isNavigatingUiBusy ||
+                            NavigationState.showGlowTuning.value ||
+                            NavigationState.selectedHistoryRoute.value != null ||
+                            NavigationState.selectedDashcamRoute.value != null ||
+                            youtubeOverlayMode == "FULL" ||
+                            ArletAssistant.isListening.value ||
+                            ArletAssistant.isSpeaking.value
+
+                        if (isUserInteractingNow) {
+                            // Mientras toca la pantalla o busca destino, el conteo queda reiniciado;
+                            // comenzará desde 0 justo al soltar el dedo / cerrar la interacción.
+                            navBelow10IdleStartMs = nowElapsed
+                        } else {
+                            if (navBelow10IdleStartMs == 0L) {
+                                navBelow10IdleStartMs = maxOf(nowElapsed, NavigationState.lastInteractionElapsedMs)
+                            } else if (NavigationState.lastInteractionElapsedMs > navBelow10IdleStartMs) {
+                                // Acción puntual (ej. cambiar canción o escribir búsqueda) restablece los 30s
+                                navBelow10IdleStartMs = NavigationState.lastInteractionElapsedMs
+                            }
+
+                            if (nowElapsed - navBelow10IdleStartMs >= 30_000L) {
+                                navBelow10IdleStartMs = 0L
+                                currentScreen = "HOME"
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    homeAbove10AccumMs = 0L
+                    navBelow10IdleStartMs = 0L
+                }
+            }
+        }
+    }
+
     val isNavigationVisible = currentScreen == "NAVIGATION"
     val isSubScreenVisible = currentScreen !in setOf("HOME", "NAVIGATION")
+
+    // Mantener el MapView visible durante toda la transición de salida hacia Inicio (420ms)
+    // para que el fundido espacial entre Mapa 3D y Menú Principal no tenga ningún cuadro vacío
+    var keepMapAliveDuringExit by remember { mutableStateOf(false) }
+    LaunchedEffect(isNavigationVisible) {
+        if (isNavigationVisible) {
+            keepMapAliveDuringExit = true
+        } else if (keepMapAliveDuringExit) {
+            delay(430L)
+            keepMapAliveDuringExit = false
+        }
+    }
+    val isMapRendered = isNavigationVisible || keepMapAliveDuringExit
 
     // Padding dinámico sincronizado con el slider (25%..50% máx) y el dock ergonómico (80.dp)
     val mapStartPadding = if (isLandscape) 96.dp else 0.dp
@@ -249,7 +399,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
             modifier = Modifier.fillMaxSize(),
             isFullScreen = !isNavSplit,
             isDarkMode = isDarkMode,
-            isVisible = isNavigationVisible,
+            isVisible = isMapRendered,
             startOverlayPadding = mapStartPadding,
             endOverlayPadding = mapEndPadding,
             bottomOverlayPadding = mapBottomPadding
@@ -260,8 +410,17 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         // ══════════════════════════════════════════════════════════════════════
         AnimatedVisibility(
             visible = isNavigationVisible,
-            enter = fadeIn(tween(220)),
-            exit = fadeOut(tween(180)),
+            enter = fadeIn(tween(340, easing = FastOutSlowInEasing)) + scaleIn(
+                initialScale = 0.965f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(280, easing = FastOutSlowInEasing)) + scaleOut(
+                targetScale = 0.975f,
+                animationSpec = tween(280, easing = FastOutSlowInEasing)
+            ),
             modifier = Modifier.fillMaxSize()
         ) {
             BackHandler(enabled = isNavigationVisible && !showSettingsDialog && youtubeOverlayMode != "FULL") {
@@ -279,20 +438,20 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         }
 
         // ══════════════════════════════════════════════════════════════════════
-        // CAPA 2: Menú Principal Bento (Kia Rio Amarillo + Clima + Accesos + Música)
+        // CAPA 2: Menú Principal Bento (Transición espacial moderna hacia/desde Mapa 3D)
         // ══════════════════════════════════════════════════════════════════════
         AnimatedVisibility(
             visible = currentScreen == "HOME",
-            enter = fadeIn(tween(220)) + scaleIn(
-                initialScale = 0.965f,
+            enter = fadeIn(tween(380, easing = FastOutSlowInEasing)) + scaleIn(
+                initialScale = 1.045f,
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow
                 )
             ),
-            exit = fadeOut(tween(180)) + scaleOut(
-                targetScale = 0.97f,
-                animationSpec = tween(180, easing = FastOutSlowInEasing)
+            exit = fadeOut(tween(340, easing = FastOutSlowInEasing)) + scaleOut(
+                targetScale = 1.045f,
+                animationSpec = tween(360, easing = FastOutSlowInEasing)
             ),
             modifier = Modifier.fillMaxSize()
         ) {
