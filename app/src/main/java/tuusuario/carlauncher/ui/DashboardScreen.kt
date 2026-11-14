@@ -791,11 +791,18 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                     SettingsRow(
                         Icons.Default.DirectionsCarFilled,
                         "Datos e Imagen de tu Auto en Inicio",
-                        "${AppSettings.carBrandName.value} · ${AppSettings.carModelName.value} (${AppSettings.carYearOrPlate.value})",
+                        "${AppSettings.userName.value} · ${AppSettings.carBrandName.value} ${AppSettings.carModelName.value}",
                         isExpanded = expandedSection == "home_car_badge",
                         onClick = { expandedSection = if (expandedSection == "home_car_badge") "" else "home_car_badge" }
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = AppSettings.userName.value,
+                                onValueChange = { AppSettings.setUserName(it) },
+                                label = { Text("Tu nombre en el saludo (ej. Lorena)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                             OutlinedTextField(
                                 value = AppSettings.carBrandName.value,
                                 onValueChange = { AppSettings.setCarBrandName(it) },

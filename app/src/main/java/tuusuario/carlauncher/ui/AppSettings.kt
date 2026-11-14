@@ -29,6 +29,7 @@ object AppSettings {
     val navPanelPercent = mutableStateOf(38f)
 
     // Personalización de la tarjeta principal del vehículo (Home Bento)
+    val userName = mutableStateOf("Lorena")
     val carBrandName = mutableStateOf("KIA")
     val carModelName = mutableStateOf("RIO STYLUS")
     val carYearOrPlate = mutableStateOf("AD513IM")
@@ -76,6 +77,7 @@ object AppSettings {
         navSplitMode.value = p.getBoolean("navSplitMode", true)
         navPanelPercent.value = p.getFloat("navPanelPercent", 38f).coerceIn(25f, 50f)
 
+        userName.value = p.getString("userName", "Lorena") ?: "Lorena"
         carBrandName.value = p.getString("carBrandName", "KIA") ?: "KIA"
         carModelName.value = p.getString("carModelName", "RIO STYLUS") ?: "RIO STYLUS"
         carYearOrPlate.value = p.getString("carYearOrPlate", "AD513IM") ?: "AD513IM"
@@ -234,6 +236,11 @@ object AppSettings {
         val clamped = percent.coerceIn(25f, 50f)
         navPanelPercent.value = clamped
         prefs?.edit()?.putFloat("navPanelPercent", clamped)?.apply()
+    }
+
+    fun setUserName(name: String) {
+        userName.value = name
+        prefs?.edit()?.putString("userName", name)?.apply()
     }
 
     fun setCarBrandName(brand: String) {

@@ -24,6 +24,8 @@ data class WeatherSnapshot(
     val nextTempC: Int,
     val nextLabel: String,
     val nextCode: Int,
+    val maxTempC: Int = 24,
+    val minTempC: Int = 14,
     val isLoaded: Boolean = true
 )
 
@@ -35,14 +37,16 @@ object WeatherService {
 
     val weather = mutableStateOf(
         WeatherSnapshot(
-            currentTempC = 28,
-            currentLabel = "Parcial nublado",
+            currentTempC = 22,
+            currentLabel = "Parcialmente nublado",
             currentCode = 2,
             isDay = true,
             nextHourTime = "--:00",
-            nextTempC = 28,
-            nextLabel = "Parcial nublado",
+            nextTempC = 22,
+            nextLabel = "Parcialmente nublado",
             nextCode = 2,
+            maxTempC = 24,
+            minTempC = 14,
             isLoaded = false
         )
     )
@@ -59,15 +63,18 @@ object WeatherService {
         initializedCache = true
         val prefs = context.getSharedPreferences("WeatherCachePrefs", Context.MODE_PRIVATE)
         if (prefs.contains("currentTempC")) {
+            val curr = prefs.getInt("currentTempC", 22)
             weather.value = WeatherSnapshot(
-                currentTempC = prefs.getInt("currentTempC", 28),
-                currentLabel = prefs.getString("currentLabel", "Nublado") ?: "Nublado",
+                currentTempC = curr,
+                currentLabel = prefs.getString("currentLabel", "Parcialmente nublado") ?: "Parcialmente nublado",
                 currentCode = prefs.getInt("currentCode", 2),
                 isDay = prefs.getBoolean("isDay", true),
                 nextHourTime = prefs.getString("nextHourTime", "12:00") ?: "12:00",
-                nextTempC = prefs.getInt("nextTempC", 28),
-                nextLabel = prefs.getString("nextLabel", "Nublado") ?: "Nublado",
+                nextTempC = prefs.getInt("nextTempC", curr),
+                nextLabel = prefs.getString("nextLabel", "Parcialmente nublado") ?: "Parcialmente nublado",
                 nextCode = prefs.getInt("nextCode", 2),
+                maxTempC = prefs.getInt("maxTempC", maxOf(curr + 2, 24)),
+                minTempC = prefs.getInt("minTempC", minOf(curr - 4, 14)),
                 isLoaded = true
             )
         }
@@ -133,6 +140,15 @@ object WeatherService {
                 val nextTemp = temps.optDouble(nextIdx, currTemp.toDouble()).roundToInt()
                 val nextCode = codes.optInt(nextIdx, currCode)
 
+                var dayMax = currTemp
+                var dayMin = currTemp
+                val limit24 = minOf(24, temps.length())
+                for (i in 0 until limit24) {
+                    val t = temps.optDouble(i, currTemp.toDouble()).roundToInt()
+                    if (t > dayMax) dayMax = t
+                    if (t < dayMin) dayMin = t
+                }
+
                 val snap = WeatherSnapshot(
                     currentTempC = currTemp,
                     currentLabel = weatherCodeToSpanish(currCode),
@@ -142,6 +158,8 @@ object WeatherService {
                     nextTempC = nextTemp,
                     nextLabel = weatherCodeToSpanish(nextCode),
                     nextCode = nextCode,
+                    maxTempC = dayMax,
+                    minTempC = dayMin,
                     isLoaded = true
                 )
 
@@ -161,6 +179,8 @@ object WeatherService {
                     .putInt("nextTempC", snap.nextTempC)
                     .putString("nextLabel", snap.nextLabel)
                     .putInt("nextCode", snap.nextCode)
+                    .putInt("maxTempC", snap.maxTempC)
+                    .putInt("minTempC", snap.minTempC)
                     .apply()
             } catch (_: Exception) {
             } finally {
@@ -172,7 +192,7 @@ object WeatherService {
     private fun weatherCodeToSpanish(code: Int): String = when (code) {
         0 -> "Despejado"
         1 -> "Mayormente claro"
-        2 -> "Parcial nublado"
+        2 -> "Parcialmente nublado"
         3 -> "Nublado"
         45, 48 -> "Neblina"
         51, 53, 55, 56, 57 -> "Llovizna"
