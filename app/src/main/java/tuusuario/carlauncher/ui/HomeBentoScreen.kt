@@ -951,9 +951,9 @@ private fun LiveMapboxMiniMap(
 
     // Escuchar actualizaciones de GPS / Simulación en tiempo real a través de LocationEngine
     DisposableEffect(Unit) {
-        val listener = LocationEngine.Listener { loc, _, bearingDeg, _, animDurationMs ->
+        val listener = LocationEngine.Listener { loc, projectedLat, projectedLon, bearingDeg, _, animDurationMs, _ ->
             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@Listener
-            val pt = Point.fromLngLat(loc.longitude, loc.latitude)
+            val pt = Point.fromLngLat(projectedLon, projectedLat)
             miniLocationProvider.updateLocation(pt, bearingDeg, animDurationMs)
 
             miniMapView.camera.easeTo(
