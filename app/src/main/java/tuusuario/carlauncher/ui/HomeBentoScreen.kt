@@ -1,8 +1,8 @@
 package com.tuusuario.carlauncher.ui
 
+import android.content.Context
 import android.graphics.BitmapFactory
-import android.graphics.Paint as AndroidPaint
-import android.graphics.Typeface
+import android.location.LocationManager
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -41,10 +41,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -58,14 +55,39 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.LineString
+import com.mapbox.geojson.Point
+import com.mapbox.maps.MapInitOptions
+import com.mapbox.maps.MapView
+import com.mapbox.maps.Style
+import com.mapbox.maps.dsl.cameraOptions
+import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.generated.lineLayer
+import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
+import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
+import com.mapbox.maps.extension.style.sources.addSource
+import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
+import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
+import com.mapbox.maps.extension.style.sources.getSourceAs
+import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.animation.MapAnimationOptions
+import com.mapbox.maps.plugin.animation.camera
+import com.mapbox.maps.plugin.gestures.gestures
+import com.mapbox.maps.plugin.locationcomponent.location
 import com.tuusuario.carlauncher.R
 import com.tuusuario.carlauncher.services.ArletAssistant
 import com.tuusuario.carlauncher.services.DashcamManager
 import com.tuusuario.carlauncher.services.GlobalState
-import com.tuusuario.carlauncher.services.SpeedRecordTracker
+import com.tuusuario.carlauncher.services.LocationEngine
 import com.tuusuario.carlauncher.services.WeatherService
+import com.tuusuario.carlauncher.ui.map.MockLocationProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -76,18 +98,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Menú Principal inspirado directamente en las dos imágenes de referencia (Modo Día y Modo Noche):
- *  - Fondo con ondas fluidas diagonales (lavanda/azul cielo de día, índigo/azul marino profundo de noche).
- *  - Cabecera superior con saludo dinámico ("Buenos días, Lorena" / "Buenas noches, Lorena"), fecha en español,
- *    hora en formato 12h (a. m. / p. m.), acceso rápido a Voz Sara, Tema Día/Noche y botón de Ajustes.
- *  - Columna izquierda: Tarjeta "Google Maps / Tu ubicación" con el mapa en miniatura idéntico a la imagen
- *    (calles, Parque, Av. del Parque, Paseo Central, río, ruta azul con flecha de origen, pin de destino y botón recentrar)
- *    y botón inferior "Abrir mapa ↗".
- *  - Área derecha superior: Vehículo flotante sobre el fondo con sombra de neumáticos y pastilla "Mi [Modelo]".
- *  - Área derecha inferior: Reproductor de música estilo Spotify con controles circulares a la derecha + Tarjeta de Clima
- *    con ilustración de sol/nube de día y luna/estrellas de noche y Máx./Mín.
- *  - Dock inferior centrado con los 6 botones squircle adaptados a las opciones reales del Launcher:
- *    Apps, Mapas, Velocímetro, Dashcam, Rutas y Récords.
+ * Menú Principal inspirado en las imágenes de referencia (Modo Día y Modo Noche):
+ *  - Reloj grande inteligente en el lado izquierdo (en la cabecera izquierda en horizontal y sobre la insignia del auto en vertical).
+ *  - Minimapa Mapbox 100% funcional en tiempo real (sigue el GPS en vivo, dibuja la ruta activa, soporta Día/Noche y botón recentrar).
+ *  - Vehículo protagonista de gran tamaño en modo horizontal y vertical con sombra realista bajo los neumáticos.
+ *  - Tarjetas de Música y Clima optimizadas para que ningún texto ni barra de progreso se recorte.
+ *  - Modo vertical perfectamente encuadrado sin solapamientos en cabecera ni recortes en el dock inferior.
  */
 @Composable
 fun HomeBentoScreen(
@@ -116,80 +132,85 @@ fun HomeBentoScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // ── CABECERA SUPERIOR: Saludo + Fecha a la izquierda | Hora + Voz + Tema + Ajustes a la derecha ──
+                // ── CABECERA SUPERIOR: Reloj Grande Izquierdo + Saludo/Fecha | Botones Voz, Tema y Ajustes a la derecha ──
                 ReferenceTopHeader(
                     isDark = isDark,
+                    isLandscape = true,
                     onOpenSettings = onOpenSettings,
                     onToggleTheme = onToggleTheme,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // ── ZONA CENTRAL: Tarjeta Mapa en Miniatura (Izquierda) + Auto Flotante / Música / Clima (Derecha) ──
+                // ── ZONA CENTRAL: Minimapa Funcional en Vivo (Izquierda) + Auto Grande / Música / Clima (Derecha) ──
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Izquierda (~33%): Tarjeta Google Maps con mapa en miniatura y botón "Abrir mapa ↗"
+                    // Izquierda (34%): Tarjeta Google Maps con Minimapa Mapbox en tiempo real y botón "Abrir mapa ↗"
                     ReferenceMiniMapCard(
                         isDark = isDark,
+                        isLandscape = true,
                         onOpenNavigation = onOpenNavigation,
                         modifier = Modifier
-                            .weight(0.33f)
+                            .weight(0.34f)
                             .fillMaxHeight()
                     )
 
-                    // Derecha (~67%): Auto protagonista arriba + (Reproductor Música + Tarjeta Clima) abajo
+                    // Derecha (66%): Auto grande arriba + (Reproductor Música + Tarjeta Clima) abajo
                     Column(
                         modifier = Modifier
-                            .weight(0.67f)
+                            .weight(0.66f)
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Mitad superior: Auto flotando sobre las ondas + pastilla "Mi [Modelo]" abajo a la izquierda
+                        // Parte superior: Auto protagonista grande y prominente + pastilla "Mi [Modelo]"
                         ReferenceFloatingCarSection(
                             isDark = isDark,
+                            isLandscape = true,
                             onOpenSpeedometer = onOpenSpeedometer,
                             onOpenSettings = onOpenSettings,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(0.56f)
+                                .weight(0.54f)
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                        // Mitad inferior: Reproductor de Música (izquierda) + Clima (derecha)
+                        // Parte inferior: Reproductor de Música (izquierda) + Clima (derecha) sin recortes
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(0.44f),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                .weight(0.46f),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             ReferenceMusicPlayerCard(
                                 isDark = isDark,
+                                isLandscape = true,
                                 onOpenYoutube = onOpenYoutube,
                                 modifier = Modifier
-                                    .weight(0.67f)
+                                    .weight(0.66f)
                                     .fillMaxHeight()
                             )
 
                             ReferenceWeatherCard(
                                 isDark = isDark,
+                                isLandscape = true,
                                 modifier = Modifier
-                                    .weight(0.33f)
+                                    .weight(0.34f)
                                     .fillMaxHeight()
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 // ── DOCK INFERIOR CENTRADO CON LAS 6 OPCIONES DEL LAUNCHER ──
                 Box(
@@ -198,6 +219,7 @@ fun HomeBentoScreen(
                 ) {
                     ReferenceBottomDock(
                         isDark = isDark,
+                        isLandscape = true,
                         onOpenAllApps = onOpenAllApps,
                         onOpenNavigation = onOpenNavigation,
                         onOpenSpeedometer = onOpenSpeedometer,
@@ -208,75 +230,151 @@ fun HomeBentoScreen(
                 }
             }
         } else {
-            // ── MODO VERTICAL ADAPTABLE CON EL MISMO DISEÑO DE LA REFERENCIA ──
+            // ── MODO VERTICAL PERFECTAMENTE ENCUADRADO SIN SOLAPAMIENTOS NI RECORTES ──
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Cabecera sin colisión: Saludo a la izquierda + 3 botones bien encuadrados a la derecha
                 ReferenceTopHeader(
                     isDark = isDark,
+                    isLandscape = false,
                     onOpenSettings = onOpenSettings,
                     onToggleTheme = onToggleTheme,
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // Sección Vehículo + Reloj Grande ubicado inteligentemente a la izquierda sobre la insignia del auto
                 ReferenceFloatingCarSection(
                     isDark = isDark,
+                    isLandscape = false,
                     onOpenSpeedometer = onOpenSpeedometer,
                     onOpenSettings = onOpenSettings,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.28f)
+                        .weight(0.26f)
                 )
 
+                // Fila central: Minimapa funcional en tiempo real (izquierda) + Clima (derecha)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.36f),
+                        .weight(0.37f),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ReferenceMiniMapCard(
                         isDark = isDark,
+                        isLandscape = false,
                         onOpenNavigation = onOpenNavigation,
                         modifier = Modifier
-                            .weight(0.54f)
+                            .weight(0.55f)
                             .fillMaxHeight()
                     )
 
                     ReferenceWeatherCard(
                         isDark = isDark,
+                        isLandscape = false,
                         modifier = Modifier
-                            .weight(0.46f)
+                            .weight(0.45f)
                             .fillMaxHeight()
                     )
                 }
 
+                // Reproductor de Música completo
                 ReferenceMusicPlayerCard(
                     isDark = isDark,
+                    isLandscape = false,
                     onOpenYoutube = onOpenYoutube,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.22f)
+                        .weight(0.21f)
                 )
 
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    ReferenceBottomDock(
-                        isDark = isDark,
-                        onOpenAllApps = onOpenAllApps,
-                        onOpenNavigation = onOpenNavigation,
-                        onOpenSpeedometer = onOpenSpeedometer,
-                        onOpenDashcamGallery = onOpenDashcamGallery,
-                        onOpenRoutes = onOpenRoutes,
-                        onOpenRecords = onOpenRecords
-                    )
-                }
+                // Dock inferior ocupando todo el ancho con los 6 botones distribuidos uniformemente
+                ReferenceBottomDock(
+                    isDark = isDark,
+                    isLandscape = false,
+                    onOpenAllApps = onOpenAllApps,
+                    onOpenNavigation = onOpenNavigation,
+                    onOpenSpeedometer = onOpenSpeedometer,
+                    onOpenDashcamGallery = onOpenDashcamGallery,
+                    onOpenRoutes = onOpenRoutes,
+                    onOpenRecords = onOpenRecords
+                )
             }
         }
+    }
+}
+
+/**
+ * Estado compartido del reloj en formato 12h para mostrarse con tipografía grande en el lado izquierdo.
+ */
+@Composable
+private fun rememberClockState(): Triple<String, String, String> {
+    var timeDigits by remember { mutableStateOf("12:00") }
+    var amPmStr by remember { mutableStateOf("a. m.") }
+    var dateSpanishStr by remember { mutableStateOf("Sábado, 14 de noviembre") }
+
+    LaunchedEffect(Unit) {
+        val localeEs = Locale("es", "ES")
+        val dayFmt = DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", localeEs)
+        while (true) {
+            val now = LocalDateTime.now()
+            val hour12 = when {
+                now.hour == 0 -> 12
+                now.hour > 12 -> now.hour - 12
+                else -> now.hour
+            }
+            timeDigits = "%d:%02d".format(hour12, now.minute)
+            amPmStr = if (now.hour < 12) "a. m." else "p. m."
+
+            val rawDate = now.format(dayFmt)
+            dateSpanishStr = rawDate.replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase(localeEs) else it.toString()
+            }
+
+            val msToNextSecond = 1000L - (System.currentTimeMillis() % 1000L)
+            delay(msToNextSecond.coerceIn(250L, 1000L))
+        }
+    }
+
+    return Triple(timeDigits, amPmStr, dateSpanishStr)
+}
+
+/**
+ * Widget de Reloj Grande ubicado en el lado izquierdo.
+ */
+@Composable
+private fun LargeLeftClockBadge(
+    timeDigits: String,
+    amPmStr: String,
+    isDark: Boolean,
+    fontSizeSp: Int = 40
+) {
+    val titleColor = if (isDark) Color.White else Color(0xFF141B2D)
+    val accentAmPm = if (isDark) Color(0xFF9BB8F8) else Color(0xFF2B5CE6)
+
+    Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Text(
+            text = timeDigits,
+            fontSize = fontSizeSp.sp,
+            lineHeight = (fontSizeSp + 2).sp,
+            fontWeight = FontWeight.Black,
+            color = titleColor,
+            style = TextStyle(fontFeatureSettings = "tnum")
+        )
+        Text(
+            text = amPmStr,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = accentAmPm,
+            modifier = Modifier.padding(bottom = 5.dp)
+        )
     }
 }
 
@@ -330,7 +428,6 @@ private fun ReferenceWaveBackground(
         val w = size.width
         val h = size.height
 
-        // Capa base: degradado diagonal completo
         drawRect(
             brush = Brush.linearGradient(
                 colors = listOf(bgTopLeft, bgMid, bgBottomRight),
@@ -339,7 +436,6 @@ private fun ReferenceWaveBackground(
             )
         )
 
-        // Onda diagonal 1 (barre desde abajo-izquierda hacia arriba-derecha como en el wallpaper de referencia)
         val wavePath1 = Path().apply {
             moveTo(0f, h * 0.92f)
             cubicTo(
@@ -360,7 +456,6 @@ private fun ReferenceWaveBackground(
             )
         )
 
-        // Línea luminosa sobre la cresta de la Onda 1
         val crestPath1 = Path().apply {
             moveTo(0f, h * 0.92f)
             cubicTo(
@@ -375,7 +470,6 @@ private fun ReferenceWaveBackground(
             style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
         )
 
-        // Onda diagonal 2 (curva inferior derecha más intensa en cian/azul real)
         val wavePath2 = Path().apply {
             moveTo(w * 0.08f, h)
             cubicTo(
@@ -395,7 +489,6 @@ private fun ReferenceWaveBackground(
             )
         )
 
-        // Línea luminosa suave sobre la cresta de la Onda 2
         val crestPath2 = Path().apply {
             moveTo(w * 0.08f, h)
             cubicTo(
@@ -413,45 +506,21 @@ private fun ReferenceWaveBackground(
 }
 
 /**
- * Cabecera superior idéntica a la referencia:
- *  - Izquierda: "Buenos días, Lorena" / "Buenas noches, Lorena" + "Jueves, 12 de noviembre"
- *  - Derecha: "10:24 a. m." / "9:40 p. m." + Botón Voz Sara + Botón Tema Día/Noche + Botón Ajustes (engranaje)
+ * Cabecera superior adaptada inteligentemente:
+ *  - En Horizontal: Reloj Grande a la izquierda + divisor luminoso + Saludo ("Buenas noches, Alex") y fecha.
+ *  - En Vertical: Saludo y fecha a la izquierda (sin chocar con el reloj) + los 3 botones a la derecha (el Reloj Grande se ubica abajo a la izquierda junto al auto).
  */
 @Composable
 private fun ReferenceTopHeader(
     isDark: Boolean,
+    isLandscape: Boolean,
     onOpenSettings: () -> Unit,
     onToggleTheme: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val userName = AppSettings.userName.value.trim()
-    var time12Str by remember { mutableStateOf("") }
-    var dateSpanishStr by remember { mutableStateOf("") }
-    var currentHour by remember { mutableStateOf(10) }
-
-    LaunchedEffect(Unit) {
-        val localeEs = Locale("es", "ES")
-        val dayFmt = DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", localeEs)
-        while (true) {
-            val now = LocalDateTime.now()
-            currentHour = now.hour
-            val hour12 = when {
-                now.hour == 0 -> 12
-                now.hour > 12 -> now.hour - 12
-                else -> now.hour
-            }
-            val amPm = if (now.hour < 12) "a. m." else "p. m."
-            time12Str = "%d:%02d %s".format(hour12, now.minute, amPm)
-
-            val rawDate = now.format(dayFmt)
-            dateSpanishStr = rawDate.replaceFirstChar {
-                if (it.isLowerCase()) it.titlecase(localeEs) else it.toString()
-            }
-
-            val msToNextSecond = 1000L - (System.currentTimeMillis() % 1000L)
-            delay(msToNextSecond.coerceIn(250L, 1000L))
-        }
-    }
+    val (timeDigits, amPmStr, dateSpanishStr) = rememberClockState()
+    val currentHour = remember(timeDigits, amPmStr) { LocalDateTime.now().hour }
 
     val greetingPrefix = remember(isDark, currentHour) {
         if (isDark) {
@@ -466,55 +535,78 @@ private fun ReferenceTopHeader(
     val subtitleColor = if (isDark) Color(0xFFC8D4EC) else Color(0xFF3E4C66)
     val btnBg = if (isDark) Color(0xFF232F5B).copy(alpha = 0.78f) else Color(0xFFF3F7FE).copy(alpha = 0.92f)
     val btnBorder = if (isDark) Color(0xFF4E63A6).copy(alpha = 0.55f) else Color.White
+    val dividerColor = if (isDark) Color(0xFF4E63A6).copy(alpha = 0.65f) else Color(0xFF3A5AD9).copy(alpha = 0.35f)
 
     val isListening = ArletAssistant.isListening.value || ArletAssistant.isWakeWordActiveWindow.value
     val isSpeaking = ArletAssistant.isSpeaking.value
+    val btnSize = if (isLandscape) 38.dp else 36.dp
 
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Saludo grande y fecha debajo
-        Column {
-            Text(
-                text = fullGreeting,
-                fontSize = 28.sp,
-                lineHeight = 32.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = titleColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = dateSpanishStr.ifEmpty { "Jueves, 12 de noviembre" },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = subtitleColor
-            )
+        // Lado izquierdo: En Horizontal incluye el Reloj Grande a la izquierda junto al saludo
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isLandscape) {
+                LargeLeftClockBadge(
+                    timeDigits = timeDigits,
+                    amPmStr = amPmStr,
+                    isDark = isDark,
+                    fontSizeSp = 40
+                )
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Box(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(dividerColor)
+                )
+
+                Spacer(modifier = Modifier.width(14.dp))
+            }
+
+            Column(modifier = Modifier.weight(1f, fill = false)) {
+                Text(
+                    text = fullGreeting,
+                    fontSize = if (isLandscape) 23.sp else 21.sp,
+                    lineHeight = if (isLandscape) 26.sp else 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = titleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = dateSpanishStr,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
-        // Reloj 12h + Controles rápidos (Voz Sara, Día/Noche y Engranaje Ajustes)
+        // Lado derecho: 3 botones squircle bien encuadrados (Voz Sara, Día/Noche, Ajustes)
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = time12Str.ifEmpty { "10:24 a. m." },
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = titleColor,
-                style = TextStyle(fontFeatureSettings = "tnum")
-            )
-
             // Botón Asistente de Voz Sara
             Surface(
                 onClick = {
                     if (isListening || isSpeaking) ArletAssistant.closeOverlay()
                     else ArletAssistant.triggerManualListening()
                 },
-                shape = RoundedCornerShape(13.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = when {
                     isListening -> Color(0xFFFF007F)
                     isSpeaking -> Color(0xFF00B8D4)
@@ -522,14 +614,14 @@ private fun ReferenceTopHeader(
                 },
                 border = BorderStroke(1.dp, if (isListening || isSpeaking) Color.Transparent else btnBorder),
                 shadowElevation = if (isDark) 0.dp else 3.dp,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(btnSize)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = "Asistente Sara",
                         tint = if (isListening || isSpeaking) Color.White else titleColor,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
@@ -537,37 +629,37 @@ private fun ReferenceTopHeader(
             // Botón rápido Modo Día / Noche
             Surface(
                 onClick = onToggleTheme,
-                shape = RoundedCornerShape(13.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = btnBg,
                 border = BorderStroke(1.dp, btnBorder),
                 shadowElevation = if (isDark) 0.dp else 3.dp,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(btnSize)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                         contentDescription = "Cambiar Día/Noche",
                         tint = titleColor,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
 
-            // Botón de Ajustes (idéntico al de la esquina superior derecha de las imágenes de referencia)
+            // Botón de Ajustes
             Surface(
                 onClick = onOpenSettings,
-                shape = RoundedCornerShape(13.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = btnBg,
                 border = BorderStroke(1.dp, btnBorder),
                 shadowElevation = if (isDark) 0.dp else 3.dp,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(btnSize)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = "Configuración",
                         tint = titleColor,
-                        modifier = Modifier.size(21.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
@@ -576,17 +668,21 @@ private fun ReferenceTopHeader(
 }
 
 /**
- * Tarjeta izquierda con cabecera "Google Maps / Tu ubicación", el mapa en miniatura idéntico a la imagen
- * (con soporte Día y Noche) y el botón inferior "Abrir mapa ↗".
+ * Tarjeta izquierda con cabecera "Google Maps / Tu ubicación", Minimapa Mapbox 100% funcional en tiempo real
+ * y botón inferior "Abrir mapa ↗".
  */
 @Composable
 private fun ReferenceMiniMapCard(
     isDark: Boolean,
+    isLandscape: Boolean,
     onOpenNavigation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isRouteActive = NavigationState.isRouteActive.value
     val routeDist = NavigationState.activeRouteDistance.value
+    val isGpsReady = NavigationState.isGpsReady.value
+    val speedKmH = NavigationState.currentSpeedKmH.value
+    var recenterTrigger by remember { mutableStateOf(0L) }
 
     val cardBg = if (isDark) Color(0xFF131B3C).copy(alpha = 0.86f) else Color(0xFFE4ECFA).copy(alpha = 0.90f)
     val cardBorder = if (isDark) Color(0xFF2E3F78).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.85f)
@@ -614,17 +710,17 @@ private fun ReferenceMiniMapCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp),
+                .padding(if (isLandscape) 12.dp else 10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Cabecera de la tarjeta: Icono Pin + "Google Maps" / "Tu ubicación"
+            // Cabecera de la tarjeta: Icono Pin + "Google Maps" / Estado GPS en vivo
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
                         .background(pinBoxBg)
                         .border(1.dp, pinBoxBorder, CircleShape),
@@ -634,37 +730,42 @@ private fun ReferenceMiniMapCard(
                         imageVector = Icons.Default.LocationOn,
                         contentDescription = null,
                         tint = pinIconTint,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Google Maps",
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
+                        lineHeight = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = titleColor,
                         maxLines = 1
                     )
+                    val statusSubtitle = when {
+                        isRouteActive && routeDist.isNotBlank() -> "En ruta · $routeDist"
+                        speedKmH >= 2f -> "En vivo · ${speedKmH.roundToInt()} km/h"
+                        isGpsReady -> "Tu ubicación · En vivo"
+                        else -> "Tu ubicación"
+                    }
                     Text(
-                        text = if (isRouteActive && routeDist.isNotBlank()) {
-                            "En ruta · $routeDist"
-                        } else {
-                            "Tu ubicación"
-                        },
+                        text = statusSubtitle,
                         fontSize = 11.sp,
+                        lineHeight = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = subtitleColor,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Mapa en miniatura idéntico a la imagen (Modo Día y Modo Noche)
+            // Minimapa Mapbox 100% funcional en tiempo real (Modo Día y Modo Noche)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -675,16 +776,17 @@ private fun ReferenceMiniMapCard(
                         color = if (isDark) Color(0xFF283766) else Color.White.copy(alpha = 0.8f),
                         shape = RoundedCornerShape(16.dp)
                     )
-                    .clickable(onClick = onOpenNavigation)
             ) {
-                StylizedReferenceMiniMap(
+                LiveMapboxMiniMap(
                     isDark = isDark,
+                    recenterTrigger = recenterTrigger,
+                    onOpenNavigation = onOpenNavigation,
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Botón recentrar (esquina inferior derecha del mapa en miniatura)
+                // Botón recentrar (esquina inferior derecha del minimapa)
                 Surface(
-                    onClick = onOpenNavigation,
+                    onClick = { recenterTrigger = System.currentTimeMillis() },
                     shape = RoundedCornerShape(8.dp),
                     color = if (isDark) Color(0xFF1F2B44).copy(alpha = 0.94f) else Color(0xFFF8FAFC).copy(alpha = 0.95f),
                     shadowElevation = 3.dp,
@@ -704,35 +806,34 @@ private fun ReferenceMiniMapCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Botón inferior "Abrir mapa ↗"
             Surface(
                 onClick = onOpenNavigation,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(13.dp),
                 color = Color.Transparent,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
+                    .height(36.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(btnBrush, RoundedCornerShape(14.dp))
+                        .background(btnBrush, RoundedCornerShape(13.dp))
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Abrir mapa",
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = btnTextColor
                     )
-                    // Flecha diagonal ↗ en el extremo derecho igual a la imagen
                     Canvas(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .size(12.dp)
+                            .size(11.dp)
                     ) {
                         val s = size.width
                         val strokeW = 1.8.dp.toPx()
@@ -764,261 +865,256 @@ private fun ReferenceMiniMapCard(
     }
 }
 
+private const val MINI_ROUTE_SOURCE_ID = "mini-map-route-source"
+private const val MINI_ROUTE_CASING_ID = "mini-map-route-casing"
+private const val MINI_ROUTE_LAYER_ID = "mini-map-route-layer"
+
 /**
- * Dibuja el mapa en miniatura con la geometría exacta de las imágenes de referencia:
- *  - Cuadrícula urbana en ángulo, avenidas principales curvas, zona verde "Parque" arriba a la derecha,
- *    río en el borde derecho, etiquetas "Av. del Parque", "Parque" y "Paseo Central",
- *    trazado de ruta en S con flecha de navegación en el origen y pin circular en el destino.
+ * Minimapa Mapbox real y funcional en tiempo real:
+ *  - Se actualiza en vivo con cada cambio de ubicación GPS o simulación de movimiento (LocationEngine).
+ *  - Muestra el puck de ubicación con halo pulsante y rumbo en vivo.
+ *  - Dibuja la ruta activa en azul si existe una navegación en curso.
+ *  - Cambia automáticamente entre estilo Día (MAPBOX_STREETS) y Noche (DARK).
  */
 @Composable
-private fun StylizedReferenceMiniMap(
+private fun LiveMapboxMiniMap(
     isDark: Boolean,
+    recenterTrigger: Long,
+    onOpenNavigation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val landColor = if (isDark) Color(0xFF131D31) else Color(0xFFE3E8F0)
-    val blockHighlight = if (isDark) Color(0xFF17233A) else Color(0xFFECEFF5)
-    val parkColor = if (isDark) Color(0xFF16383A) else Color(0xFFC5E8C8)
-    val waterColor = if (isDark) Color(0xFF0A2246) else Color(0xFF9AC3F8)
-    val waterEdgeColor = if (isDark) Color(0xFF173768) else Color(0xFFB7D4FA)
-    val minorStreetColor = if (isDark) Color(0xFF23324D) else Color(0xFFFFFFFF)
-    val majorRoadColor = if (isDark) Color(0xFF2E4163) else Color(0xFFFFFFFF)
-    val roadCasingColor = if (isDark) Color(0xFF0E1626) else Color(0xFFD0D8E4)
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val miniLocationProvider = remember { MockLocationProvider() }
+    var miniStyleReady by remember { mutableStateOf(false) }
 
-    val routeMainColor = if (isDark) Color(0xFF8AB4F8) else Color(0xFF2A5BE6)
-    val routeCasingColor = if (isDark) Color(0xFF3B69B8) else Color(0xFF183CA3)
-
-    val labelColorInt = if (isDark) Color(0xFFB8C7E0).toArgb() else Color(0xFF2D3A4F).toArgb()
-    val parkLabelColorInt = if (isDark) Color(0xFF8CC4C2).toArgb() else Color(0xFF2F5E41).toArgb()
-    val labelHaloColorInt = if (isDark) Color(0xFF0F172A).toArgb() else Color(0xFFFFFFFF).toArgb()
-
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-
-        // 1. Fondo base de manzanas urbanas
-        drawRect(color = landColor)
-
-        // Polígono sutil para variación de manzanas centrales
-        val blockPoly = Path().apply {
-            moveTo(w * 0.12f, h * 0.18f)
-            lineTo(w * 0.65f, h * 0.14f)
-            lineTo(w * 0.58f, h * 0.82f)
-            lineTo(w * 0.08f, h * 0.76f)
-            close()
-        }
-        drawPath(blockPoly, color = blockHighlight)
-
-        // 2. Zona Verde "Parque" arriba a la derecha (como en la imagen de referencia)
-        val parkPath = Path().apply {
-            moveTo(w * 0.66f, 0f)
-            lineTo(w * 0.90f, 0f)
-            lineTo(w * 0.82f, h * 0.34f)
-            lineTo(w * 0.61f, h * 0.30f)
-            close()
-        }
-        drawPath(parkPath, color = parkColor)
-
-        // 3. Río / Canal de agua en el borde derecho
-        val waterEdgePath = Path().apply {
-            moveTo(w * 0.94f, 0f)
-            cubicTo(
-                w * 0.90f, h * 0.35f,
-                w * 0.85f, h * 0.68f,
-                w * 0.78f, h
-            )
-            lineTo(w, h)
-            lineTo(w, 0f)
-            close()
-        }
-        drawPath(waterEdgePath, color = waterEdgeColor)
-
-        val waterPath = Path().apply {
-            moveTo(w * 0.96f, 0f)
-            cubicTo(
-                w * 0.92f, h * 0.36f,
-                w * 0.87f, h * 0.69f,
-                w * 0.80f, h
-            )
-            lineTo(w, h)
-            lineTo(w, 0f)
-            close()
-        }
-        drawPath(waterPath, color = waterColor)
-
-        // 4. Cuadrícula de calles secundarias
-        val minorStroke = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Butt)
-        // Calles horizontales/inclinadas
-        val hLines = listOf(
-            Offset(0f, h * 0.14f) to Offset(w * 0.92f, h * 0.20f),
-            Offset(0f, h * 0.28f) to Offset(w * 0.90f, h * 0.35f),
-            Offset(0f, h * 0.44f) to Offset(w * 0.88f, h * 0.52f),
-            Offset(0f, h * 0.61f) to Offset(w * 0.84f, h * 0.68f),
-            Offset(0f, h * 0.77f) to Offset(w * 0.82f, h * 0.83f),
-            Offset(0f, h * 0.91f) to Offset(w * 0.78f, h * 0.96f)
-        )
-        hLines.forEach { (start, end) ->
-            drawLine(color = minorStreetColor, start = start, end = end, strokeWidth = minorStroke.width)
-        }
-
-        // Calles verticales/inclinadas
-        val vLines = listOf(
-            Offset(w * 0.16f, 0f) to Offset(w * 0.04f, h),
-            Offset(w * 0.33f, 0f) to Offset(w * 0.18f, h),
-            Offset(w * 0.49f, 0f) to Offset(w * 0.34f, h),
-            Offset(w * 0.66f, 0f) to Offset(w * 0.51f, h),
-            Offset(w * 0.89f, 0f) to Offset(w * 0.72f, h)
-        )
-        vLines.forEach { (start, end) ->
-            drawLine(color = minorStreetColor, start = start, end = end, strokeWidth = minorStroke.width)
-        }
-
-        // 5. Avenidas principales curvas
-        val ave1 = Path().apply {
-            moveTo(0f, h * 0.64f)
-            cubicTo(
-                w * 0.28f, h * 0.42f,
-                w * 0.52f, h * 0.56f,
-                w * 0.86f, h * 0.62f
-            )
-        }
-        val ave2 = Path().apply {
-            moveTo(w * 0.83f, 0f)
-            cubicTo(
-                w * 0.77f, h * 0.35f,
-                w * 0.68f, h * 0.68f,
-                w * 0.62f, h
-            )
-        }
-        val ave3 = Path().apply {
-            moveTo(w * 0.10f, h)
-            cubicTo(
-                w * 0.32f, h * 0.74f,
-                w * 0.50f, h * 0.66f,
-                w * 0.82f, h * 0.84f
-            )
-        }
-
-        val majorCasingStroke = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        val majorFillStroke = Stroke(width = 4.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-
-        listOf(ave1, ave2, ave3).forEach { path ->
-            drawPath(path, color = roadCasingColor, style = majorCasingStroke)
-            drawPath(path, color = majorRoadColor, style = majorFillStroke)
-        }
-
-        // 6. Trazado de Ruta Azul (idéntica a la curva en S de la imagen de referencia)
-        val orig = Offset(w * 0.25f, h * 0.76f)
-        val dest = Offset(w * 0.75f, h * 0.33f)
-
-        val routePath = Path().apply {
-            moveTo(orig.x, orig.y)
-            lineTo(w * 0.34f, h * 0.77f)
-            cubicTo(
-                w * 0.38f, h * 0.77f,
-                w * 0.40f, h * 0.62f,
-                w * 0.43f, h * 0.56f
-            )
-            cubicTo(
-                w * 0.46f, h * 0.51f,
-                w * 0.64f, h * 0.57f,
-                w * 0.69f, h * 0.51f
-            )
-            cubicTo(
-                w * 0.72f, h * 0.47f,
-                w * 0.73f, h * 0.40f,
-                dest.x, dest.y
-            )
-        }
-
-        drawPath(
-            path = routePath,
-            color = routeCasingColor,
-            style = Stroke(width = 7.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-        drawPath(
-            path = routePath,
-            color = routeMainColor,
-            style = Stroke(width = 4.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // 7. Pin de Destino (arriba a la derecha de la ruta)
-        drawCircle(
-            color = Color.White,
-            radius = 7.5.dp.toPx(),
-            center = dest
-        )
-        drawCircle(
-            color = routeMainColor,
-            radius = 5.8.dp.toPx(),
-            center = dest
-        )
-        drawCircle(
-            color = if (isDark) Color(0xFF0F172A) else Color.White,
-            radius = 2.4.dp.toPx(),
-            center = dest
-        )
-
-        // 8. Puck de Origen con Flecha de Navegación (abajo a la izquierda de la ruta)
-        drawCircle(
-            color = routeMainColor.copy(alpha = 0.26f),
-            radius = 15.dp.toPx(),
-            center = orig
-        )
-        drawCircle(
-            color = Color.White,
-            radius = 9.5.dp.toPx(),
-            center = orig
-        )
-        drawCircle(
-            color = if (isDark) Color(0xFF1E293B) else Color(0xFF2A5BE6),
-            radius = 7.5.dp.toPx(),
-            center = orig
-        )
-
-        // Flecha triangular blanca/azul claro dentro del puck de origen
-        rotate(degrees = 15f, pivot = orig) {
-            val r = 4.2.dp.toPx()
-            val arrowPath = Path().apply {
-                moveTo(orig.x, orig.y - r)
-                lineTo(orig.x + r * 0.78f, orig.y + r * 0.85f)
-                lineTo(orig.x, orig.y + r * 0.35f)
-                lineTo(orig.x - r * 0.78f, orig.y + r * 0.85f)
-                close()
-            }
-            drawPath(arrowPath, color = if (isDark) Color(0xFF9BB8F8) else Color.White)
-        }
-
-        // 9. Etiquetas de calles del mapa ("Parque", "Av. del Parque", "Paseo Central")
-        val textPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            textAlign = AndroidPaint.Align.CENTER
-            textSize = 9.5.dp.toPx()
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        }
-        val haloPaint = AndroidPaint(textPaint).apply {
-            style = AndroidPaint.Style.STROKE
-            strokeWidth = 2.5.dp.toPx()
-            color = labelHaloColorInt
-        }
-
-        fun drawMapLabel(text: String, x: Float, y: Float, colorInt: Int) {
-            textPaint.color = colorInt
-            drawContext.canvas.nativeCanvas.drawText(text, x, y, haloPaint)
-            drawContext.canvas.nativeCanvas.drawText(text, x, y, textPaint)
-        }
-
-        drawMapLabel("Parque", w * 0.73f, h * 0.14f, parkLabelColorInt)
-        drawMapLabel("Av. del Parque", w * 0.26f, h * 0.39f, labelColorInt)
-        drawMapLabel("Paseo Central", w * 0.54f, h * 0.86f, labelColorInt)
+    val miniMapView = remember {
+        MapView(context, MapInitOptions(context = context, textureView = true))
     }
+
+    // Obtener última ubicación conocida del sistema para arranque instantáneo antes del primer tick GPS
+    val initialFallbackPoint = remember {
+        val current = NavigationState.currentLocation.value
+        if (current != null && (current.latitude != 0.0 || current.longitude != 0.0)) {
+            Point.fromLngLat(current.longitude, current.latitude)
+        } else {
+            try {
+                val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                val lastGps = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    ?: lm?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+                if (lastGps != null) {
+                    Point.fromLngLat(lastGps.longitude, lastGps.latitude)
+                } else {
+                    Point.fromLngLat(-66.9036, 10.4806)
+                }
+            } catch (_: SecurityException) {
+                Point.fromLngLat(-66.9036, 10.4806)
+            } catch (_: Exception) {
+                Point.fromLngLat(-66.9036, 10.4806)
+            }
+        }
+    }
+
+    fun refreshMiniRoute() {
+        if (!miniStyleReady) return
+        val pts = NavigationState.activeRoutePoints.toList()
+        miniMapView.mapboxMap.getStyle { style ->
+            val src = style.getSourceAs<GeoJsonSource>(MINI_ROUTE_SOURCE_ID) ?: return@getStyle
+            if (NavigationState.isRouteActive.value && pts.size >= 2) {
+                src.featureCollection(
+                    FeatureCollection.fromFeature(Feature.fromGeometry(LineString.fromLngLats(pts)))
+                )
+            } else {
+                src.featureCollection(FeatureCollection.fromFeatures(emptyList()))
+            }
+        }
+    }
+
+    // Ciclo de vida del MapView en miniatura
+    DisposableEffect(lifecycleOwner) {
+        miniMapView.onStart()
+        val obs = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> miniMapView.onStart()
+                Lifecycle.Event.ON_STOP -> miniMapView.onStop()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(obs)
+            miniMapView.onStop()
+            miniMapView.onDestroy()
+        }
+    }
+
+    // Escuchar actualizaciones de GPS / Simulación en tiempo real a través de LocationEngine
+    DisposableEffect(Unit) {
+        val listener = LocationEngine.Listener { loc, _, bearingDeg, _, animDurationMs ->
+            if (loc.latitude == 0.0 && loc.longitude == 0.0) return@Listener
+            val pt = Point.fromLngLat(loc.longitude, loc.latitude)
+            miniLocationProvider.updateLocation(pt, bearingDeg, animDurationMs)
+
+            miniMapView.camera.easeTo(
+                cameraOptions {
+                    center(pt)
+                    zoom(15.5)
+                    pitch(22.0)
+                    bearing(bearingDeg)
+                },
+                MapAnimationOptions.mapAnimationOptions {
+                    duration(animDurationMs.coerceIn(120L, 900L))
+                }
+            )
+        }
+        LocationEngine.addListener(listener)
+        onDispose {
+            LocationEngine.removeListener(listener)
+        }
+    }
+
+    // Reaccionar también si currentLocation cambia directamente
+    val currentLoc = NavigationState.currentLocation.value
+    LaunchedEffect(currentLoc, miniStyleReady) {
+        if (miniStyleReady && currentLoc != null && (currentLoc.latitude != 0.0 || currentLoc.longitude != 0.0)) {
+            val pt = Point.fromLngLat(currentLoc.longitude, currentLoc.latitude)
+            val brg = if (currentLoc.hasBearing()) currentLoc.bearing.toDouble() else 0.0
+            miniLocationProvider.updateLocation(pt, brg, animDurationMs = 150L)
+        }
+    }
+
+    // Actualizar estilo Día / Noche dinámicamente
+    LaunchedEffect(isDark) {
+        miniStyleReady = false
+        val targetStyle = if (isDark) Style.DARK else Style.MAPBOX_STREETS
+        val routeColorHex = if (isDark) "#8AB4F8" else "#2A5BE6"
+        val casingColorHex = if (isDark) "#3B69B8" else "#183CA3"
+
+        miniMapView.mapboxMap.loadStyle(targetStyle) { loadedStyle ->
+            try {
+                val pts = NavigationState.activeRoutePoints.toList()
+                loadedStyle.addSource(geoJsonSource(MINI_ROUTE_SOURCE_ID) {
+                    if (NavigationState.isRouteActive.value && pts.size >= 2) {
+                        featureCollection(
+                            FeatureCollection.fromFeature(Feature.fromGeometry(LineString.fromLngLats(pts)))
+                        )
+                    } else {
+                        featureCollection(FeatureCollection.fromFeatures(emptyList()))
+                    }
+                })
+                loadedStyle.addLayer(lineLayer(MINI_ROUTE_CASING_ID, MINI_ROUTE_SOURCE_ID) {
+                    lineColor(casingColorHex)
+                    lineWidth(7.5)
+                    lineCap(LineCap.ROUND)
+                    lineJoin(LineJoin.ROUND)
+                    lineOpacity(0.85)
+                })
+                loadedStyle.addLayer(lineLayer(MINI_ROUTE_LAYER_ID, MINI_ROUTE_SOURCE_ID) {
+                    lineColor(routeColorHex)
+                    lineWidth(4.8)
+                    lineCap(LineCap.ROUND)
+                    lineJoin(LineJoin.ROUND)
+                })
+            } catch (_: Exception) {}
+
+            val locPlugin = miniMapView.location
+            try {
+                locPlugin.setLocationProvider(miniLocationProvider)
+            } catch (_: Exception) {}
+
+            locPlugin.updateSettings {
+                enabled = true
+                pulsingEnabled = true
+                pulsingColor = android.graphics.Color.parseColor(routeColorHex)
+                puckBearingEnabled = true
+                puckBearing = PuckBearing.HEADING
+            }
+
+            val seedLoc = NavigationState.currentLocation.value
+            val seedPt = if (seedLoc != null && (seedLoc.latitude != 0.0 || seedLoc.longitude != 0.0)) {
+                Point.fromLngLat(seedLoc.longitude, seedLoc.latitude)
+            } else {
+                initialFallbackPoint
+            }
+            val seedBrg = if (seedLoc != null && seedLoc.hasBearing()) seedLoc.bearing.toDouble() else 0.0
+
+            miniLocationProvider.updateLocation(seedPt, seedBrg, animDurationMs = 80L)
+            miniMapView.mapboxMap.setCamera(
+                cameraOptions {
+                    center(seedPt)
+                    zoom(15.5)
+                    pitch(22.0)
+                    bearing(seedBrg)
+                }
+            )
+            miniStyleReady = true
+        }
+    }
+
+    // Actualizar polilínea cuando cambia la ruta activa
+    val routeActive = NavigationState.isRouteActive.value
+    val routeSize = NavigationState.activeRoutePoints.size
+    LaunchedEffect(routeActive, routeSize, miniStyleReady) {
+        if (miniStyleReady) {
+            refreshMiniRoute()
+        }
+    }
+
+    // Botón de recentrado manual
+    LaunchedEffect(recenterTrigger) {
+        if (recenterTrigger > 0L) {
+            val loc = NavigationState.currentLocation.value
+            val pt = if (loc != null && (loc.latitude != 0.0 || loc.longitude != 0.0)) {
+                Point.fromLngLat(loc.longitude, loc.latitude)
+            } else {
+                initialFallbackPoint
+            }
+            val brg = if (loc != null && loc.hasBearing()) loc.bearing.toDouble() else 0.0
+            miniMapView.camera.easeTo(
+                cameraOptions {
+                    center(pt)
+                    zoom(15.8)
+                    pitch(22.0)
+                    bearing(brg)
+                },
+                MapAnimationOptions.mapAnimationOptions { duration(350L) }
+            )
+        }
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = {
+            miniMapView.apply {
+                mapboxMap.setCamera(
+                    cameraOptions {
+                        center(initialFallbackPoint)
+                        zoom(15.2)
+                        pitch(20.0)
+                        bearing(0.0)
+                    }
+                )
+                gestures.addOnMapClickListener {
+                    onOpenNavigation()
+                    true
+                }
+            }
+        }
+    )
 }
 
 /**
- * Sección superior derecha: Vehículo flotante sobre el fondo de ondas (sin caja alrededor)
- * con sombra realista bajo las ruedas y pastilla "Mi [Modelo]" en la esquina inferior izquierda.
+ * Sección del Vehículo Flotante:
+ *  - En modo Horizontal el auto recibe una escala ampliada (1.38x adicional) y sin recorte de bordes (clip = false)
+ *    para que se note mucho más y tenga presencia protagonista como en la referencia.
+ *  - En modo Vertical muestra además el Reloj Grande inteligentemente ubicado en el lado izquierdo,
+ *    justo encima de la pastilla "Mi [Modelo]".
  */
 @Composable
 private fun ReferenceFloatingCarSection(
     isDark: Boolean,
+    isLandscape: Boolean,
     onOpenSpeedometer: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -1052,16 +1148,19 @@ private fun ReferenceFloatingCarSection(
         }
     }
 
-    val pillBg = if (isDark) Color(0xFF1A2550).copy(alpha = 0.85f) else Color(0xFFE3ECFA).copy(alpha = 0.92f)
-    val pillBorder = if (isDark) Color(0xFF3B4F8C).copy(alpha = 0.75f) else Color.White.copy(alpha = 0.90f)
+    val pillBg = if (isDark) Color(0xFF1A2550).copy(alpha = 0.88f) else Color(0xFFE3ECFA).copy(alpha = 0.92f)
+    val pillBorder = if (isDark) Color(0xFF3B4F8C).copy(alpha = 0.78f) else Color.White.copy(alpha = 0.90f)
     val pillText = if (isDark) Color.White else Color(0xFF141B2D)
 
+    // Escala visual reforzada en modo horizontal para que el vehículo destaque con fuerza
+    val effectiveScale = if (isLandscape) carScale * 1.38f else carScale * 1.08f
+
     Box(modifier = modifier) {
-        // Contenedor del vehículo desplazado ligeramente a la derecha como en la imagen de referencia
+        // Contenedor del vehículo protagonista
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .fillMaxWidth(0.86f)
+                .fillMaxWidth(if (isLandscape) 0.88f else 0.84f)
                 .align(Alignment.CenterEnd)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1070,19 +1169,19 @@ private fun ReferenceFloatingCarSection(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            // Sombra elíptica realista bajo los neumáticos del vehículo
+            // Sombra elíptica amplia bajo las ruedas
             Canvas(
                 modifier = Modifier
-                    .fillMaxWidth(0.86f)
-                    .height(34.dp)
+                    .fillMaxWidth(0.92f)
+                    .height(if (isLandscape) 38.dp else 30.dp)
                     .align(Alignment.BottomCenter)
-                    .offset(y = (-2).dp)
+                    .offset(y = 2.dp)
             ) {
                 drawOval(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color.Black.copy(alpha = if (isDark) 0.62f else 0.32f),
-                            Color.Black.copy(alpha = if (isDark) 0.24f else 0.10f),
+                            Color.Black.copy(alpha = if (isDark) 0.68f else 0.36f),
+                            Color.Black.copy(alpha = if (isDark) 0.28f else 0.12f),
                             Color.Transparent
                         ),
                         center = Offset(size.width / 2f, size.height / 2f),
@@ -1097,11 +1196,12 @@ private fun ReferenceFloatingCarSection(
                     bitmap = carBitmap!!,
                     contentDescription = "Vehículo",
                     modifier = Modifier
-                        .fillMaxWidth(0.95f)
-                        .fillMaxHeight(0.96f)
+                        .fillMaxSize()
+                        .offset(y = if (isLandscape) (-4).dp else 0.dp)
                         .graphicsLayer {
-                            scaleX = carScale
-                            scaleY = carScale
+                            scaleX = effectiveScale
+                            scaleY = effectiveScale
+                            clip = false
                         },
                     contentScale = ContentScale.Fit
                 )
@@ -1110,18 +1210,36 @@ private fun ReferenceFloatingCarSection(
                     painter = painterResource(id = R.drawable.car_hero_kia_rio),
                     contentDescription = "Vehículo",
                     modifier = Modifier
-                        .fillMaxWidth(0.95f)
-                        .fillMaxHeight(0.96f)
+                        .fillMaxSize()
+                        .offset(y = if (isLandscape) (-4).dp else 0.dp)
                         .graphicsLayer {
-                            scaleX = carScale
-                            scaleY = carScale
+                            scaleX = effectiveScale
+                            scaleY = effectiveScale
+                            clip = false
                         },
                     contentScale = ContentScale.Fit
                 )
             }
         }
 
-        // Pastilla "Mi [Modelo]" en la esquina inferior izquierda junto al auto (idéntica a "Mi RAV4" en la imagen)
+        // En Modo Vertical: Reloj Grande ubicado inteligentemente en la esquina superior izquierda sobre la insignia del auto
+        if (!isLandscape) {
+            val (timeDigits, amPmStr, _) = rememberClockState()
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 2.dp)
+            ) {
+                LargeLeftClockBadge(
+                    timeDigits = timeDigits,
+                    amPmStr = amPmStr,
+                    isDark = isDark,
+                    fontSizeSp = 38
+                )
+            }
+        }
+
+        // Pastilla "Mi [Modelo]" en la esquina inferior izquierda junto al auto
         Surface(
             onClick = {
                 if (smoothSpeed >= 3f) onOpenSpeedometer() else onOpenSettings()
@@ -1132,10 +1250,10 @@ private fun ReferenceFloatingCarSection(
             shadowElevation = if (isDark) 0.dp else 4.dp,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(bottom = 4.dp)
+                .padding(bottom = 2.dp)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1147,7 +1265,7 @@ private fun ReferenceFloatingCarSection(
                 }
                 Text(
                     text = badgeLabel,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = pillText,
                     maxLines = 1
@@ -1158,15 +1276,13 @@ private fun ReferenceFloatingCarSection(
 }
 
 /**
- * Tarjeta de Reproductor de Música estilo Spotify de la imagen de referencia:
- *  - Izquierda: Carátula cuadrada redondeada (con arte de atardecer estilo "Midnight City" cuando no hay carátula).
- *  - Centro: Badge verde Spotify / App reproductora + Título de la canción + Artista.
- *  - Derecha (arriba de la barra de progreso): 3 botones circulares (Anterior, Play/Pause destacado, Siguiente).
- *  - Abajo: Barra de progreso interactiva + tiempos a los extremos (1:23 ... 4:04).
+ * Tarjeta de Reproductor de Música estilo Spotify con proporciones compactas en horizontal
+ * para que la barra de progreso y los tiempos nunca se corten.
  */
 @Composable
 private fun ReferenceMusicPlayerCard(
     isDark: Boolean,
+    isLandscape: Boolean,
     onOpenYoutube: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
@@ -1223,9 +1339,13 @@ private fun ReferenceMusicPlayerCard(
     val trackBg = if (isDark) Color(0xFF33447A) else Color(0xFF9AB4E8).copy(alpha = 0.55f)
     val trackFill = if (isDark) Color(0xFF9BB8F8) else Color(0xFF3A5AD9)
 
+    val artSize = if (isLandscape) 46.dp else 50.dp
+    val playBtnSize = if (isLandscape) 38.dp else 42.dp
+    val skipBtnSize = if (isLandscape) 30.dp else 32.dp
+
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(22.dp),
         color = Color.Transparent,
         border = BorderStroke(1.dp, cardBorder),
         shadowElevation = if (isDark) 0.dp else 5.dp
@@ -1234,7 +1354,7 @@ private fun ReferenceMusicPlayerCard(
             modifier = Modifier
                 .fillMaxSize()
                 .background(cardBrush)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = if (isLandscape) 8.dp else 10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Fila Superior: Carátula + Info Canción + Controles Circulares a la derecha
@@ -1242,12 +1362,11 @@ private fun ReferenceMusicPlayerCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Carátula cuadrada redondeada (con arte sunset si no hay carátula cargada)
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
-                        .shadow(4.dp, RoundedCornerShape(14.dp))
-                        .clip(RoundedCornerShape(14.dp))
+                        .size(artSize)
+                        .shadow(3.dp, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable { showExpandedModal = true }
                 ) {
                     if (artImageBitmap != null) {
@@ -1262,9 +1381,8 @@ private fun ReferenceMusicPlayerCard(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                // Columna central: Badge Spotify/App + Título + Artista
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -1274,10 +1392,9 @@ private fun ReferenceMusicPlayerCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        // Icono circular verde estilo Spotify
                         Box(
                             modifier = Modifier
-                                .size(13.dp)
+                                .size(12.dp)
                                 .background(Color(0xFF1ED760), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
@@ -1285,26 +1402,27 @@ private fun ReferenceMusicPlayerCard(
                                 imageVector = Icons.Default.GraphicEq,
                                 contentDescription = null,
                                 tint = Color.Black,
-                                modifier = Modifier.size(9.dp)
+                                modifier = Modifier.size(8.dp)
                             )
                         }
                         Text(
                             text = playerApp.ifBlank { "Spotify" },
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = subtitleColor,
                             maxLines = 1
                         )
 
                         if (onOpenYoutube != null) {
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
                             Surface(
                                 onClick = onOpenYoutube,
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(7.dp),
                                 color = if (isDark) Color(0xFF28386E) else Color.White.copy(alpha = 0.7f)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                                 ) {
@@ -1312,11 +1430,11 @@ private fun ReferenceMusicPlayerCard(
                                         imageVector = Icons.Default.PlayCircleFilled,
                                         contentDescription = "YouTube",
                                         tint = Color(0xFFE53935),
-                                        modifier = Modifier.size(11.dp)
+                                        modifier = Modifier.size(10.dp)
                                     )
                                     Text(
                                         text = "YT",
-                                        fontSize = 9.sp,
+                                        fontSize = 8.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = titleColor
                                     )
@@ -1325,12 +1443,10 @@ private fun ReferenceMusicPlayerCard(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
-
                     Text(
                         text = songTitle.ifBlank { "Midnight City" },
-                        fontSize = 17.sp,
-                        lineHeight = 20.sp,
+                        fontSize = if (isLandscape) 15.sp else 16.sp,
+                        lineHeight = if (isLandscape) 17.sp else 19.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = titleColor,
                         maxLines = 1,
@@ -1339,7 +1455,8 @@ private fun ReferenceMusicPlayerCard(
 
                     Text(
                         text = songArtist.ifBlank { "M83" },
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
+                        lineHeight = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = subtitleColor,
                         maxLines = 1,
@@ -1347,25 +1464,25 @@ private fun ReferenceMusicPlayerCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // 3 Controles Circulares a la derecha (Anterior, Play/Pausa, Siguiente)
+                // 3 Controles Circulares a la derecha
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Surface(
                         onClick = { GlobalState.skipToPrevious() },
                         shape = CircleShape,
                         color = sideCircleBg,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(skipBtnSize)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.SkipPrevious,
                                 contentDescription = "Anterior",
                                 tint = sideIconTint,
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     }
@@ -1374,15 +1491,15 @@ private fun ReferenceMusicPlayerCard(
                         onClick = { GlobalState.togglePlayPause() },
                         shape = CircleShape,
                         color = playCircleBg,
-                        shadowElevation = 4.dp,
-                        modifier = Modifier.size(44.dp)
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.size(playBtnSize)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = "Reproducir / Pausar",
                                 tint = playIconTint,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(21.dp)
                             )
                         }
                     }
@@ -1391,14 +1508,14 @@ private fun ReferenceMusicPlayerCard(
                         onClick = { GlobalState.skipToNext() },
                         shape = CircleShape,
                         color = sideCircleBg,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(skipBtnSize)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.SkipNext,
                                 contentDescription = "Siguiente",
                                 tint = sideIconTint,
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     }
@@ -1406,11 +1523,11 @@ private fun ReferenceMusicPlayerCard(
             }
 
             // Fila Inferior: Barra de progreso interactiva + tiempos en los extremos
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(12.dp)
+                        .height(8.dp)
                         .pointerInput(duration) {
                             detectTapGestures { offset ->
                                 if (duration > 0L && size.width > 0) {
@@ -1426,7 +1543,7 @@ private fun ReferenceMusicPlayerCard(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(4.dp)
+                            .height(3.5.dp)
                             .clip(RoundedCornerShape(50))
                             .background(trackBg)
                     ) {
@@ -1446,14 +1563,16 @@ private fun ReferenceMusicPlayerCard(
                 ) {
                     Text(
                         text = if (duration > 0L) formatDurationMs(position) else "1:23",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = subtitleColor,
                         style = TextStyle(fontFeatureSettings = "tnum")
                     )
                     Text(
                         text = if (duration > 0L) formatDurationMs(duration) else "4:04",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = subtitleColor,
                         style = TextStyle(fontFeatureSettings = "tnum")
@@ -1469,8 +1588,7 @@ private fun ReferenceMusicPlayerCard(
 }
 
 /**
- * Ilustración de carátula synthwave (sol de atardecer + montañas) idéntica a la carátula de "Midnight City"
- * de la imagen de referencia cuando no hay carátula activa.
+ * Ilustración de carátula synthwave (sol de atardecer + montañas) cuando no hay carátula activa.
  */
 @Composable
 private fun SunsetAlbumArtPlaceholder(modifier: Modifier = Modifier) {
@@ -1478,7 +1596,6 @@ private fun SunsetAlbumArtPlaceholder(modifier: Modifier = Modifier) {
         val w = size.width
         val h = size.height
 
-        // Cielo degradado violeta/rosa atardecer
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(
@@ -1489,7 +1606,6 @@ private fun SunsetAlbumArtPlaceholder(modifier: Modifier = Modifier) {
             )
         )
 
-        // Sol cálido en el centro
         drawCircle(
             brush = Brush.verticalGradient(
                 colors = listOf(Color(0xFFFFE599), Color(0xFFFF9E7D))
@@ -1498,7 +1614,6 @@ private fun SunsetAlbumArtPlaceholder(modifier: Modifier = Modifier) {
             center = Offset(w * 0.5f, h * 0.50f)
         )
 
-        // Silueta de montañas en la base
         val mountain1 = Path().apply {
             moveTo(0f, h * 0.72f)
             lineTo(w * 0.34f, h * 0.50f)
@@ -1522,14 +1637,12 @@ private fun SunsetAlbumArtPlaceholder(modifier: Modifier = Modifier) {
 }
 
 /**
- * Tarjeta de Clima de la esquina inferior derecha idéntica a las dos imágenes de referencia:
- *  - Arriba: "Clima"
- *  - Centro: Temperatura grande ("22°" / "15°") a la izquierda + Ilustración vectorial (Sol con nube de día, Luna con estrellas de noche)
- *  - Abajo: Condición ("Parcialmente nublado" / "Despejado") + "Máx. 24° · Mín. 14°"
+ * Tarjeta de Clima optimizada para mostrar siempre la condición y Máx./Mín. sin recortes.
  */
 @Composable
 private fun ReferenceWeatherCard(
     isDark: Boolean,
+    isLandscape: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1561,7 +1674,7 @@ private fun ReferenceWeatherCard(
                 WeatherService.onLocationAvailable(context, loc.latitude, loc.longitude, force = true)
             }
         },
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(22.dp),
         color = Color.Transparent,
         border = BorderStroke(1.dp, cardBorder),
         shadowElevation = if (isDark) 0.dp else 5.dp
@@ -1570,12 +1683,13 @@ private fun ReferenceWeatherCard(
             modifier = Modifier
                 .fillMaxSize()
                 .background(cardBrush)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = if (isLandscape) 8.dp else 10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 text = "Clima",
-                fontSize = 12.sp,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = subtitleColor
             )
@@ -1587,8 +1701,8 @@ private fun ReferenceWeatherCard(
             ) {
                 Text(
                     text = "${snap.currentTempC}°",
-                    fontSize = 34.sp,
-                    lineHeight = 36.sp,
+                    fontSize = if (isLandscape) 28.sp else 32.sp,
+                    lineHeight = if (isLandscape) 30.sp else 34.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = titleColor
                 )
@@ -1596,7 +1710,7 @@ private fun ReferenceWeatherCard(
                 ReferenceWeatherIllustration(
                     isDark = isDark,
                     weatherCode = snap.currentCode,
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(if (isLandscape) 36.dp else 42.dp)
                 )
             }
 
@@ -1608,7 +1722,8 @@ private fun ReferenceWeatherCard(
                 }
                 Text(
                     text = conditionDisplay,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
+                    lineHeight = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = titleColor,
                     maxLines = 1,
@@ -1617,6 +1732,7 @@ private fun ReferenceWeatherCard(
                 Text(
                     text = "Máx. ${snap.maxTempC}° · Mín. ${snap.minTempC}°",
                     fontSize = 10.sp,
+                    lineHeight = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = subtitleColor,
                     maxLines = 1
@@ -1627,9 +1743,7 @@ private fun ReferenceWeatherCard(
 }
 
 /**
- * Dibuja el icono artístico de clima idéntico a las referencias:
- *  - Modo Noche: Luna creciente con estrellas brillantes en trazo azul/blanco.
- *  - Modo Día: Sol dorado con rayos asomando detrás de una nube contorneada.
+ * Icono artístico de clima (Luna creciente + estrellas de noche; Sol dorado + nube de día).
  */
 @Composable
 private fun ReferenceWeatherIllustration(
@@ -1642,9 +1756,8 @@ private fun ReferenceWeatherIllustration(
         val h = size.height
 
         if (isDark && weatherCode !in 51..99) {
-            // Luna creciente + estrellas (como en la imagen de referencia de Noche)
             val moonColor = Color(0xFFB4C8F8)
-            val strokeW = 2.2.dp.toPx()
+            val strokeW = 2.dp.toPx()
 
             val moonPath = Path().apply {
                 moveTo(w * 0.56f, h * 0.16f)
@@ -1671,19 +1784,16 @@ private fun ReferenceWeatherIllustration(
                 style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
 
-            // Estrella de 4 puntas arriba a la derecha
             val sx = w * 0.76f
             val sy = h * 0.28f
-            val sr = 4.dp.toPx()
-            drawLine(moonColor, Offset(sx - sr, sy), Offset(sx + sr, sy), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(moonColor, Offset(sx, sy - sr), Offset(sx, sy + sr), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
+            val sr = 3.5.dp.toPx()
+            drawLine(moonColor, Offset(sx - sr, sy), Offset(sx + sr, sy), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(moonColor, Offset(sx, sy - sr), Offset(sx, sy + sr), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
         } else {
-            // Sol dorado detrás de una nube suave (como en la imagen de referencia de Día)
             val sunColor = Color(0xFFF59E0B)
             val sunCenter = Offset(w * 0.46f, h * 0.38f)
             val sunRadius = w * 0.18f
 
-            // Rayos del sol
             for (angleDeg in 0 until 360 step 45) {
                 val rad = Math.toRadians(angleDeg.toDouble())
                 val r1 = sunRadius * 1.32f
@@ -1698,7 +1808,7 @@ private fun ReferenceWeatherIllustration(
                         sunCenter.x + (kotlin.math.cos(rad) * r2).toFloat(),
                         sunCenter.y + (kotlin.math.sin(rad) * r2).toFloat()
                     ),
-                    strokeWidth = 1.8.dp.toPx(),
+                    strokeWidth = 1.6.dp.toPx(),
                     cap = StrokeCap.Round
                 )
             }
@@ -1709,7 +1819,6 @@ private fun ReferenceWeatherIllustration(
                 center = sunCenter
             )
 
-            // Nube en primer plano
             val cloudFill = if (isDark) Color(0xFF1E2D5E) else Color(0xFFEBF2FF)
             val cloudStroke = if (isDark) Color(0xFF9BB8F8) else Color(0xFF283A66)
 
@@ -1719,7 +1828,7 @@ private fun ReferenceWeatherIllustration(
                 color = cloudFill,
                 topLeft = Offset(w * 0.18f, cloudRectTop),
                 size = Size(w * 0.66f, cloudRectBottom - cloudRectTop),
-                cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+                cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx())
             )
             drawCircle(
                 color = cloudFill,
@@ -1736,26 +1845,24 @@ private fun ReferenceWeatherIllustration(
                 color = cloudStroke,
                 topLeft = Offset(w * 0.18f, cloudRectTop),
                 size = Size(w * 0.66f, cloudRectBottom - cloudRectTop),
-                cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx()),
-                style = Stroke(width = 2.dp.toPx())
+                cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+                style = Stroke(width = 1.8.dp.toPx())
             )
         }
     }
 }
 
 /**
- * Dock inferior centrado con los 6 botones squircle adaptados a las opciones que ya existen en el Launcher:
- *  1. Apps (Cajón de aplicaciones instaladas) — Morado
- *  2. Mapas (Modo Navegación 3D / CarPlay) — Azul Cielo
- *  3. Velocímetro (18 Estilos de Velocímetro GPS) — Verde Esmeralda
- *  4. Dashcam (Galería de videos + mantener presionado para iniciar/detener grabación REC) — Naranja Coral
- *  5. Rutas (Historial de Rutas GPS) — Azul Real
- *  6. Récords (Récords de Velocidad) — Gris Pizarra Oscuro
+ * Dock inferior adaptable:
+ *  - En Horizontal: Píldora centrada con los 6 botones squircle.
+ *  - En Vertical: Ocupa todo el ancho con Arrangement.SpaceEvenly para que los 6 botones ("Apps", "Mapas",
+ *    "Velocímetro", "Dashcam", "Rutas", "Récords") queden perfectamente encuadrados sin recortarse jamás.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ReferenceBottomDock(
     isDark: Boolean,
+    isLandscape: Boolean,
     onOpenAllApps: () -> Unit,
     onOpenNavigation: () -> Unit,
     onOpenSpeedometer: () -> Unit,
@@ -1766,50 +1873,63 @@ private fun ReferenceBottomDock(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isRec = DashcamManager.isRecording.value
-    val todayMax = SpeedRecordTracker.todayMaxLive.value
 
     val dockBg = if (isDark) Color(0xFF141E42).copy(alpha = 0.84f) else Color(0xFFE7EFFC).copy(alpha = 0.90f)
     val dockBorder = if (isDark) Color(0xFF31447E).copy(alpha = 0.75f) else Color.White.copy(alpha = 0.88f)
 
     Surface(
-        shape = RoundedCornerShape(26.dp),
+        modifier = if (isLandscape) Modifier else Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
         color = dockBg,
         border = BorderStroke(1.dp, dockBorder),
         shadowElevation = if (isDark) 0.dp else 6.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = if (isLandscape) {
+                Modifier.padding(horizontal = 22.dp, vertical = 7.dp)
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
+            },
+            horizontalArrangement = if (isLandscape) {
+                Arrangement.spacedBy(22.dp)
+            } else {
+                Arrangement.SpaceEvenly
+            },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 1. APPS (Morado igual al 1er botón de la imagen)
+            // 1. APPS
             DockAppItem(
                 label = "Apps",
                 icon = Icons.Default.Apps,
                 gradientColors = listOf(Color(0xFF7B61FF), Color(0xFF4A32D4)),
                 isDark = isDark,
+                isLandscape = isLandscape,
                 onClick = onOpenAllApps
             )
 
-            // 2. MAPAS (Azul celeste igual al 2do botón de la imagen)
+            // 2. MAPAS
             DockAppItem(
                 label = "Mapas",
                 icon = Icons.Default.LocationOn,
                 gradientColors = listOf(Color(0xFF60B6FF), Color(0xFF2E6FE8)),
                 isDark = isDark,
+                isLandscape = isLandscape,
                 onClick = onOpenNavigation
             )
 
-            // 3. VELOCÍMETRO (Verde esmeralda igual al 3er botón de la imagen)
+            // 3. VELOCÍMETRO
             DockAppItem(
                 label = "Velocímetro",
                 icon = Icons.Default.Speed,
                 gradientColors = listOf(Color(0xFF34D374), Color(0xFF168A42)),
                 isDark = isDark,
+                isLandscape = isLandscape,
                 onClick = onOpenSpeedometer
             )
 
-            // 4. DASHCAM (Naranja coral igual al 4to botón de la imagen; pulsación larga = iniciar/detener REC)
+            // 4. DASHCAM
             DockAppItem(
                 label = if (isRec) "Grabando" else "Dashcam",
                 icon = if (isRec) Icons.Default.Videocam else Icons.Default.PhotoCameraFront,
@@ -1819,6 +1939,7 @@ private fun ReferenceBottomDock(
                     listOf(Color(0xFFFF8F66), Color(0xFFE05336))
                 },
                 isDark = isDark,
+                isLandscape = isLandscape,
                 showBadgeDot = isRec,
                 onClick = onOpenDashcamGallery,
                 onLongClick = {
@@ -1827,21 +1948,23 @@ private fun ReferenceBottomDock(
                 }
             )
 
-            // 5. RUTAS (Azul índigo igual al 5to botón de la imagen)
+            // 5. RUTAS
             DockAppItem(
                 label = "Rutas",
                 icon = Icons.Default.Timeline,
                 gradientColors = listOf(Color(0xFF6482FF), Color(0xFF3752D6)),
                 isDark = isDark,
+                isLandscape = isLandscape,
                 onClick = onOpenRoutes
             )
 
-            // 6. RÉCORDS (Gris pizarra oscuro igual al 6to botón de la imagen)
+            // 6. RÉCORDS
             DockAppItem(
-                label = if (todayMax >= 15f) "Récords" else "Récords",
+                label = "Récords",
                 icon = Icons.Default.EmojiEvents,
                 gradientColors = listOf(Color(0xFF475569), Color(0xFF1E293B)),
                 isDark = isDark,
+                isLandscape = isLandscape,
                 onClick = onOpenRecords
             )
         }
@@ -1855,6 +1978,7 @@ private fun DockAppItem(
     icon: ImageVector,
     gradientColors: List<Color>,
     isDark: Boolean,
+    isLandscape: Boolean,
     showBadgeDot: Boolean = false,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
@@ -1863,6 +1987,8 @@ private fun DockAppItem(
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.91f else 1f, tween(100), label = "dockItemScale")
     val labelColor = if (isDark) Color.White else Color(0xFF141B2D)
+    val boxSize = if (isLandscape) 40.dp else 38.dp
+    val iconSize = if (isLandscape) 21.dp else 20.dp
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1880,14 +2006,14 @@ private fun DockAppItem(
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
-                .shadow(4.dp, RoundedCornerShape(13.dp))
-                .clip(RoundedCornerShape(13.dp))
+                .size(boxSize)
+                .shadow(4.dp, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(Brush.verticalGradient(gradientColors))
                 .border(
                     width = 1.dp,
                     color = Color.White.copy(alpha = 0.30f),
-                    shape = RoundedCornerShape(13.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -1895,25 +2021,26 @@ private fun DockAppItem(
                 imageVector = icon,
                 contentDescription = label,
                 tint = Color.White,
-                modifier = Modifier.size(23.dp)
+                modifier = Modifier.size(iconSize)
             )
 
             if (showBadgeDot) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(7.dp)
+                        .padding(3.dp)
+                        .size(6.dp)
                         .background(Color.White, CircleShape)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(5.dp))
+        Spacer(modifier = Modifier.height(3.dp))
 
         Text(
             text = label,
-            fontSize = 11.sp,
+            fontSize = if (isLandscape) 10.sp else 9.5.sp,
+            lineHeight = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = labelColor,
             maxLines = 1,
