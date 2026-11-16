@@ -293,22 +293,32 @@ fun NavigationMap(
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx().toDouble() }
     val screenHeightPxRef = rememberUpdatedState(screenHeightPx)
 
-    // Helper unificado para cámara de persecución 3D (Chase Cam a 75°, zoom 19.75, horizonte alto y despejado)
-    fun buildChaseFollowState() = mapView.viewport.makeFollowPuckViewportState(
-        FollowPuckViewportStateOptions.Builder()
-            .pitch(75.0)
-            .zoom(19.75)
-            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-            .padding(
-                com.mapbox.maps.EdgeInsets(
-                    (screenHeightPxRef.value * 0.11).coerceAtLeast(44.0),
-                    leftInsetRef.value,
-                    maxOf(screenHeightPxRef.value * 0.15, bottomInsetRef.value),
-                    rightInsetRef.value
-                )
-            )
-            .build()
-    )
+    val isPortraitMode = configuration.screenHeightDp > configuration.screenWidthDp
+    val isPortraitRef = rememberUpdatedState(isPortraitMode)
+
+    // Helper unificado para cámara de persecución 3D (posiciona el auto y sus luces en el tercio inferior sobre el dock)
+    fun buildChaseFollowState() = run {
+        val portrait = isPortraitRef.value
+        val topPad = if (portrait) {
+            (screenHeightPxRef.value * 0.35).coerceAtLeast(160.0)
+        } else {
+            (screenHeightPxRef.value * 0.46).coerceAtLeast(140.0)
+        }
+        val botPad = if (portrait) {
+            maxOf(screenHeightPxRef.value * 0.11, bottomInsetRef.value)
+        } else {
+            maxOf(screenHeightPxRef.value * 0.04, bottomInsetRef.value)
+        }
+        val targetPitch = if (portrait) 65.0 else 67.5
+        mapView.viewport.makeFollowPuckViewportState(
+            FollowPuckViewportStateOptions.Builder()
+                .pitch(targetPitch)
+                .zoom(19.75)
+                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+                .padding(com.mapbox.maps.EdgeInsets(topPad, leftInsetRef.value, botPad, rightInsetRef.value))
+                .build()
+        )
+    }
 
     // Referencias al mapa — guardadas en remember para no recrear
     var mapReady          by remember { mutableStateOf(false) }
@@ -1435,7 +1445,7 @@ fun NavigationMap(
             }
         )
 
-        // ── Horizonte Cielo + Silueta de Ciudad 3D (Acotado al 23% superior del cielo, sin neblina sobre las calles) ──
+        // ── Horizonte Cielo + Silueta de Ciudad 3D (Acotado a la franja superior del cielo, sin neblina sobre las calles) ──
         val horizonAlpha by animateFloatAsState(
             targetValue = if (isFollowingLocation && !isAerialExploreMode && !isIntroAnimating && currentStyle != "SATELLITE") 1f else 0f,
             animationSpec = tween(durationMillis = 380),
@@ -1447,7 +1457,7 @@ fun NavigationMap(
                 currentStyle = currentStyle,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.23f)
+                    .fillMaxHeight(if (isPortrait) 0.17f else 0.22f)
                     .align(Alignment.TopCenter)
             )
         }
@@ -1475,20 +1485,20 @@ fun NavigationMap(
                     bottom = bottomOverlayPadding
                 )
         ) {
-            // ── ZONA SUPERIOR CENTRAL ADAPTABLE (Horizontal: entre reloj y botones; Vertical: ancho completo debajo del reloj) ──
+            // ── ZONA SUPERIOR ADAPTABLE (Horizontal: centro superior; Vertical: buscador a la derecha del reloj + tarjetas debajo) ──
             val nextStep = activeRouteSteps.firstOrNull()
             Column(
                 modifier = if (isPortrait) {
                     Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 96.dp, start = 14.dp, end = 14.dp)
+                        .padding(top = 56.dp, start = 14.dp, end = 14.dp)
                         .fillMaxWidth()
                 } else {
                     Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 10.dp, start = 230.dp, end = 215.dp)
                 },
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = if (isPortrait) Alignment.End else Alignment.CenterHorizontally
             ) {
                 // 1. Banner Turn-by-Turn estilo Cockpit ("↱ 200 m / Calle 26")
                 AnimatedVisibility(
@@ -1497,7 +1507,8 @@ fun NavigationMap(
                         initialOffsetY = { -it },
                         animationSpec = spring(dampingRatio = 0.72f, stiffness = 360f)
                     ) + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut()
+                    exit = slideOutVertically { -it } + fadeOut(),
+                    modifier = if (isPortrait) Modifier.padding(top = 52.dp).align(Alignment.CenterHorizontally) else Modifier
                 ) {
                     val distDisplay = when {
                         nextStep != null && nextStep.distance >= 1000 ->
@@ -1593,15 +1604,15 @@ fun NavigationMap(
                     }
                 }
 
-                // 2. Barra de búsqueda y Favoritos con animaciones elásticas modernas
+                // 2. Barra de búsqueda y Favoritos (En vertical se ubica a la derecha del reloj digital sin solaparlo)
                 AnimatedVisibility(
                     visible = !NavigationState.isRouteActive.value,
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.widthIn(max = 350.dp)
+                        horizontalAlignment = if (isPortrait) Alignment.End else Alignment.CenterHorizontally,
+                        modifier = if (isPortrait) Modifier.fillMaxWidth() else Modifier.widthIn(max = 350.dp)
                     ) {
                         val favHeartScale by animateFloatAsState(
                             targetValue = if (showFavorites) 1.12f else 1f,
@@ -1610,13 +1621,14 @@ fun NavigationMap(
                         )
 
                         Row(
+                            modifier = if (isPortrait) Modifier.padding(start = 178.dp).fillMaxWidth() else Modifier,
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Surface(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp),
+                                    .height(if (isPortrait) 40.dp else 44.dp),
                                 shape = RoundedCornerShape(22.dp),
                                 color = Color(0xFF0E1638).copy(alpha = 0.90f),
                                 border = BorderStroke(
@@ -1626,23 +1638,24 @@ fun NavigationMap(
                                 shadowElevation = 10.dp
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         Icons.Default.Search,
                                         null,
                                         tint = Color(0xFF38F2A6),
-                                        modifier = Modifier.size(19.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Box(modifier = Modifier.weight(1f)) {
                                         if (searchQuery.isEmpty()) {
                                             Text(
-                                                "¿A dónde vamos?",
+                                                if (isPortrait) "Buscar..." else "¿A dónde vamos?",
                                                 color = Color.White.copy(alpha = 0.65f),
-                                                fontSize = 13.sp,
-                                                maxLines = 1
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                         androidx.compose.foundation.text.BasicTextField(
@@ -1682,20 +1695,20 @@ fun NavigationMap(
                                     }
                                     if (isSearching) {
                                         CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
+                                            modifier = Modifier.size(15.dp),
                                             strokeWidth = 2.dp,
                                             color = Color(0xFF38F2A6)
                                         )
                                     } else if (searchQuery.isNotEmpty()) {
                                         IconButton(
                                             onClick = { searchQuery = ""; searchResults = emptyList() },
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
                                                 null,
                                                 tint = Color.White,
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                     }
@@ -1716,7 +1729,7 @@ fun NavigationMap(
                                 ),
                                 shadowElevation = 8.dp,
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(if (isPortrait) 40.dp else 44.dp)
                                     .scale(favHeartScale)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -1724,7 +1737,7 @@ fun NavigationMap(
                                         if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                         contentDescription = "Favoritos",
                                         tint = if (showFavorites) Color(0xFF38F2A6) else Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
@@ -1745,7 +1758,7 @@ fun NavigationMap(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 8.dp)
+                                    .padding(top = if (isPortrait) 14.dp else 8.dp)
                                     .heightIn(max = 260.dp),
                                 shape = RoundedCornerShape(22.dp),
                                 color = Color(0xFF0B112E).copy(alpha = 0.96f),
@@ -2034,7 +2047,7 @@ fun NavigationMap(
                     Surface(
                         modifier = if (isPortrait) {
                             Modifier
-                                .padding(top = 8.dp)
+                                .padding(top = 14.dp)
                                 .fillMaxWidth()
                         } else {
                             Modifier
