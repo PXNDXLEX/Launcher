@@ -366,26 +366,10 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     }
     val isMapRendered = isNavigationVisible || keepMapAliveDuringExit
 
-    // Padding dinámico sincronizado con el slider (25%..50% máx) y el dock ergonómico (80.dp)
-    val mapStartPadding = if (isLandscape) 96.dp else 0.dp
-    val mapEndPadding = if (isLandscape && isNavSplit) {
-        val availLandscapeWidth = (configuration.screenWidthDp.dp - 20.dp).coerceAtLeast(240.dp)
-        val maxPanelW = (availLandscapeWidth * 0.50f).coerceAtLeast(140.dp)
-        val minPanelW = 220.dp.coerceAtMost(maxPanelW)
-        val rightPanelWidthDp = (availLandscapeWidth * (navPanelPct / 100f)).coerceIn(minPanelW, maxPanelW)
-        rightPanelWidthDp + 18.dp
-    } else 0.dp
-
-    val mapBottomPadding = if (!isLandscape && isNavigationVisible) {
-        if (isNavSplit) {
-            val availPortraitHeight = (configuration.screenHeightDp.dp - 16.dp).coerceAtLeast(280.dp)
-            val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
-            val maxRowH = 310.dp.coerceAtMost((availPortraitHeight * 0.48f).coerceAtLeast(130.dp))
-            val minRowH = 168.dp.coerceAtMost(maxRowH)
-            val bottomRowHeightDp = (availPortraitHeight * portraitFraction).coerceIn(minRowH, maxRowH)
-            bottomRowHeightDp + 76.dp
-        } else 70.dp
-    } else 0.dp
+    // En modo Cockpit HUD el mapa ocupa el 100% del ancho con simetría total (auto 3D centrado entre los relojes)
+    val mapStartPadding = 0.dp
+    val mapEndPadding = 0.dp
+    val mapBottomPadding = 0.dp
 
     Box(
         modifier = Modifier
@@ -406,7 +390,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
         )
 
         // ══════════════════════════════════════════════════════════════════════
-        // CAPA 1: Interfaz CarPlay Split-Screen sobre el Mapa en Modo Navegación
+        // CAPA 1: Interfaz Cockpit HUD 3D sobre el Mapa en Modo Navegación
         // ══════════════════════════════════════════════════════════════════════
         AnimatedVisibility(
             visible = isNavigationVisible,
@@ -432,6 +416,7 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
                 onToggleSplitMode = { AppSettings.setNavSplitMode(!isNavSplit) },
                 onBackToHome = { currentScreen = "HOME" },
                 onOpenFullSpeedometer = { currentScreen = "SPEEDOMETER" },
+                onOpenAllApps = { currentScreen = "ALL_APPS" },
                 onOpenYoutube = { youtubeOverlayMode = "MINI" },
                 onOpenSettings = { showSettingsDialog = true }
             )

@@ -1,27 +1,24 @@
 package com.tuusuario.carlauncher.ui
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.BatteryManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,10 +32,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -47,6 +48,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tuusuario.carlauncher.services.ArletAssistant
@@ -55,16 +57,16 @@ import com.tuusuario.carlauncher.services.GlobalState
 import com.tuusuario.carlauncher.services.SpeedRecordTracker
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import kotlinx.coroutines.delay
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
- * Interfaz estilo Apple CarPlay / Android Auto Coolwalk para Modo Navegación:
- *  - Horizontal: Dock izquierdo ergonómico (80.dp) con botones VOZ y CAM grandes y físicamente separados
- *    + Panel lateral derecho adaptable mediante slider (25% hasta máximo 50% de la pantalla) sin deformarse.
- *  - Vertical: Fila dual adaptable (Velocímetro + Música a partes iguales) + Barra inferior ergonómica
- *    con botones VOZ y CAM en extremos opuestos para evitar toques accidentales al conducir.
+ * Interfaz Cockpit HUD 3D para Modo Navegación / Seguimiento GPS:
+ *  - Arriba Izquierda: Reproductor de Música HUD moderno con título, carátula, barra de progreso y botones circulares.
+ *  - Abajo Izquierda: Pod circular de Velocímetro que muestra los 18 velocímetros creados (deslizar para cambiar estilo).
+ *  - Abajo Derecha: Pod circular simétrico de Tacómetro / Telemetría con escala graduada y aguja dinámica.
+ *  - Abajo Centro: Barra Dock redondeada estilo cabina (Home, Velocímetro, Ajustes, Apps, Voz Sara / Dashcam).
  */
 @Composable
 fun CarPlayNavigationOverlay(
@@ -73,253 +75,91 @@ fun CarPlayNavigationOverlay(
     onToggleSplitMode: () -> Unit,
     onBackToHome: () -> Unit,
     onOpenFullSpeedometer: () -> Unit,
+    onOpenAllApps: () -> Unit = {},
     onOpenYoutube: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val navPanelPct = AppSettings.navPanelPercent.value.coerceIn(25f, 50f)
+    val scaleFactor = 0.88f + ((navPanelPct - 25f) / 25f) * 0.24f
 
-    if (isLandscape) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(10.dp)
-        ) {
-            // Ancho dinámico del panel Música + Velocímetro (25%..50% máx del ancho disponible, siempre min <= max)
-            val maxPanelW = (maxWidth * 0.50f).coerceAtLeast(0.dp)
-            val minPanelW = 220.dp.coerceAtMost(maxPanelW)
-            val targetPanelWidth = (maxWidth * (navPanelPct / 100f)).coerceIn(minPanelW, maxPanelW)
-            val animatedPanelWidth by animateDpAsState(
-                targetValue = targetPanelWidth,
-                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
-                label = "navPanelWidth"
-            )
-
-            // ── DOCK LATERAL IZQUIERDO ERGONÓMICO (80.dp): VOZ y CAM grandes y separados ──
-            CarPlayLeftDock(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(80.dp)
-                    .fillMaxHeight(),
-                isSplitMode = isSplitMode,
-                onBackToHome = onBackToHome,
-                onToggleSplitMode = onToggleSplitMode,
-                onOpenSettings = onOpenSettings
-            )
-
-            // ── PANEL LATERAL DERECHO ADAPTABLE (hasta 50% máx): Velocímetro + Música con Carátula ──
-            AnimatedVisibility(
-                visible = isSplitMode,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it + 40 },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ) + fadeIn(tween(220)),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it + 40 },
-                    animationSpec = tween(200, easing = FastOutSlowInEasing)
-                ) + fadeOut(tween(170)),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(animatedPanelWidth)
-                    .fillMaxHeight()
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Tarjeta Superior (54%): Velocímetro programado seleccionado en vivo (escala circular sin deformación)
-                    CarPlayLiveSpeedometerCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(0.54f),
-                        onClick = onOpenFullSpeedometer
-                    )
-
-                    // Tarjeta Inferior (46%): Widget de Música adaptable con carátula de fondo
-                    CarPlayAlbumArtMusicCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(0.46f),
-                        ultraCompact = false,
-                        onOpenYoutube = onOpenYoutube
-                    )
-                }
-            }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        val gaugeSizeRaw = if (isLandscape) {
+            (minOf(maxWidth * 0.27f, maxHeight * 0.56f) * scaleFactor).coerceIn(170.dp, 255.dp)
+        } else {
+            (minOf(maxWidth * 0.44f, maxHeight * 0.28f) * scaleFactor).coerceIn(148.dp, 210.dp)
         }
-    } else {
-        // ── MODO VERTICAL: Fila Dual Simétrica Adaptable + Dock Inferior con VOZ y CAM separados ──
-        BoxWithConstraints(
+        val animatedGaugeSize by animateDpAsState(
+            targetValue = gaugeSizeRaw,
+            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+            label = "cockpitGaugeSize"
+        )
+
+        // ── 1. ARRIBA IZQUIERDA: WIDGET DE MÚSICA HUD COCKPIT ──
+        CockpitTopLeftMusicHud(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .align(Alignment.TopStart)
+                .widthIn(max = if (isLandscape) 265.dp else 235.dp),
+            onOpenYoutube = onOpenYoutube
+        )
+
+        // ── 2. ABAJO IZQUIERDA: POD DE VELOCÍMETRO (CON LOS 18 VELOCÍMETROS CREADOS) ──
+        AnimatedVisibility(
+            visible = isSplitMode,
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(tween(240)) + scaleIn(initialScale = 0.9f),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(tween(180)) + scaleOut(targetScale = 0.9f),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(bottom = if (isLandscape) 4.dp else 68.dp)
         ) {
-            // Altura adaptable según el slider (manteniendo siempre min <= max incluso en ventanas reducidas)
-            val portraitFraction = (0.22f + ((navPanelPct - 25f) / 25f) * 0.16f).coerceIn(0.22f, 0.38f)
-            val maxRowH = 310.dp.coerceAtMost((maxHeight * 0.48f).coerceAtLeast(0.dp))
-            val minRowH = 168.dp.coerceAtMost(maxRowH)
-            val targetRowHeight = (maxHeight * portraitFraction).coerceIn(minRowH, maxRowH)
-            val animatedRowHeight by animateDpAsState(
-                targetValue = targetRowHeight,
-                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
-                label = "portraitRowHeight"
-            )
-
-            AnimatedVisibility(
-                visible = isSplitMode,
-                enter = slideInVertically { it } + fadeIn(tween(200)),
-                exit = slideOutVertically { it } + fadeOut(tween(170)),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 66.dp)
-                    .fillMaxWidth()
-                    .height(animatedRowHeight)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Izquierda (50%): Velocímetro programado seleccionado
-                    CarPlayLiveSpeedometerCard(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        onClick = onOpenFullSpeedometer
-                    )
-
-                    // Derecha (50%): Widget de música con carátula de fondo
-                    CarPlayAlbumArtMusicCard(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        ultraCompact = true,
-                        onOpenYoutube = onOpenYoutube
-                    )
-                }
-            }
-
-            // Dock inferior ergonómico con VOZ a la izquierda y CAM a la derecha
-            CarPlayPortraitBottomDock(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(58.dp),
-                isSplitMode = isSplitMode,
-                onBackToHome = onBackToHome,
-                onToggleSplitMode = onToggleSplitMode,
-                onOpenSettings = onOpenSettings
+            CockpitSpeedometerPod(
+                size = animatedGaugeSize,
+                onClick = onOpenFullSpeedometer
             )
         }
-    }
-}
 
-/**
- * Tarjeta de velocímetro para Modo Navegación que renderiza directamente el estilo programado
- * seleccionado por el usuario (de los 18 velocímetros disponibles).
- * Escala proporcionalmente con `min(maxWidth, maxHeight)` para nunca deformarse al ampliar el panel.
- */
-@Composable
-private fun CarPlayLiveSpeedometerCard(
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val palette = LocalBentoPalette.current
-    val activeStyle = AppSettings.speedoStyle.value
-    val todayMax = SpeedRecordTracker.todayMaxLive.value
-    val isRouteActive = NavigationState.isRouteActive.value
-    val routeDist = NavigationState.activeRouteDistance.value
+        // ── 3. ABAJO DERECHA: POD SIMÉTRICO DE TACÓMETRO / TELEMETRÍA ──
+        AnimatedVisibility(
+            visible = isSplitMode,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(tween(240)) + scaleIn(initialScale = 0.9f),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(tween(180)) + scaleOut(targetScale = 0.9f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = if (isLandscape) 4.dp else 68.dp)
+        ) {
+            CockpitRightTelemetryPod(
+                size = animatedGaugeSize
+            )
+        }
 
-    val styles = remember {
-        listOf(
-            "PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX",
-            "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON",
-            "SHONEN", "MECHA", "OVERDRIVE", "NEBULA", "DEMONIC", "CUSTOM"
+        // ── 4. ABAJO CENTRO: BARRA DOCK REDONDEADA COCKPIT ──
+        CockpitBottomCenterDock(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 2.dp),
+            isSplitMode = isSplitMode,
+            onBackToHome = onBackToHome,
+            onOpenFullSpeedometer = onOpenFullSpeedometer,
+            onOpenSettings = onOpenSettings,
+            onOpenAllApps = onOpenAllApps,
+            onToggleSplitMode = onToggleSplitMode
         )
     }
-    var dragAccum by remember { mutableStateOf(0f) }
-
-    Surface(
-        modifier = modifier
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        if (dragAccum > 65f) {
-                            val idx = styles.indexOf(AppSettings.speedoStyle.value)
-                            val prev = if (idx <= 0) styles.lastIndex else idx - 1
-                            AppSettings.setSpeedoStyle(styles[prev])
-                        } else if (dragAccum < -65f) {
-                            val idx = styles.indexOf(AppSettings.speedoStyle.value)
-                            val next = (idx + 1) % styles.size
-                            AppSettings.setSpeedoStyle(styles[next])
-                        }
-                        dragAccum = 0f
-                    }
-                ) { change, amount ->
-                    change.consume()
-                    dragAccum += amount
-                }
-            }
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(22.dp),
-        color = palette.cardBg.copy(alpha = 0.96f),
-        shadowElevation = 6.dp,
-        border = BorderStroke(1.dp, palette.cardBorder)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Crossfade(
-                targetState = activeStyle,
-                animationSpec = tween(220),
-                label = "navLiveSpeedo"
-            ) { _ ->
-                SpeedometerWidget(scaleMultiplier = 1.06f)
-            }
-
-            // Etiqueta discreta superior derecha (Récord del día o distancia restante)
-            val badgeText = when {
-                isRouteActive && routeDist.isNotBlank() -> routeDist
-                todayMax >= 10f -> "Máx ${todayMax.roundToInt()}"
-                else -> null
-            }
-            if (badgeText != null) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(2.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = palette.routesTileBg.copy(alpha = 0.88f)
-                ) {
-                    Text(
-                        text = badgeText,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.accent,
-                        maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
-            }
-        }
-    }
 }
 
 /**
- * Widget de música adaptable para Modo Navegación con la carátula de la canción actual
- * ocupando todo el fondo de la tarjeta. Se adapta fluidamente desde ancho compacto (25%)
- * hasta mitad de pantalla (50%) manteniendo proporciones armónicas sin estirarse.
+ * Widget de Música HUD ubicado en la esquina superior izquierda (como en el diseño de referencia),
+ * integrando título de la canción, artista, miniatura de carátula, barra de progreso interactiva,
+ * botones circulares con aro luminoso, acceso a YouTube PiP y modal expandido al tocar el título.
  */
 @Composable
-private fun CarPlayAlbumArtMusicCard(
+private fun CockpitTopLeftMusicHud(
     modifier: Modifier = Modifier,
-    ultraCompact: Boolean = false,
-    onOpenYoutube: (() -> Unit)? = null
+    onOpenYoutube: () -> Unit
 ) {
-    val palette = LocalBentoPalette.current
     val songTitle = GlobalState.songTitle.value
     val songArtist = GlobalState.songArtist.value
     val playerApp = GlobalState.playerAppName.value
@@ -346,302 +186,145 @@ private fun CarPlayAlbumArtMusicCard(
         (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
 
-    val textShadow = remember {
-        Shadow(color = Color.Black.copy(alpha = 0.78f), blurRadius = 8f)
+    val titleShadow = remember {
+        Shadow(color = Color.Black.copy(alpha = 0.85f), offset = Offset(0f, 2f), blurRadius = 8f)
     }
 
-    Surface(
+    Column(
         modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        color = Color(0xFF0A101D),
-        shadowElevation = 6.dp,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
+        verticalArrangement = Arrangement.spacedBy(7.dp)
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val isSpacious = maxWidth >= 300.dp && maxHeight >= 150.dp
-            val isWide = maxWidth >= 360.dp
-
-            // ── CAPA 1: Carátula de la canción como fondo completo de la tarjeta ──
+        // Fila 1: Mini carátula + Título ("Bass Persuades") + Subtítulo artista (toque abre reproductor completo)
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .clickable { showExpandedModal = true }
+                .padding(end = 6.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (artImageBitmap != null) {
                 Image(
                     bitmap = artImageBitmap,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    contentDescription = "Carátula",
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(9.dp)),
                     contentScale = ContentScale.Crop
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(palette.navyHeroStart, Color(0xFF091122))
-                            )
-                        )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.08f),
-                        modifier = Modifier
-                            .size(92.dp)
-                            .align(Alignment.Center)
+                Spacer(modifier = Modifier.width(9.dp))
+            }
+
+            Column(modifier = Modifier.weight(1f, fill = false)) {
+                Text(
+                    text = songTitle.ifBlank { "Sin reproducción" },
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(shadow = titleShadow)
+                )
+                val subtitleText = if (songArtist.isNotBlank()) songArtist else playerApp
+                if (subtitleText.isNotBlank()) {
+                    Text(
+                        text = subtitleText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFB8CEFF),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(shadow = titleShadow)
                     )
                 }
             }
+        }
 
-            // ── CAPA 2: Velo degradado oscuro para garantizar contraste sobre carátulas claras ──
+        // Barra de progreso fina interactiva cuando hay canción activa
+        if (duration > 0L) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF070C17).copy(alpha = 0.46f),
-                                Color(0xFF070C17).copy(alpha = 0.66f),
-                                Color(0xFF070C17).copy(alpha = 0.88f)
-                            )
-                        )
-                    )
-            )
-
-            // ── CAPA 3: Controles e información con escalado proporcional ──
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        horizontal = when {
-                            isWide -> 18.dp
-                            ultraCompact -> 11.dp
-                            else -> 14.dp
-                        },
-                        vertical = when {
-                            isSpacious -> 13.dp
-                            ultraCompact -> 10.dp
-                            else -> 11.dp
+                    .width(196.dp)
+                    .height(10.dp)
+                    .pointerInput(duration) {
+                        detectTapGestures { offset ->
+                            if (size.width > 0) {
+                                val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                val targetMs = (frac * duration).toLong()
+                                GlobalState.seekTo(targetMs)
+                                GlobalState.songPosition.value = targetMs
+                            }
                         }
-                    ),
-                verticalArrangement = Arrangement.SpaceBetween
+                    },
+                contentAlignment = Alignment.CenterStart
             ) {
-                // Fila superior: Miniatura nítida opcional (en vista amplia) + Título/Artista + Botón YouTube PiP
-                Row(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showExpandedModal = true },
-                    verticalAlignment = Alignment.CenterVertically
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.25f))
                 ) {
-                    if (isSpacious && artImageBitmap != null) {
-                        Image(
-                            bitmap = artImageBitmap,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(if (isWide) 50.dp else 42.dp)
-                                .clip(RoundedCornerShape(12.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = songTitle.ifBlank { "Sin reproducción" },
-                            fontSize = when {
-                                isWide -> 18.sp
-                                isSpacious -> 16.sp
-                                ultraCompact -> 13.sp
-                                else -> 15.sp
-                            },
-                            lineHeight = when {
-                                isWide -> 21.sp
-                                isSpacious -> 19.sp
-                                else -> 17.sp
-                            },
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = TextStyle(shadow = textShadow)
-                        )
-                        val sub = buildString {
-                            if (songArtist.isNotBlank()) {
-                                append(songArtist)
-                                if (!ultraCompact) {
-                                    append(" · ")
-                                    append(playerApp)
-                                }
-                            } else {
-                                append(playerApp)
-                            }
-                        }
-                        Text(
-                            text = sub,
-                            fontSize = when {
-                                isWide -> 13.sp
-                                isSpacious -> 12.sp
-                                ultraCompact -> 10.sp
-                                else -> 11.sp
-                            },
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.82f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = TextStyle(shadow = textShadow)
-                        )
-                    }
-
-                    if (onOpenYoutube != null) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            onClick = onOpenYoutube,
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFE53935).copy(alpha = 0.86f),
-                            modifier = Modifier.height(if (ultraCompact) 28.dp else 32.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = if (isSpacious) 10.dp else 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PictureInPictureAlt,
-                                    contentDescription = "YouTube en ventana",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(if (ultraCompact) 14.dp else 16.dp)
-                                )
-                                if (isSpacious) {
-                                    Text(
-                                        text = "YT",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Zona media: Barra de progreso interactiva + tiempos
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(14.dp)
-                            .pointerInput(duration) {
-                                detectTapGestures { offset ->
-                                    if (duration > 0L && size.width > 0) {
-                                        val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                                        val targetMs = (frac * duration).toLong()
-                                        GlobalState.seekTo(targetMs)
-                                        GlobalState.songPosition.value = targetMs
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(if (isSpacious) 5.dp else 4.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(Color.White.copy(alpha = 0.28f))
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .fillMaxWidth(progress.coerceIn(0.02f, 1f))
-                                    .clip(RoundedCornerShape(50))
-                                    .background(palette.accent)
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = formatDurationMs(position),
-                            fontSize = if (isSpacious) 11.sp else 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.80f),
-                            style = TextStyle(fontFeatureSettings = "tnum")
-                        )
-                        Text(
-                            text = formatDurationMs(duration),
-                            fontSize = if (isSpacious) 11.sp else 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.80f),
-                            style = TextStyle(fontFeatureSettings = "tnum")
-                        )
-                    }
+                            .fillMaxHeight()
+                            .fillMaxWidth(progress.coerceIn(0.03f, 1f))
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFF38F2A6))
+                    )
                 }
+            }
+        }
 
-                // Fila inferior: Controles Anterior / Play-Pause / Siguiente con separación acotada sin deformarse
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val playBtnSize = when {
-                        isWide -> 48.dp
-                        isSpacious -> 44.dp
-                        ultraCompact -> 36.dp
-                        else -> 40.dp
-                    }
-                    val skipBtnSize = when {
-                        isWide -> 40.dp
-                        isSpacious -> 36.dp
-                        else -> 32.dp
-                    }
+        // Fila 2: Botones circulares translúcidos con aro luminoso (|<, Play/Pause, >|, BT/YouTube)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HudCircleMediaButton(
+                icon = Icons.Default.SkipPrevious,
+                contentDescription = "Anterior",
+                isPrimary = false,
+                onClick = { GlobalState.skipToPrevious() }
+            )
 
-                    Row(
-                        modifier = Modifier
-                            .widthIn(max = 260.dp)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { GlobalState.skipToPrevious() },
-                            modifier = Modifier.size(skipBtnSize)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SkipPrevious,
-                                contentDescription = "Anterior",
-                                tint = Color.White,
-                                modifier = Modifier.size(if (isSpacious) 28.dp else 23.dp)
-                            )
-                        }
+            HudCircleMediaButton(
+                icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = "Reproducir / Pausar",
+                isPrimary = true,
+                onClick = { GlobalState.togglePlayPause() }
+            )
 
-                        Surface(
-                            onClick = { GlobalState.togglePlayPause() },
-                            shape = CircleShape,
-                            color = palette.accent,
-                            shadowElevation = 4.dp,
-                            modifier = Modifier.size(playBtnSize)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = "Reproducir / Pausar",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(if (isSpacious) 26.dp else 22.dp)
-                                )
-                            }
-                        }
+            HudCircleMediaButton(
+                icon = Icons.Default.SkipNext,
+                contentDescription = "Siguiente",
+                isPrimary = false,
+                onClick = { GlobalState.skipToNext() }
+            )
 
-                        IconButton(
-                            onClick = { GlobalState.skipToNext() },
-                            modifier = Modifier.size(skipBtnSize)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SkipNext,
-                                contentDescription = "Siguiente",
-                                tint = Color.White,
-                                modifier = Modifier.size(if (isSpacious) 28.dp else 23.dp)
-                            )
-                        }
-                    }
+            HudCircleMediaButton(
+                icon = Icons.Default.BluetoothAudio,
+                contentDescription = "Reproductor / Audio",
+                isPrimary = false,
+                onClick = { showExpandedModal = true },
+                onLongClick = onOpenYoutube
+            )
+
+            // Botón compacto YouTube PiP
+            Surface(
+                onClick = onOpenYoutube,
+                shape = CircleShape,
+                color = Color(0xFF1A2A5E).copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.65f)),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.PlayCircleOutline,
+                        contentDescription = "YouTube Mini",
+                        tint = Color(0xFFFF6E6E),
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
             }
         }
@@ -652,446 +335,475 @@ private fun CarPlayAlbumArtMusicCard(
     }
 }
 
-/**
- * Barra inferior para modo vertical: coloca VOZ en el extremo izquierdo y CAM en el extremo derecho,
- * grandes y con etiqueta visible, separados por los controles centrales para evitar errores al conducir.
- */
 @Composable
-private fun CarPlayPortraitBottomDock(
-    modifier: Modifier = Modifier,
-    isSplitMode: Boolean,
-    onBackToHome: () -> Unit,
-    onToggleSplitMode: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    val palette = LocalBentoPalette.current
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val isRec = DashcamManager.isRecording.value
-    val isListening = ArletAssistant.isListening.value || ArletAssistant.isWakeWordActiveWindow.value
-    val isSpeaking = ArletAssistant.isSpeaking.value
-
-    val micBg by animateColorAsState(
-        targetValue = when {
-            isListening -> Color(0xFFFF007F)
-            isSpeaking -> Color(0xFF00B8D4)
-            else -> palette.routesTileBg
-        },
-        animationSpec = tween(200),
-        label = "portraitMicBg"
-    )
-
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        color = palette.cardBg.copy(alpha = 0.96f),
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, palette.cardBorder)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // ── EXTREMO IZQUIERDO: BOTÓN GRANDE ASISTENTE DE VOZ ──
-            Surface(
-                onClick = {
-                    if (isListening || isSpeaking) ArletAssistant.closeOverlay()
-                    else ArletAssistant.triggerManualListening()
-                },
-                shape = RoundedCornerShape(16.dp),
-                color = micBg,
-                border = BorderStroke(
-                    1.dp,
-                    if (isListening || isSpeaking) Color.Transparent else palette.accent.copy(alpha = 0.35f)
-                ),
-                modifier = Modifier
-                    .width(92.dp)
-                    .fillMaxHeight()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Asistente Sara",
-                        tint = if (isListening || isSpeaking) Color.White else palette.accent,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = if (isListening) "OÍR" else "VOZ",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (isListening || isSpeaking) Color.White else palette.accent
-                    )
-                }
-            }
-
-            // ── ZONA CENTRAL SEPARADORA: Inicio · Vista · Ajustes ──
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                DockIconButton(
-                    icon = Icons.Default.GridView,
-                    contentDescription = "Menú Principal",
-                    containerColor = palette.accent,
-                    contentColor = Color.White,
-                    sizeDp = 42,
-                    onClick = onBackToHome
-                )
-
-                DockIconButton(
-                    icon = if (isSplitMode) Icons.Default.Fullscreen else Icons.Default.VerticalSplit,
-                    contentDescription = "Mostrar / Ocultar Widgets",
-                    containerColor = if (isSplitMode) palette.routesTileBg else palette.subCardBg,
-                    contentColor = if (isSplitMode) palette.accent else palette.textPrimary,
-                    sizeDp = 42,
-                    onClick = onToggleSplitMode
-                )
-
-                DockIconButton(
-                    icon = Icons.Default.Settings,
-                    contentDescription = "Ajustes",
-                    containerColor = palette.subCardBg,
-                    contentColor = palette.textSecondary,
-                    sizeDp = 42,
-                    onClick = onOpenSettings
-                )
-            }
-
-            // ── EXTREMO DERECHO: BOTÓN GRANDE CÁMARA / DASHCAM ──
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = if (isRec) Color(0xFFE53935) else palette.dashcamTileBg,
-                border = BorderStroke(
-                    1.dp,
-                    if (isRec) Color.Transparent else palette.dashcamTileFg.copy(alpha = 0.35f)
-                ),
-                modifier = Modifier
-                    .width(92.dp)
-                    .fillMaxHeight()
-                    .pointerInput(isRec) {
-                        detectTapGestures(
-                            onTap = {
-                                if (isRec) DashcamManager.stopRecording()
-                                else DashcamManager.startRecording(context, lifecycleOwner)
-                            },
-                            onLongPress = {
-                                DashcamManager.cycleCamera(context, lifecycleOwner)
-                            }
-                        )
-                    }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = if (isRec) Icons.Default.Stop else Icons.Default.Videocam,
-                        contentDescription = "Cámara Dashcam",
-                        tint = if (isRec) Color.White else palette.dashcamTileFg,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = if (isRec) "REC" else "CAM",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (isRec) Color.White else palette.dashcamTileFg
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Dock izquierdo ergonómico (80.dp) para conducción horizontal:
- * Separa físicamente el botón grande de VOZ (arriba) y el botón grande de CAM (abajo),
- * colocando los botones de Vista Dividida y Ajustes en el centro como barrera táctil.
- */
-@Composable
-private fun CarPlayLeftDock(
-    modifier: Modifier = Modifier,
-    isSplitMode: Boolean,
-    onBackToHome: () -> Unit,
-    onToggleSplitMode: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    val palette = LocalBentoPalette.current
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    val isRec = DashcamManager.isRecording.value
-    val isListening = ArletAssistant.isListening.value || ArletAssistant.isWakeWordActiveWindow.value
-    val isSpeaking = ArletAssistant.isSpeaking.value
-
-    var clockText by remember { mutableStateOf("") }
-    var batteryPct by remember { mutableStateOf(100) }
-
-    LaunchedEffect(Unit) {
-        val fmt = DateTimeFormatter.ofPattern("HH:mm")
-        while (true) {
-            clockText = LocalDateTime.now().format(fmt)
-            delay(1000L - (System.currentTimeMillis() % 1000L))
-        }
-    }
-
-    DisposableEffect(context) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
-                    val lvl = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                    val scl = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                    if (lvl >= 0 && scl > 0) batteryPct = (lvl * 100 / scl)
-                }
-            }
-        }
-        context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        onDispose {
-            try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
-        }
-    }
-
-    val micBg by animateColorAsState(
-        targetValue = when {
-            isListening -> Color(0xFFFF007F)
-            isSpeaking -> Color(0xFF00B8D4)
-            else -> palette.routesTileBg
-        },
-        animationSpec = tween(200),
-        label = "dockMicBg"
-    )
-
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
-        color = palette.cardBg.copy(alpha = 0.95f),
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, palette.cardBorder)
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 10.dp, horizontal = 6.dp)
-        ) {
-            val isCompactHeight = maxHeight < 390.dp
-            val heroBtnHeight = if (isCompactHeight) 52.dp else 64.dp
-            val heroIconSize = if (isCompactHeight) 24.dp else 28.dp
-
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                // 1. CABECERA + BOTÓN INICIO
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = clockText.ifEmpty { "12:00" },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = palette.textPrimary,
-                            style = TextStyle(fontFeatureSettings = "tnum")
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .background(
-                                        if (NavigationState.isGpsReady.value) Color(0xFF10B981) else Color(0xFFF59E0B),
-                                        CircleShape
-                                    )
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "${batteryPct}%",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = palette.textSecondary
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = onBackToHome,
-                        shape = RoundedCornerShape(15.dp),
-                        color = palette.accent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (isCompactHeight) 38.dp else 44.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.GridView,
-                                contentDescription = "Menú Principal",
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                }
-
-                // 2. MITAD SUPERIOR: BOTÓN GRANDE DE VOZ (ASISTENTE SARA)
-                Surface(
-                    onClick = {
-                        if (isListening || isSpeaking) ArletAssistant.closeOverlay()
-                        else ArletAssistant.triggerManualListening()
-                    },
-                    shape = RoundedCornerShape(18.dp),
-                    color = micBg,
-                    border = BorderStroke(
-                        1.5.dp,
-                        if (isListening || isSpeaking) Color.Transparent else palette.accent.copy(alpha = 0.40f)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(heroBtnHeight)
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Asistente de Voz",
-                            tint = if (isListening || isSpeaking) Color.White else palette.accent,
-                            modifier = Modifier.size(heroIconSize)
-                        )
-                        Text(
-                            text = if (isListening) "OYENDO" else "VOZ",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.5.sp,
-                            color = if (isListening || isSpeaking) Color.White else palette.accent
-                        )
-                    }
-                }
-
-                // 3. ZONA INTERMEDIA SEPARADORA: Vista Dividida + Ajustes (evita tocar CAM por error al buscar VOZ)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        onClick = onToggleSplitMode,
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSplitMode) palette.routesTileBg else palette.subCardBg,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isSplitMode) Icons.Default.Fullscreen else Icons.Default.VerticalSplit,
-                                contentDescription = "Alternar Panel Lateral",
-                                tint = if (isSplitMode) palette.accent else palette.textPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = onOpenSettings,
-                        shape = RoundedCornerShape(12.dp),
-                        color = palette.subCardBg,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Ajustes",
-                                tint = palette.textSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
-                // 4. MITAD INFERIOR: BOTÓN GRANDE DE CÁMARA (DASHCAM) — Físicamente alejado de VOZ
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = if (isRec) Color(0xFFE53935) else palette.dashcamTileBg,
-                    border = BorderStroke(
-                        1.5.dp,
-                        if (isRec) Color.Transparent else palette.dashcamTileFg.copy(alpha = 0.40f)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(heroBtnHeight)
-                        .pointerInput(isRec) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (isRec) DashcamManager.stopRecording()
-                                    else DashcamManager.startRecording(context, lifecycleOwner)
-                                },
-                                onLongPress = {
-                                    DashcamManager.cycleCamera(context, lifecycleOwner)
-                                }
-                            )
-                        }
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isRec) Icons.Default.Stop else Icons.Default.Videocam,
-                            contentDescription = "Cámara Dashcam",
-                            tint = if (isRec) Color.White else palette.dashcamTileFg,
-                            modifier = Modifier.size(heroIconSize)
-                        )
-                        Text(
-                            text = if (isRec) "STOP" else "CAM",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.5.sp,
-                            color = if (isRec) Color.White else palette.dashcamTileFg
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DockIconButton(
+private fun HudCircleMediaButton(
     icon: ImageVector,
     contentDescription: String,
-    containerColor: Color,
-    contentColor: Color,
-    sizeDp: Int = 44,
-    onClick: () -> Unit
+    isPrimary: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
+    val bgColor = if (isPrimary) {
+        Color(0xFF162458).copy(alpha = 0.88f)
+    } else {
+        Color(0xFF1D3570).copy(alpha = 0.65f)
+    }
+    val borderColor = if (isPrimary) {
+        Color(0xFF7CA8FF).copy(alpha = 0.85f)
+    } else {
+        Color.White.copy(alpha = 0.55f)
+    }
+
     Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape((sizeDp * 0.34f).dp),
-        color = containerColor,
-        modifier = Modifier.size(sizeDp.dp)
+        shape = CircleShape,
+        color = bgColor,
+        border = BorderStroke(if (isPrimary) 1.6.dp else 1.2.dp, borderColor),
+        shadowElevation = if (isPrimary) 8.dp else 4.dp,
+        modifier = Modifier
+            .size(if (isPrimary) 44.dp else 40.dp)
+            .pointerInput(onLongClick) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick?.invoke() }
+                )
+            }
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = contentColor,
-                modifier = Modifier.size((sizeDp * 0.5f).dp)
+                tint = Color.White,
+                modifier = Modifier.size(if (isPrimary) 23.dp else 20.dp)
             )
+        }
+    }
+}
+
+/**
+ * Pod Circular Izquierdo: Integra nuestros 18 Velocímetros programados dentro del bisel circular Cockpit.
+ * Permite deslizar horizontalmente para alternar entre los 18 estilos en vivo o tocar para pantalla completa.
+ */
+@Composable
+private fun CockpitSpeedometerPod(
+    size: Dp,
+    onClick: () -> Unit
+) {
+    val activeStyle = AppSettings.speedoStyle.value
+    val styles = remember {
+        listOf(
+            "PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX",
+            "QUANTUM", "PULSAR", "PLASMA", "ANIME", "KAIJU", "OMNIMON",
+            "SHONEN", "MECHA", "OVERDRIVE", "NEBULA", "DEMONIC", "CUSTOM"
+        )
+    }
+    var dragAccum by remember { mutableStateOf(0f) }
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (dragAccum > 55f) {
+                            val idx = styles.indexOf(AppSettings.speedoStyle.value)
+                            val prev = if (idx <= 0) styles.lastIndex else idx - 1
+                            AppSettings.setSpeedoStyle(styles[prev])
+                        } else if (dragAccum < -55f) {
+                            val idx = styles.indexOf(AppSettings.speedoStyle.value)
+                            val next = (idx + 1) % styles.size
+                            AppSettings.setSpeedoStyle(styles[next])
+                        }
+                        dragAccum = 0f
+                    }
+                ) { change, amount ->
+                    change.consume()
+                    dragAccum += amount
+                }
+            }
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        // Fondo y bisel exterior tipo Cockpit (igual al dial izquierdo de la referencia)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val radius = this.size.minDimension / 2f
+            val center = Offset(this.size.width / 2f, this.size.height / 2f)
+
+            // Sombra radial profunda del reloj
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF141842).copy(alpha = 0.94f),
+                        Color(0xFF090B24).copy(alpha = 0.97f),
+                        Color(0xFF050614).copy(alpha = 0.92f)
+                    ),
+                    center = center,
+                    radius = radius
+                ),
+                radius = radius * 0.96f,
+                center = center
+            )
+
+            // Arco metálico exterior de 240° (estilo tacómetro automotriz)
+            val arcInset = radius * 0.05f
+            drawArc(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF8A94B8).copy(alpha = 0.65f),
+                        Color(0xFF3E4668).copy(alpha = 0.35f)
+                    )
+                ),
+                startAngle = 150f,
+                sweepAngle = 240f,
+                useCenter = false,
+                topLeft = Offset(arcInset, arcInset),
+                size = Size(this.size.width - arcInset * 2f, this.size.height - arcInset * 2f),
+                style = Stroke(width = radius * 0.055f, cap = StrokeCap.Round)
+            )
+        }
+
+        // Velocímetro seleccionado por el usuario (los 18 diseños creados)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(size * 0.06f)
+                .clip(CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Crossfade(
+                targetState = activeStyle,
+                animationSpec = tween(220),
+                label = "cockpitLiveSpeedo"
+            ) { _ ->
+                SpeedometerWidget(
+                    scaleMultiplier = 1.05f,
+                    forceDarkBackground = true
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Pod Circular Derecho Simétrico: Reloj de Tacómetro / Telemetría con el mismo diseño visual
+ * del medidor derecho de la imagen de referencia (arco metálico de 240°, marcas graduadas y aguja roja),
+ * más lectura opcional de RPM / Récord Máximo al tocarlo.
+ */
+@Composable
+private fun CockpitRightTelemetryPod(
+    size: Dp
+) {
+    val speedKmH = NavigationState.currentSpeedKmH.value
+    val todayMax = SpeedRecordTracker.todayMaxLive.value
+    var showTelemetryText by remember { mutableStateOf(false) }
+
+    // Simulación suave de RPM / carga dinámica en función de la velocidad para mover la aguja roja
+    val targetGaugeFraction = remember(speedKmH) {
+        when {
+            speedKmH <= 1f -> 0.04f
+            else -> {
+                // Simula cambios de marcha realistas (1ª..6ª) entre 15% y 88% del arco
+                val gearSpans = floatArrayOf(28f, 52f, 82f, 115f, 150f, 210f)
+                var gearIdx = 0
+                while (gearIdx < gearSpans.lastIndex && speedKmH > gearSpans[gearIdx]) {
+                    gearIdx++
+                }
+                val prevSpan = if (gearIdx == 0) 0f else gearSpans[gearIdx - 1]
+                val gearProgress = ((speedKmH - prevSpan) / (gearSpans[gearIdx] - prevSpan)).coerceIn(0f, 1f)
+                (0.18f + gearProgress * 0.68f).coerceIn(0.05f, 0.95f)
+            }
+        }
+    }
+
+    val animatedFraction by animateFloatAsState(
+        targetValue = targetGaugeFraction,
+        animationSpec = tween(durationMillis = 160, easing = LinearEasing),
+        label = "rightGaugeNeedle"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .clickable { showTelemetryText = !showTelemetryText },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = this.size.width
+            val h = this.size.height
+            val radius = minOf(w, h) / 2f
+            val center = Offset(w / 2f, h / 2f)
+
+            // 1. Fondo circular oscuro profundo con degradado radial idéntico a la imagen
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF151946).copy(alpha = 0.94f),
+                        Color(0xFF0A0C26).copy(alpha = 0.97f),
+                        Color(0xFF050614).copy(alpha = 0.92f)
+                    ),
+                    center = center,
+                    radius = radius
+                ),
+                radius = radius * 0.96f,
+                center = center
+            )
+
+            // 2. Bisel exterior arqueado (150° a 390°, 240° de barrido)
+            val outerInset = radius * 0.055f
+            drawArc(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF8C96BA).copy(alpha = 0.68f),
+                        Color(0xFF3A4264).copy(alpha = 0.32f)
+                    )
+                ),
+                startAngle = 150f,
+                sweepAngle = 240f,
+                useCenter = false,
+                topLeft = Offset(outerInset, outerInset),
+                size = Size(w - outerInset * 2f, h - outerInset * 2f),
+                style = Stroke(width = radius * 0.055f, cap = StrokeCap.Round)
+            )
+
+            // 3. Anillo interior oscuro sutil
+            val innerArcInset = radius * 0.14f
+            drawArc(
+                color = Color(0xFF2B3258).copy(alpha = 0.65f),
+                startAngle = 150f,
+                sweepAngle = 240f,
+                useCenter = false,
+                topLeft = Offset(innerArcInset, innerArcInset),
+                size = Size(w - innerArcInset * 2f, h - innerArcInset * 2f),
+                style = Stroke(width = radius * 0.025f, cap = StrokeCap.Round)
+            )
+
+            // 4. Marcas graduadas (ticks) alrededor del arco de 240°
+            val totalTicks = 24
+            val tickOuterR = radius * 0.84f
+            for (i in 0..totalTicks) {
+                val angleDeg = 150f + (i.toFloat() / totalTicks) * 240f
+                val angleRad = Math.toRadians(angleDeg.toDouble())
+                val isMajor = i % 3 == 0
+                val tickInnerR = if (isMajor) radius * 0.73f else radius * 0.78f
+                val startPt = Offset(
+                    center.x + (tickInnerR * cos(angleRad)).toFloat(),
+                    center.y + (tickInnerR * sin(angleRad)).toFloat()
+                )
+                val endPt = Offset(
+                    center.x + (tickOuterR * cos(angleRad)).toFloat(),
+                    center.y + (tickOuterR * sin(angleRad)).toFloat()
+                )
+                val tickColor = if (i >= 20) {
+                    Color(0xFFFF4D5E).copy(alpha = 0.85f)
+                } else {
+                    Color(0xFF8B93B8).copy(alpha = if (isMajor) 0.78f else 0.45f)
+                }
+                drawLine(
+                    color = tickColor,
+                    start = startPt,
+                    end = endPt,
+                    strokeWidth = if (isMajor) radius * 0.024f else radius * 0.014f,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            // 5. Aguja indicadora roja en el borde (como en la imagen de referencia)
+            val needleAngleDeg = 150f + animatedFraction * 240f
+            val needleRad = Math.toRadians(needleAngleDeg.toDouble())
+            val needleStartR = radius * 0.66f
+            val needleEndR = radius * 0.90f
+            drawLine(
+                color = Color(0xFFFF3B4E),
+                start = Offset(
+                    center.x + (needleStartR * cos(needleRad)).toFloat(),
+                    center.y + (needleStartR * sin(needleRad)).toFloat()
+                ),
+                end = Offset(
+                    center.x + (needleEndR * cos(needleRad)).toFloat(),
+                    center.y + (needleEndR * sin(needleRad)).toFloat()
+                ),
+                strokeWidth = radius * 0.042f,
+                cap = StrokeCap.Round
+            )
+        }
+
+        // Si el usuario toca el reloj derecho, muestra/oculta datos de RPM y Récord del día en el centro
+        if (showTelemetryText) {
+            val rpmValue = (800 + (animatedFraction * 6200).roundToInt())
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${rpmValue / 1000}.${(rpmValue % 1000) / 100}",
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Text(
+                    text = "x1000 RPM",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF9AB0FF)
+                )
+                if (todayMax >= 5f) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "MÁX ${todayMax.roundToInt()} km/h",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF38F2A6)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Barra Dock Inferior Central estilo Cockpit (idéntica a la cápsula oscura inferior de la imagen):
+ * Contiene los 5 iconos principales:
+ *  1. Home (con indicador luminoso cian debajo)
+ *  2. Velocímetro
+ *  3. Ajustes (Llave inglesa)
+ *  4. Aplicaciones (Cuadrícula)
+ *  5. Voz Sara / Conectividad (Toque activa asistente Sara; pulsación larga alterna relojes HUD)
+ *  + Indicador compacto de grabación Dashcam si está activa.
+ */
+@Composable
+private fun CockpitBottomCenterDock(
+    modifier: Modifier = Modifier,
+    isSplitMode: Boolean,
+    onBackToHome: () -> Unit,
+    onOpenFullSpeedometer: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenAllApps: () -> Unit,
+    onToggleSplitMode: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val isRec = DashcamManager.isRecording.value
+    val isListening = ArletAssistant.isListening.value || ArletAssistant.isWakeWordActiveWindow.value
+    val isSpeaking = ArletAssistant.isSpeaking.value
+
+    val voiceTint by animateColorAsState(
+        targetValue = when {
+            isListening -> Color(0xFFFF4081)
+            isSpeaking -> Color(0xFF00E5FF)
+            else -> Color.White.copy(alpha = 0.85f)
+        },
+        animationSpec = tween(200),
+        label = "dockVoiceTint"
+    )
+
+    Surface(
+        modifier = modifier.height(56.dp),
+        shape = RoundedCornerShape(50),
+        color = Color(0xFF080A16).copy(alpha = 0.92f),
+        shadowElevation = 12.dp,
+        border = BorderStroke(1.2.dp, Color(0xFF3B4675).copy(alpha = 0.65f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(22.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 1. HOME (con esfera/halo oscuro e indicador cian luminoso debajo, como en la imagen)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClick = onBackToHome)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = "Inicio",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Box(
+                    modifier = Modifier
+                        .width(18.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFF00E5FF))
+                )
+            }
+
+            // 2. VELOCÍMETRO (Toque abre velocímetro completo; pulsación larga muestra/oculta relojes HUD)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { onOpenFullSpeedometer() },
+                            onLongPress = { onToggleSplitMode() }
+                        )
+                    }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Speed,
+                    contentDescription = "Velocímetro",
+                    tint = if (isSplitMode) Color.White.copy(alpha = 0.88f) else Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(23.dp)
+                )
+            }
+
+            // 3. AJUSTES (Icono llave inglesa / Build igual a la imagen)
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = "Ajustes",
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+
+            // 4. APLICACIONES (Icono cuadrícula 3x3 igual a la imagen)
+            IconButton(
+                onClick = onOpenAllApps,
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Apps,
+                    contentDescription = "Aplicaciones",
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(23.dp)
+                )
+            }
+
+            // 5. CONECTIVIDAD / ASISTENTE SARA & DASHCAM (Icono teléfono con ondas igual a la imagen)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .pointerInput(isRec, isListening, isSpeaking) {
+                        detectTapGestures(
+                            onTap = {
+                                if (isListening || isSpeaking) ArletAssistant.closeOverlay()
+                                else ArletAssistant.triggerManualListening()
+                            },
+                            onLongPress = {
+                                if (isRec) DashcamManager.stopRecording()
+                                else DashcamManager.startRecording(context, lifecycleOwner)
+                            }
+                        )
+                    }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PermPhoneMsg,
+                    contentDescription = "Asistente Sara / Dashcam",
+                    tint = if (isRec) Color(0xFFFF5252) else voiceTint,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
     }
 }

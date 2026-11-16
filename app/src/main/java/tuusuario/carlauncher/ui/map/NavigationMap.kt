@@ -261,11 +261,31 @@ fun NavigationMap(
     )
 
     val currentStyle = AppSettings.mapStyle.value
+    // Ruta tipo alfombra de carril luminosa verde esmeralda (idéntica a la guía de carril 3D)
     val routeColorHex = when (currentStyle) {
-        "NEON" -> "#FF00FF"
-        "DARK" -> "#00FFFF"
-        else   -> "#2979FF"
+        "NEON" -> "#00FFA6"
+        else   -> "#34F5A6"
     }
+
+    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx().toDouble() }
+    val screenHeightPxRef = rememberUpdatedState(screenHeightPx)
+
+    // Helper unificado para cámara de persecución 3D (Chase Cam a 78°, auto centrado abajo)
+    fun buildChaseFollowState() = mapView.viewport.makeFollowPuckViewportState(
+        FollowPuckViewportStateOptions.Builder()
+            .pitch(78.0)
+            .zoom(18.8)
+            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
+            .padding(
+                com.mapbox.maps.EdgeInsets(
+                    (screenHeightPxRef.value * 0.46).coerceAtLeast(220.0),
+                    leftInsetRef.value,
+                    maxOf(screenHeightPxRef.value * 0.12, bottomInsetRef.value),
+                    rightInsetRef.value
+                )
+            )
+            .build()
+    )
 
     // Referencias al mapa — guardadas en remember para no recrear
     var mapReady          by remember { mutableStateOf(false) }
@@ -497,7 +517,7 @@ fun NavigationMap(
                     val labelRef = firstSymbolLayerId ?: "3d-buildings"
 
                     val greenColor = if (isNightMode) {
-                        if (style == "NEON") "#0A0014" else "#1a1a24" // Dark synthwave parks
+                        if (style == "NEON") "#0A0018" else "#161B58" // Deep royal indigo parks
                     } else "#b7e4c7"
 
                     try {
@@ -514,85 +534,99 @@ fun NavigationMap(
                                 )
                             )
                             fillColor(greenColor)
-                            fillOpacity(0.6)
+                            fillOpacity(0.75)
                         }, labelRef)
                     } catch (e: Exception) {}
 
-                    // ── Fondo (Agua y Tierra) para estilo Cyberpunk ──────────
-                    if (style == "NEON") {
+                    // ── Fondo (Agua y Tierra) para estética 3D Cockpit Indigo / Cyberpunk ──
+                    if (isNightMode) {
+                        val waterHex = if (style == "NEON") "#040412" else "#111648"
+                        val landHex  = if (style == "NEON") "#07061A" else "#181E62"
                         try {
                             loadedStyle.addLayerBelow(fillLayer("custom-water", "composite") {
                                 sourceLayer("water")
-                                fillColor("#000000") // Pitch black cyber water
+                                fillColor(waterHex)
                             }, labelRef)
                             loadedStyle.addLayerBelow(fillLayer("custom-landcover", "composite") {
                                 sourceLayer("landcover")
-                                fillColor("#000000") // Pitch black cyber ground
+                                fillColor(landHex)
                             }, labelRef)
                         } catch (e: Exception) {}
                     }
 
                     val roadColor = if (isNightMode) {
-                        if (style == "NEON") "#030308" else "#202020" // Pitch black roads
-                    } else "#c0c0c0"
+                        if (style == "NEON") "#090C24" else "#1F276E" // Deep royal-indigo asphalt
+                    } else "#2E355B"
 
-                    val casingColor = if (style == "NEON") "#00FFFF" else "#ffffff" // Cyan neon edges
-                    val casingOpacity = if (style == "NEON") 0.7 else 0.35
+                    val casingColor = if (style == "NEON") "#00FFFF" else "#E8F0FF" // Crisp white/cyan lane borders
+                    val casingOpacity = if (style == "NEON") 0.85 else 0.90
 
-                    // Borde blanco de carreteras (road casing) para modos oscuros
-                    if (isNightMode) {
-                        try {
-                            loadedStyle.addLayerBelow(lineLayer("custom-roads-casing", "composite") {
-                                sourceLayer("road")
-                                filter(
-                                    Expression.any(
-                                        Expression.eq(Expression.get("class"), Expression.literal("motorway")),
-                                        Expression.eq(Expression.get("class"), Expression.literal("trunk")),
-                                        Expression.eq(Expression.get("class"), Expression.literal("primary")),
-                                        Expression.eq(Expression.get("class"), Expression.literal("secondary")),
-                                        Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
-                                        Expression.eq(Expression.get("class"), Expression.literal("street")),
-                                        Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
-                                    )
+                    val roadFilter = Expression.any(
+                        Expression.eq(Expression.get("class"), Expression.literal("motorway")),
+                        Expression.eq(Expression.get("class"), Expression.literal("trunk")),
+                        Expression.eq(Expression.get("class"), Expression.literal("primary")),
+                        Expression.eq(Expression.get("class"), Expression.literal("secondary")),
+                        Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
+                        Expression.eq(Expression.get("class"), Expression.literal("street")),
+                        Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
+                    )
+
+                    // 1. Líneas laterales blancas de carril (road casing)
+                    try {
+                        loadedStyle.addLayerBelow(lineLayer("custom-roads-casing", "composite") {
+                            sourceLayer("road")
+                            filter(roadFilter)
+                            lineColor(casingColor)
+                            lineWidth(
+                                Expression.interpolate(
+                                    Expression.linear(), Expression.zoom(),
+                                    Expression.literal(12.0), Expression.literal(4.2),
+                                    Expression.literal(16.0), Expression.literal(13.0),
+                                    Expression.literal(19.0), Expression.literal(28.0)
                                 )
-                                lineColor(casingColor)
-                                lineWidth(
-                                    Expression.interpolate(
-                                        Expression.linear(), Expression.zoom(),
-                                        Expression.literal(12.0), Expression.literal(3.5),
-                                        Expression.literal(18.0), Expression.literal(17.0)
-                                    )
-                                )
-                                lineOpacity(casingOpacity)
-                                lineCap(LineCap.ROUND)
-                                lineJoin(LineJoin.ROUND)
-                            }, labelRef)
-                        } catch (e: Exception) {}
-                    }
+                            )
+                            lineOpacity(casingOpacity)
+                            lineCap(LineCap.ROUND)
+                            lineJoin(LineJoin.ROUND)
+                        }, labelRef)
+                    } catch (e: Exception) {}
 
+                    // 2. Superficie de asfalto 3D
                     try {
                         loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
                             sourceLayer("road")
-                            filter(
-                                Expression.any(
-                                    Expression.eq(Expression.get("class"), Expression.literal("motorway")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("trunk")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("primary")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("secondary")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("street")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
-                                )
-                            )
+                            filter(roadFilter)
                             lineColor(roadColor)
                             lineWidth(
                                 Expression.interpolate(
                                     Expression.linear(), Expression.zoom(),
-                                    Expression.literal(12.0), Expression.literal(2.0),
-                                    Expression.literal(18.0), Expression.literal(14.0)
+                                    Expression.literal(12.0), Expression.literal(3.0),
+                                    Expression.literal(16.0), Expression.literal(10.5),
+                                    Expression.literal(19.0), Expression.literal(24.0)
                                 )
                             )
                             lineCap(LineCap.ROUND)
+                            lineJoin(LineJoin.ROUND)
+                        }, labelRef)
+                    } catch (e: Exception) {}
+
+                    // 3. Líneas divisorias discontinuas en el centro de las calles
+                    try {
+                        loadedStyle.addLayerBelow(lineLayer("custom-roads-lane-dashes", "composite") {
+                            sourceLayer("road")
+                            filter(roadFilter)
+                            lineColor("#D6E4FF")
+                            lineOpacity(0.72)
+                            lineDasharray(listOf(2.2, 2.8))
+                            lineWidth(
+                                Expression.interpolate(
+                                    Expression.linear(), Expression.zoom(),
+                                    Expression.literal(14.0), Expression.literal(0.6),
+                                    Expression.literal(17.0), Expression.literal(1.5),
+                                    Expression.literal(19.0), Expression.literal(2.4)
+                                )
+                            )
+                            lineCap(LineCap.BUTT)
                             lineJoin(LineJoin.ROUND)
                         }, labelRef)
                     } catch (e: Exception) {}
@@ -629,20 +663,33 @@ fun NavigationMap(
                 } catch (e: Exception) {}
             }
 
-            // ── Capas de Ruta Visuales ─────────────────
+            // ── Capas de Ruta Visuales (Alfombra luminosa de carril 3D) ──────
             // Añadidas AL FINAL para garantizar que se dibujen SOBRE carreteras y áreas verdes
             loadedStyle.addLayer(lineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID) {
-                lineColor("#0D1B2A")
-                lineWidth(14.0)
+                lineColor("#00E676")
+                lineWidth(
+                    Expression.interpolate(
+                        Expression.linear(), Expression.zoom(),
+                        Expression.literal(13.0), Expression.literal(10.0),
+                        Expression.literal(18.5), Expression.literal(26.0)
+                    )
+                )
                 lineCap(LineCap.ROUND)
                 lineJoin(LineJoin.ROUND)
-                lineOpacity(0.8)
+                lineOpacity(0.32)
             })
             loadedStyle.addLayer(lineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID) {
                 lineColor(routeColorHex)
-                lineWidth(9.0)
+                lineWidth(
+                    Expression.interpolate(
+                        Expression.linear(), Expression.zoom(),
+                        Expression.literal(13.0), Expression.literal(6.0),
+                        Expression.literal(18.5), Expression.literal(15.5)
+                    )
+                )
                 lineCap(LineCap.ROUND)
                 lineJoin(LineJoin.ROUND)
+                lineOpacity(0.92)
             })
             loadedStyle.addLayer(lineLayer(HISTORY_LAYER_ID, HISTORY_SOURCE_ID) {
                 lineColor("#4CAF50")
@@ -829,17 +876,10 @@ fun NavigationMap(
                     autoCenterJob?.cancel()
                     updateRouteOnMap()
 
-                    // Activar viewport 3D de seguimiento tipo videojuego respetando barra lateral CarPlay
+                    // Activar viewport 3D Chase Cam (78° de inclinación, auto centrado abajo)
                     val vp = mapView.viewport
-                    val followState = vp.makeFollowPuckViewportState(
-                        FollowPuckViewportStateOptions.Builder()
-                            .pitch(70.0)
-                            .zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
-                            .build()
-                    )
-                    vp.transitionTo(followState,
+                    vp.transitionTo(
+                        buildChaseFollowState(),
                         vp.makeDefaultViewportTransition(
                             DefaultViewportTransitionOptions.Builder().maxDurationMs(1200).build()
                         )
@@ -881,7 +921,7 @@ fun NavigationMap(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── Sincronizar visibilidad e insets CarPlay sin recrear el MapView ──────
+    // ── Sincronizar visibilidad e insets sin recrear el MapView ──────
     LaunchedEffect(isVisible, leftInsetPx, rightInsetPx, bottomInsetPx, mapReady) {
         if (!mapReady) return@LaunchedEffect
         mapView.visibility = if (isVisible) android.view.View.VISIBLE else android.view.View.INVISIBLE
@@ -896,16 +936,8 @@ fun NavigationMap(
             }
             if (isFollowingLocation && !isIntroAnimating) {
                 val vp = mapView.viewport
-                val followState = vp.makeFollowPuckViewportState(
-                    FollowPuckViewportStateOptions.Builder()
-                        .pitch(68.0)
-                        .zoom(18.5)
-                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                        .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetPx, bottomInsetPx, rightInsetPx))
-                        .build()
-                )
                 vp.transitionTo(
-                    followState,
+                    buildChaseFollowState(),
                     vp.makeDefaultViewportTransition(
                         DefaultViewportTransitionOptions.Builder().maxDurationMs(650).build()
                     )
@@ -976,15 +1008,7 @@ fun NavigationMap(
             if (!hasInitializedPosition && loc.latitude != 0.0) {
                 hasInitializedPosition = true
                 val vp = mapView.viewport
-                val followState = vp.makeFollowPuckViewportState(
-                    FollowPuckViewportStateOptions.Builder()
-                        .pitch(68.0)
-                        .zoom(18.5)
-                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                        .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
-                        .build()
-                )
-                vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
             }
 
             val userInteracting = isSavingFavorite || isPlacingDestination
@@ -995,30 +1019,14 @@ fun NavigationMap(
                     locationWhenFollowDisabled = null
                     autoCenterJob?.cancel()
                     val vp = mapView.viewport
-                    val followState = vp.makeFollowPuckViewportState(
-                        FollowPuckViewportStateOptions.Builder()
-                            .pitch(68.0)
-                            .zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
-                            .build()
-                    )
-                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
                 }
             }
 
             if (!isIntroAnimating && !NavigationState.isRouteActive.value && isFollowingLocation && hasInitializedPosition) {
                 val vp = mapView.viewport
                 if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
-                    val followState = vp.makeFollowPuckViewportState(
-                        FollowPuckViewportStateOptions.Builder()
-                            .pitch(68.0)
-                            .zoom(18.5)
-                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                            .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
-                            .build()
-                    )
-                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
                 }
             }
         }
@@ -1038,24 +1046,16 @@ fun NavigationMap(
     }
 
     // ── Intro cinematográfica: espera a que el mapa esté listo ───────────────
-    // Se dispara cuando mapReady y pendingIntroPos son ambos válidos.
-    // Garantizamos que el estilo esté cargado antes de mover la cámara.
     LaunchedEffect(mapReady, pendingIntroPos) {
         val (carPos, carBearing) = pendingIntroPos ?: return@LaunchedEffect
         if (!mapReady) return@LaunchedEffect
 
-        // Desactivar follow-mode y detener cualquier viewport activo
-        // para que NADA pueda cancelar las animaciones de cámara que siguen
         isFollowingLocation = false
         mapView.viewport.idle()
-
-        // isIntroAnimating ya es true (lo pusimos en onLocationResult)
-        // pero aseguramos también aquí por si acaso
         isIntroAnimating = true
 
         try {
             // ── FASE 1: Frente inclinado del auto, acercamiento (zoom-in) ──
-            // Posicionar un poco más lejos
             mapView.mapboxMap.setCamera(
                 cameraOptions {
                     center(carPos)
@@ -1064,7 +1064,6 @@ fun NavigationMap(
                     bearing(carBearing + 165.0)
                 }
             )
-            // Hacer un easeTo acercándose lentamente para detallar el modelo
             mapView.camera.easeTo(
                 cameraOptions {
                     center(carPos)
@@ -1075,7 +1074,7 @@ fun NavigationMap(
                 com.mapbox.maps.plugin.animation.MapAnimationOptions
                     .mapAnimationOptions { duration(1800) }
             )
-            delay(2000) // pausa para completar el acercamiento y que el usuario lo vea
+            delay(2000)
 
             // ── FASE 2: Órbita suave alrededor del frente del auto ─────────
             mapView.camera.easeTo(
@@ -1088,7 +1087,7 @@ fun NavigationMap(
                 com.mapbox.maps.plugin.animation.MapAnimationOptions
                     .mapAnimationOptions { duration(4000) }
             )
-            delay(4200) // delay ligeramente mayor que duration para dejar terminar
+            delay(4200)
 
             // ── FASE 3: Vuelo aéreo — vista del área (estilo águila) ───────
             mapView.camera.flyTo(
@@ -1103,49 +1102,28 @@ fun NavigationMap(
             )
             delay(3700)
 
-            // ── FASE 4: Volver a navegación — activar follow mode ──────────
+            // ── FASE 4: Volver a navegación — activar follow mode 3D Chase Cam ──
             isFollowingLocation = true
             val vp = mapView.viewport
-            val followState = vp.makeFollowPuckViewportState(
-                FollowPuckViewportStateOptions.Builder()
-                    .pitch(70.0)
-                    .zoom(18.5)
-                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                    .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
-                    .build()
-            )
             vp.transitionTo(
-                followState,
+                buildChaseFollowState(),
                 vp.makeDefaultViewportTransition(
                     DefaultViewportTransitionOptions.Builder().maxDurationMs(2500).build()
                 )
             )
-            delay(2600) // esperar que termine la transición antes de liberar el flag
+            delay(2600)
         } finally {
             isIntroAnimating = false
-            isFollowingLocation = true  // garantizar restauración en caso de error
-            pendingIntroPos = null // Consumir el pendiente al final para evitar cancelación prematura
+            isFollowingLocation = true
+            pendingIntroPos = null
         }
     }
-
-    // ── Animación dinámica de ventanas eliminada ─────────────────────────────
-    // Las ventanas son fijas (seed constante). Se genera una sola vez al cargar
-    // el estilo y no vuelve a cambiar, evitando el efecto de papel de regalos.
-
 
     // ── Re-centrar al cambiar orientación (portrait ↔ landscape) ────────────
     LaunchedEffect(configuration.orientation) {
         if (hasInitializedPosition && isFollowingLocation) {
             val vp = mapView.viewport
-            val followState = vp.makeFollowPuckViewportState(
-                FollowPuckViewportStateOptions.Builder()
-                    .pitch(55.0)
-                    .zoom(18.5)
-                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                    .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
-                    .build()
-            )
-            vp.transitionTo(followState, vp.makeImmediateViewportTransition())
+            vp.transitionTo(buildChaseFollowState(), vp.makeImmediateViewportTransition())
         }
     }
 
@@ -1224,6 +1202,16 @@ fun NavigationMap(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 mapView.apply {
+                    // Desbloquear inclinación máxima hasta 85° para la cámara de persecución (Chase Cam 78°)
+                    try {
+                        mapView.mapboxMap.setBounds(
+                            com.mapbox.maps.CameraBoundsOptions.Builder()
+                                .maxPitch(85.0)
+                                .minPitch(0.0)
+                                .build()
+                        )
+                    } catch (_: Exception) {}
+
                     // Prevenir el flashazo del planeta entero antes del primer fix GPS
                     mapView.mapboxMap.setCamera(cameraOptions {
                         zoom(14.0)
@@ -1238,7 +1226,6 @@ fun NavigationMap(
                     gestures.addOnMapLongClickListener { point ->
                         val destPt = point
                         if (NavigationState.isRouteActive.value) {
-                            // En ruta: abrir diálogo para guardar favorito en esta posición
                             favoriteLocationToSave = destPt
                             favoriteNameToSave     = ""
                             favoriteAddressToSave  = "${String.format("%.5f", destPt.latitude())}, ${String.format("%.5f", destPt.longitude())}"
@@ -1252,10 +1239,9 @@ fun NavigationMap(
                         selectedDestination  = destPt
                         routeDistanceText    = ""
                         isFollowingLocation  = false
-                        isPlacingDestination = true   // pausar auto-recentrado
+                        isPlacingDestination = true
                         autoCenterJob?.cancel()
 
-                        // Anotar destino
                         destAnnotation?.let { pointAnnotMgr?.delete(it) }
                         val pm = pointAnnotMgr ?: mapView.annotations.createPointAnnotationManager().apply {
                             addClickListener { annotation ->
@@ -1293,7 +1279,6 @@ fun NavigationMap(
                         }
                         override fun onMove(detector: com.mapbox.android.gestures.MoveGestureDetector) = false
                         override fun onMoveEnd(detector: com.mapbox.android.gestures.MoveGestureDetector) {
-                            // Iniciar cuenta regresiva de 5s para recentrar (pausar si el usuario está interactuando)
                             autoCenterJob?.cancel()
                             autoCenterJob = coroutineScope.launch {
                                 var elapsed = 0
@@ -1307,41 +1292,25 @@ fun NavigationMap(
                                     isFollowingLocation = true
                                     locationWhenFollowDisabled = null
                                     val vp = mapView.viewport
-                                    val followState = vp.makeFollowPuckViewportState(
-                                        FollowPuckViewportStateOptions.Builder()
-                                            .pitch(68.0)
-                                            .zoom(18.5)
-                                            .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                            .padding(com.mapbox.maps.EdgeInsets(320.0, leftInsetRef.value, bottomInsetRef.value, rightInsetRef.value))
-                                            .build()
-                                    )
-                                    vp.transitionTo(followState, vp.makeDefaultViewportTransition())
+                                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
                                 }
                             }
                         }
                     })
 
-                    // Primera posición — NO inicializar aquí para evitar
-                    // que el mapa arranque en USA y luego haga glitch.
-                    // La intro se maneja completamente en onLocationResult.
-                    // Si ya hay posición previa (re-entrada), centrar sin intro.
                     NavigationState.currentLocation.value?.let { loc ->
                         if (!hasInitializedPosition && loc.latitude != 0.0) {
-                            // Posicionar silenciosamente antes del primer fix de GPS
                             mapboxMap.setCamera(cameraOptions {
                                 center(Point.fromLngLat(loc.longitude, loc.latitude))
-                                zoom(20.0)   // muy cerca — evita ver USA
-                                pitch(75.0)
-                                bearing(gpsBearing + 180.0)
+                                zoom(18.8)
+                                pitch(78.0)
+                                bearing(gpsBearing)
                             })
                         }
                     }
                 }
             },
             update = { _ ->
-                // Actualizar altura de las luces si el estilo está cargado
-                // El mapa se actualiza vía LaunchedEffects y callbacks; aquí solo
-                // sincronizamos el marcador de destino cuando cambia el estado global
                 if (mapReady) {
                     val activeDest = NavigationState.activeDestination.value
                     if (activeDest != null && destAnnotation == null) {
@@ -1349,7 +1318,7 @@ fun NavigationMap(
                         val iconBmp = drawCustomPin(uiColor)
                         destAnnotation = pm.create(
                             PointAnnotationOptions()
-                                .withPoint(activeDest)  // activeDest ya es Point
+                                .withPoint(activeDest)
                                 .withIconImage(iconBmp)
                         )
                     } else if (activeDest == null && destAnnotation != null) {
@@ -1359,6 +1328,23 @@ fun NavigationMap(
                 }
             }
         )
+
+        // ── Horizonte Cielo + Silueta de Ciudad 3D (modo seguimiento Chase Cam) ──
+        val horizonAlpha by animateFloatAsState(
+            targetValue = if (isFollowingLocation && !isIntroAnimating) 1f else 0f,
+            animationSpec = tween(durationMillis = 480),
+            label = "horizonSkyAlpha"
+        )
+        if (horizonAlpha > 0.01f) {
+            CockpitHorizonSkyBackdrop(
+                alpha = horizonAlpha,
+                currentStyle = currentStyle,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.28f)
+                    .align(Alignment.TopCenter)
+            )
+        }
 
         // Velo de fundido suave al alternar estilo Día <-> Noche en tiempo real mientras conduces
         val styleVeilAlpha by animateFloatAsState(
@@ -1374,7 +1360,7 @@ fun NavigationMap(
             )
         }
 
-        // ── Contenedor de controles HUD (respeta paneles laterales e inferiores CarPlay) ──
+        // ── Contenedor de controles HUD sobre el Mapa ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1384,484 +1370,686 @@ fun NavigationMap(
                     bottom = bottomOverlayPadding
                 )
         ) {
-        // ── Barra de búsqueda (oculta en modo ruta) ──────────────────────────
-        AnimatedVisibility(
-            visible = !NavigationState.isRouteActive.value,
-            enter   = fadeIn() + expandVertically(),
-            exit    = fadeOut() + shrinkVertically()
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // ── ZONA SUPERIOR CENTRAL: Turn-by-Turn Card (como en la imagen: "200 m / Calle 26") o Buscador Compacto ──
+            val nextStep = activeRouteSteps.firstOrNull()
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 10.dp, start = 240.dp, end = 120.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // 1. Banner Turn-by-Turn estilo Cockpit ("↱ 200 m / Calle 26")
+                AnimatedVisibility(
+                    visible = NavigationState.isRouteActive.value,
+                    enter = slideInVertically { -it } + fadeIn(),
+                    exit = slideOutVertically { -it } + fadeOut()
+                ) {
+                    val distDisplay = when {
+                        nextStep != null && nextStep.distance >= 1000 ->
+                            Pair(String.format("%.1f", nextStep.distance / 1000.0), "km")
+                        nextStep != null ->
+                            Pair("${nextStep.distance.toInt().coerceAtLeast(10)}", "m")
+                        routeDistanceText.isNotBlank() ->
+                            Pair(routeDistanceText.replace(" restantes", ""), "")
+                        else -> Pair("200", "m")
+                    }
+                    val streetDisplay = nextStep?.streetName?.ifBlank { "Continúa por la vía" }
+                        ?: "Ruta activa"
+
                     Surface(
-                        modifier      = Modifier.weight(1f).height(48.dp),
-                        shape         = RoundedCornerShape(24.dp),
-                        color         = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                        shadowElevation = 8.dp
+                        shape = RoundedCornerShape(22.dp),
+                        color = Color(0xFF1A256E).copy(alpha = 0.94f),
+                        shadowElevation = 12.dp,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.5.dp,
+                            Color(0xFF4A66FF).copy(alpha = 0.55f)
+                        ),
+                        modifier = Modifier.widthIn(min = 210.dp, max = 310.dp)
                     ) {
-                        Row(modifier = Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Search, null, tint = Color(uiColor), modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Box(modifier = Modifier.weight(1f)) {
-                                if (searchQuery.isEmpty()) Text("¿A dónde vamos?", color = Color.Gray, fontSize = 14.sp)
-                                androidx.compose.foundation.text.BasicTextField(
-                                    value         = searchQuery,
-                                    onValueChange = {
-                                        searchQuery = it
-                                        NavigationState.notifyUserInteraction()
-                                    },
-                                    modifier      = Modifier
-                                        .fillMaxWidth()
-                                        .onFocusChanged { focusState ->
-                                            isSearchFocused = focusState.isFocused
-                                            NavigationState.notifyUserInteraction()
+                        Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (nextStep != null) {
+                                            getManeuverIcon(nextStep.modifier, nextStep.maneuverType)
+                                        } else {
+                                            Icons.Default.TurnRight
                                         },
-                                    textStyle     = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface),
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                    keyboardActions = KeyboardActions(onSearch = {
-                                        if (searchQuery.isNotEmpty()) {
-                                            isSearching = true
-                                            coroutineScope.launch {
-                                                searchResults = searchPlaces(searchQuery, NavigationState.currentLocation.value)
-                                                isSearching = false
-                                            }
-                                        }
-                                        focusManager.clearFocus()
-                                    })
-                                )
-                            }
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = ""; searchResults = emptyList() }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    SmallFloatingActionButton(
-                        onClick        = { showFavorites = !showFavorites; searchResults = emptyList() },
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                        contentColor   = if (showFavorites) Color(uiColor) else MaterialTheme.colorScheme.onSurface
-                    ) {
-                        Icon(if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, modifier = Modifier.size(20.dp))
-                    }
-                }
-
-                AnimatedVisibility(visible = searchResults.isNotEmpty() || showFavorites, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).heightIn(max = 280.dp),
-                        shape    = RoundedCornerShape(20.dp),
-                        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
-                    ) {
-                        val list = if (showFavorites) favManager.getFavorites() else searchResults
-                        LazyColumn {
-                            items(list) { place ->
-                                ListItem(
-                                    headlineContent   = { Text(place.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp) },
-                                    supportingContent = { Text(place.address, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp) },
-                                    leadingContent    = {
-                                        Icon(
-                                            when (place.iconType) {
-                                                "Home" -> Icons.Default.Home
-                                                "Work" -> Icons.Default.Work
-                                                else   -> Icons.Default.Place
-                                            },
-                                            null, tint = Color(uiColor), modifier = Modifier.size(20.dp)
+                                        contentDescription = null,
+                                        tint = Color(0xFF38F2A6),
+                                        modifier = Modifier.size(38.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Row(verticalAlignment = Alignment.Bottom) {
+                                        Text(
+                                            text = distDisplay.first,
+                                            fontSize = 34.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White,
+                                            lineHeight = 36.sp
                                         )
-                                    },
-                                    modifier = Modifier.clickable {
-                                        val destPt = Point.fromLngLat(place.lon, place.lat)
-                                        selectedDestination = destPt  // Point
-
-                                        destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                                        val pm = pointAnnotMgr ?: mapView.annotations.createPointAnnotationManager().also { pointAnnotMgr = it }
-                                        val iconBmp = drawCustomPin(uiColor)
-                                        destAnnotation = pm.create(PointAnnotationOptions().withPoint(destPt).withIconImage(iconBmp))
-
-                                        mapView.camera.easeTo(cameraOptions { center(destPt); zoom(15.0) }, MapAnimationOptions.mapAnimationOptions { duration(800) })
-
-                                        searchResults = emptyList()
-                                        showFavorites = false
-                                        focusManager.clearFocus()
-                                    },
-                                    trailingContent = {
-                                        if (place.distanceKm > 0) {
+                                        if (distDisplay.second.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = if (place.distanceKm < 1) "${(place.distanceKm * 1000).toInt()} m" else String.format("%.1f km", place.distanceKm),
-                                                fontSize = 11.sp, color = Color(uiColor).copy(alpha = 0.7f), fontWeight = FontWeight.Medium
+                                                text = distDisplay.second,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White.copy(alpha = 0.90f),
+                                                modifier = Modifier.padding(bottom = 4.dp)
                                             )
                                         }
                                     }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = streetDisplay,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.95f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Botón discreto para cancelar ruta activa en la esquina del banner
+                            IconButton(
+                                onClick = {
+                                    NavigationState.clearActiveRoute()
+                                    selectedDestination = null
+                                    destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                    destAnnotation = null
+                                    updateRouteOnMap()
+                                    mapView.viewport.idle()
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Cancelar ruta",
+                                    tint = Color.White.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
                     }
                 }
-            }
-        }
 
-        // ── HUD Navegación Turn-by-Turn ──────────────────────────────────────
-        val nextStep = activeRouteSteps.firstOrNull()
-        AnimatedVisibility(
-            visible  = NavigationState.isRouteActive.value && nextStep != null,
-            enter    = slideInHorizontally { -it } + fadeIn(),
-            exit     = slideOutHorizontally { -it } + fadeOut(),
-            modifier = Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 8.dp)
-        ) {
-            val step = nextStep ?: return@AnimatedVisibility
-            Surface(
-                shape          = RoundedCornerShape(16.dp),
-                color          = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                shadowElevation = 6.dp,
-                border         = androidx.compose.foundation.BorderStroke(1.dp, Color(uiColor).copy(alpha = 0.4f)),
-                modifier       = Modifier.widthIn(max = 220.dp)
-            ) {
-                Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier        = Modifier.size(36.dp).background(Color(uiColor).copy(alpha = 0.18f), RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
+                // 2. Barra de búsqueda compacta central (visible cuando no hay ruta activa)
+                AnimatedVisibility(
+                    visible = !NavigationState.isRouteActive.value,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.widthIn(max = 320.dp)
                     ) {
-                        Icon(getManeuverIcon(step.modifier, step.maneuverType), null, tint = Color(uiColor), modifier = Modifier.size(22.dp))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            if (step.distance > 1000) String.format("%.1f km", step.distance / 1000) else "${step.distance.toInt()} m",
-                            fontSize = 11.sp, color = Color(uiColor), fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            step.streetName.ifEmpty { "Recto" },
-                            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-
-        // (ETA/speed HUD eliminado: ya existe el widget del velocimetro)
-
-        // ── FABs de control (derecha) ─────────────────────────────────────────
-        Column(
-            modifier             = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
-            horizontalAlignment  = Alignment.End,
-            verticalArrangement  = Arrangement.spacedBy(8.dp)
-        ) {
-            // Selector de estilo
-            Box {
-                FloatingActionButton(
-                    onClick        = { showStyleSelector = !showStyleSelector },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-                    contentColor   = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier       = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = when (currentStyle) {
-                            "SATELLITE" -> Icons.Default.Public
-                            "NEON"      -> Icons.Default.Bolt
-                            "DARK"      -> Icons.Default.DarkMode
-                            else        -> Icons.Default.LightMode
-                        },
-                        contentDescription = "Estilo Mapa"
-                    )
-                }
-                DropdownMenu(
-                    expanded          = showStyleSelector,
-                    onDismissRequest  = { showStyleSelector = false },
-                    modifier          = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    DropdownMenuItem(text = { Text("Día") },           leadingIcon = { Icon(Icons.Default.LightMode, null) },                                     onClick = { AppSettings.setMapStyle("LIGHT");     showStyleSelector = false })
-                    DropdownMenuItem(text = { Text("Noche") },         leadingIcon = { Icon(Icons.Default.DarkMode, null) },                                      onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
-                    DropdownMenuItem(text = { Text("Neon Electric") }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00B0FF)) },                 onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
-                    DropdownMenuItem(text = { Text("Satélite") },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF4CAF50)) },               onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
-                }
-            }
-
-            // Botón guardar favorito (aparece en FABs cuando hay un pin sin ruta)
-            AnimatedVisibility(
-                visible = !NavigationState.isRouteActive.value
-                    && favoriteLocationToSave != null
-                    && selectedDestination == null
-            ) {
-                SmallFloatingActionButton(
-                    onClick = {
-                        favoriteNameToSave    = ""
-                        favoriteAddressToSave = favoriteLocationToSave?.let {
-                            "${String.format("%.5f", it.latitude())}, ${String.format("%.5f", it.longitude())}"
-                        } ?: ""
-                        selectedIconType       = "Star"
-                        isSavingFavorite       = true
-                        showSaveFavoriteDialog = true
-                        autoCenterJob?.cancel()
-                    },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-                    contentColor   = Color(uiColor)
-                ) {
-                    Icon(Icons.Default.FavoriteBorder, "Guardar en favoritos", modifier = Modifier.size(18.dp))
-                }
-            }
-
-            // Botón recentrar — primero vista aérea, luego 3D tras 2 segundos
-            AnimatedVisibility(visible = !isFollowingLocation) {
-                FloatingActionButton(
-                    onClick = {
-                        isFollowingLocation  = true
-                        isPlacingDestination = false
-                        locationWhenFollowDisabled = null
-                        autoCenterJob?.cancel()
-                        val vp = mapView.viewport
-
-                        // Paso 1: vista aérea top-down para orientarse
-                        val aerialState = vp.makeFollowPuckViewportState(
-                            FollowPuckViewportStateOptions.Builder()
-                                .pitch(0.0)
-                                .zoom(17.0)
-                                .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                .padding(com.mapbox.maps.EdgeInsets(0.0, leftInsetRef.value, 0.0, rightInsetRef.value))
-                                .build()
-                        )
-                        vp.transitionTo(aerialState, vp.makeDefaultViewportTransition())
-
-                        // Paso 2: volver a 3D inclinado después de 2 segundos
-                        autoCenterJob = coroutineScope.launch {
-                            delay(2000)
-                            val followState = vp.makeFollowPuckViewportState(
-                                FollowPuckViewportStateOptions.Builder()
-                                    .pitch(70.0)
-                                    .zoom(18.5)
-                                    .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                    .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
-                                    .build()
-                            )
-                            vp.transitionTo(followState, vp.makeDefaultViewportTransition())
-                        }
-                    },
-                    containerColor = Color(uiColor).copy(alpha = 0.9f),
-                    contentColor   = Color.White
-                ) {
-                    Icon(Icons.Default.MyLocation, "Centrar")
-                }
-            }
-        }
-
-        // ── Panel de ajuste de luces en tiempo real ────
-        // Panel deslizable desde el borde derecho
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 64.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            GlowTuningPanel(
-                visible       = showGlowTuning,
-                onDismiss     = { NavigationState.showGlowTuning.value = false },
-                onGlowChanged = refreshGlowOnMap
-            )
-        }
-        // Boton 🔦 para abrir/cerrar el panel (esquina superior izquierda, junto a la barra de busqueda)
-        SmallFloatingActionButton(
-            onClick        = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
-            modifier       = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 60.dp, start = 12.dp),
-            containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0x99111122),
-            contentColor   = Color.White
-        ) {
-            Text(if (showGlowTuning) "✕" else "🔦", fontSize = 16.sp)
-        }
-
-        // ── Panel inferior: acciones de ruta ─────────────────────────────────
-        AnimatedVisibility(
-            visible  = selectedDestination != null,
-            enter    = slideInVertically { it } + fadeIn(),
-            exit     = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            Surface(
-                modifier        = Modifier.fillMaxWidth(),
-                shape           = RoundedCornerShape(24.dp),
-                color           = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                shadowElevation = 8.dp
-            ) {
-                Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            if (NavigationState.isRouteActive.value) "En ruta" else "Destino",
-                            fontWeight = FontWeight.SemiBold, color = Color.Gray, fontSize = 11.sp
-                        )
-                        Text(
-                            routeDistanceText.ifEmpty { if (NavigationState.isRouteActive.value) "Calculando..." else "Listo para iniciar" },
-                            fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color(uiColor)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    if (!NavigationState.isRouteActive.value) {
-                        IconButton(
-                            onClick  = {
-                                selectedDestination  = null
-                                routeDistanceText    = ""
-                                isPlacingDestination = false
-                                destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                                destAnnotation = null
-                            },
-                            modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(14.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.Close, "Cancelar", tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                NavigationState.currentLocation.value?.let { loc ->
-                                    val dest = selectedDestination!!
-                                    calculateRoute(
-                                        Point.fromLngLat(loc.longitude, loc.latitude),
-                                        Point.fromLngLat(dest.longitude(), dest.latitude())
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(21.dp),
+                                color = Color(0xFF10173A).copy(alpha = 0.88f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    Color.White.copy(alpha = 0.22f)
+                                ),
+                                shadowElevation = 8.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Search,
+                                        null,
+                                        tint = Color(0xFF38F2A6),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        if (searchQuery.isEmpty()) {
+                                            Text(
+                                                "¿A dónde vamos?",
+                                                color = Color.White.copy(alpha = 0.60f),
+                                                fontSize = 13.sp,
+                                                maxLines = 1
+                                            )
+                                        }
+                                        androidx.compose.foundation.text.BasicTextField(
+                                            value = searchQuery,
+                                            onValueChange = {
+                                                searchQuery = it
+                                                NavigationState.notifyUserInteraction()
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .onFocusChanged { focusState ->
+                                                    isSearchFocused = focusState.isFocused
+                                                    NavigationState.notifyUserInteraction()
+                                                },
+                                            textStyle = androidx.compose.ui.text.TextStyle(
+                                                fontSize = 13.sp,
+                                                color = Color.White
+                                            ),
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                            keyboardActions = KeyboardActions(onSearch = {
+                                                if (searchQuery.isNotEmpty()) {
+                                                    isSearching = true
+                                                    coroutineScope.launch {
+                                                        searchResults = searchPlaces(
+                                                            searchQuery,
+                                                            NavigationState.currentLocation.value
+                                                        )
+                                                        isSearching = false
+                                                    }
+                                                }
+                                                focusManager.clearFocus()
+                                            })
+                                        )
+                                    }
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { searchQuery = ""; searchResults = emptyList() },
+                                            modifier = Modifier.size(26.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Surface(
+                                onClick = {
+                                    showFavorites = !showFavorites
+                                    searchResults = emptyList()
+                                },
+                                shape = RoundedCornerShape(50),
+                                color = Color(0xFF10173A).copy(alpha = 0.88f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (showFavorites) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.22f)
+                                ),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        null,
+                                        tint = if (showFavorites) Color(0xFF38F2A6) else Color.White,
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
-                            },
-                            shape           = RoundedCornerShape(16.dp),
-                            colors          = ButtonDefaults.buttonColors(containerColor = Color(uiColor)),
-                            modifier        = Modifier.height(44.dp),
-                            contentPadding  = PaddingValues(horizontal = 14.dp)
-                        ) {
-                            Icon(Icons.Default.Directions, null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("INICIAR", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
                         }
-                    } else {
-                        Button(
-                            onClick = {
-                                NavigationState.clearActiveRoute()
-                                selectedDestination = null
-                                destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                                destAnnotation = null
-                                updateRouteOnMap()
-                                mapView.viewport.idle()
-                            },
-                            shape          = RoundedCornerShape(16.dp),
-                            colors         = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            modifier       = Modifier.height(44.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp)
+
+                        AnimatedVisibility(
+                            visible = searchResults.isNotEmpty() || showFavorites,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
                         ) {
-                            Icon(Icons.Default.Stop, null, modifier = Modifier.size(18.dp))
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp)
+                                    .heightIn(max = 230.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color(0xFF0E1535).copy(alpha = 0.96f)
+                                )
+                            ) {
+                                val list = if (showFavorites) favManager.getFavorites() else searchResults
+                                LazyColumn {
+                                    items(list) { place ->
+                                        ListItem(
+                                            colors = ListItemDefaults.colors(
+                                                containerColor = Color.Transparent,
+                                                headlineColor = Color.White,
+                                                supportingColor = Color.White.copy(alpha = 0.7f)
+                                            ),
+                                            headlineContent = {
+                                                Text(
+                                                    place.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    fontSize = 13.sp
+                                                )
+                                            },
+                                            supportingContent = {
+                                                Text(
+                                                    place.address,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    fontSize = 11.sp
+                                                )
+                                            },
+                                            leadingContent = {
+                                                Icon(
+                                                    when (place.iconType) {
+                                                        "Home" -> Icons.Default.Home
+                                                        "Work" -> Icons.Default.Work
+                                                        else -> Icons.Default.Place
+                                                    },
+                                                    null,
+                                                    tint = Color(0xFF38F2A6),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            },
+                                            modifier = Modifier.clickable {
+                                                val destPt = Point.fromLngLat(place.lon, place.lat)
+                                                selectedDestination = destPt
+
+                                                destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                                val pm = pointAnnotMgr
+                                                    ?: mapView.annotations.createPointAnnotationManager()
+                                                        .also { pointAnnotMgr = it }
+                                                val iconBmp = drawCustomPin(uiColor)
+                                                destAnnotation = pm.create(
+                                                    PointAnnotationOptions()
+                                                        .withPoint(destPt)
+                                                        .withIconImage(iconBmp)
+                                                )
+
+                                                mapView.camera.easeTo(
+                                                    cameraOptions { center(destPt); zoom(15.0) },
+                                                    MapAnimationOptions.mapAnimationOptions { duration(800) }
+                                                )
+
+                                                searchResults = emptyList()
+                                                showFavorites = false
+                                                focusManager.clearFocus()
+                                            },
+                                            trailingContent = {
+                                                if (place.distanceKm > 0) {
+                                                    Text(
+                                                        text = if (place.distanceKm < 1)
+                                                            "${(place.distanceKm * 1000).toInt()} m"
+                                                        else
+                                                            String.format("%.1f km", place.distanceKm),
+                                                        fontSize = 11.sp,
+                                                        color = Color(0xFF38F2A6),
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Píldora flotante para iniciar ruta cuando se ha marcado un destino
+                AnimatedVisibility(
+                    visible = selectedDestination != null && !NavigationState.isRouteActive.value,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .widthIn(max = 310.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF141D52).copy(alpha = 0.95f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38F2A6).copy(alpha = 0.5f)),
+                        shadowElevation = 10.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Destino seleccionado",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 10.sp
+                                )
+                                Text(
+                                    routeDistanceText.ifEmpty { "Listo para iniciar" },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF38F2A6),
+                                    maxLines = 1
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    selectedDestination = null
+                                    routeDistanceText = ""
+                                    isPlacingDestination = false
+                                    destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                    destAnnotation = null
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Close, "Cancelar", tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("PARAR", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Button(
+                                onClick = {
+                                    NavigationState.currentLocation.value?.let { loc ->
+                                        val dest = selectedDestination!!
+                                        calculateRoute(
+                                            Point.fromLngLat(loc.longitude, loc.latitude),
+                                            Point.fromLngLat(dest.longitude(), dest.latitude())
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                                modifier = Modifier.height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp)
+                            ) {
+                                Icon(Icons.Default.Directions, null, tint = Color(0xFF062016), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("IR", fontWeight = FontWeight.Black, color = Color(0xFF062016), fontSize = 12.sp)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // ── Alerta de llegada ─────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible  = showArrivalAlert,
-            enter    = scaleIn(spring(dampingRatio = 0.5f, stiffness = 500f)) + fadeIn(),
-            exit     = scaleOut() + fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            LaunchedEffect(showArrivalAlert) {
-                if (showArrivalAlert) { delay(4000); showArrivalAlert = false }
-            }
-            Card(
-                shape    = RoundedCornerShape(24.dp),
-                colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)),
-                elevation = CardDefaults.cardElevation(16.dp),
-                modifier = Modifier.padding(32.dp).fillMaxWidth(0.8f)
+            // ── CONTROLES RÁPIDOS DE MAPA (Esquina Superior Derecha, lejos de los relojes inferiores) ──
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp).fillMaxWidth()) {
-                    Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(72.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("¡Has Llegado!", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Has alcanzado tu destino.", style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onPrimaryContainer))
+                // Botón recentrar — vuelve inmediatamente al ángulo 3D Chase Cam (78°)
+                AnimatedVisibility(visible = !isFollowingLocation) {
+                    SmallFloatingActionButton(
+                        onClick = {
+                            isFollowingLocation = true
+                            isPlacingDestination = false
+                            locationWhenFollowDisabled = null
+                            autoCenterJob?.cancel()
+                            val vp = mapView.viewport
+                            vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                        },
+                        containerColor = Color(0xFF00E676),
+                        contentColor = Color(0xFF071E16),
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.Default.MyLocation, "Centrar 3D", modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                // Botón ajuste de luces del vehículo 3D
+                SmallFloatingActionButton(
+                    onClick = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
+                    containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0xFF10173A).copy(alpha = 0.85f),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Text(if (showGlowTuning) "✕" else "🔦", fontSize = 14.sp)
+                }
+
+                // Selector de estilo de mapa
+                Box {
+                    SmallFloatingActionButton(
+                        onClick = { showStyleSelector = !showStyleSelector },
+                        containerColor = Color(0xFF10173A).copy(alpha = 0.85f),
+                        contentColor = Color.White,
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = when (currentStyle) {
+                                "SATELLITE" -> Icons.Default.Public
+                                "NEON"      -> Icons.Default.Bolt
+                                "DARK"      -> Icons.Default.DarkMode
+                                else        -> Icons.Default.LightMode
+                            },
+                            contentDescription = "Estilo Mapa",
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showStyleSelector,
+                        onDismissRequest = { showStyleSelector = false },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        DropdownMenuItem(text = { Text("Día") },           leadingIcon = { Icon(Icons.Default.LightMode, null) },                                     onClick = { AppSettings.setMapStyle("LIGHT");     showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Noche Cockpit") }, leadingIcon = { Icon(Icons.Default.DarkMode, null) },                                      onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Neon Electric") }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00B0FF)) },                 onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Satélite") },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF4CAF50)) },               onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
+                    }
                 }
             }
+
+            // ── Panel de ajuste de luces en tiempo real ────
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 60.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                GlowTuningPanel(
+                    visible       = showGlowTuning,
+                    onDismiss     = { NavigationState.showGlowTuning.value = false },
+                    onGlowChanged = refreshGlowOnMap
+                )
+            }
+
+            // ── Alerta de llegada ─────────────────────────────────────────────────
+            AnimatedVisibility(
+                visible  = showArrivalAlert,
+                enter    = scaleIn(spring(dampingRatio = 0.5f, stiffness = 500f)) + fadeIn(),
+                exit     = scaleOut() + fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                LaunchedEffect(showArrivalAlert) {
+                    if (showArrivalAlert) { delay(4000); showArrivalAlert = false }
+                }
+                Card(
+                    shape    = RoundedCornerShape(24.dp),
+                    colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)),
+                    elevation = CardDefaults.cardElevation(16.dp),
+                    modifier = Modifier.padding(32.dp).fillMaxWidth(0.8f)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp).fillMaxWidth()) {
+                        Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(72.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("¡Has Llegado!", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Has alcanzado tu destino.", style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onPrimaryContainer))
+                    }
+                }
+            }
+
+            // ── Diálogo guardar favorito ──────────────────────────────────────────
+            if (showSaveFavoriteDialog) {
+                AlertDialog(
+                    onDismissRequest = {
+                        showSaveFavoriteDialog = false
+                        isSavingFavorite = false
+                    },
+                    title = { Text("Guardar Favorito", fontWeight = FontWeight.Bold) },
+                    text  = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            favoriteLocationToSave?.let { pt ->
+                                Text(
+                                    "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}",
+                                    fontSize = 11.sp,
+                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                )
+                            }
+                            TextField(
+                                value         = favoriteNameToSave,
+                                onValueChange = {
+                                    favoriteNameToSave = it
+                                    NavigationState.notifyUserInteraction()
+                                },
+                                label         = { Text("Nombre del lugar") },
+                                singleLine    = true,
+                                modifier      = Modifier.fillMaxWidth()
+                            )
+                            Text("Tipo de icono", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("Star" to Icons.Default.Star, "Home" to Icons.Default.Home, "Work" to Icons.Default.Work).forEach { (type, icon) ->
+                                    FilterChip(
+                                        selected = selectedIconType == type,
+                                        onClick  = { selectedIconType = type },
+                                        label    = { Text(type) },
+                                        leadingIcon = { Icon(icon, null, modifier = Modifier.size(14.dp)) }
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            enabled = favoriteNameToSave.isNotBlank(),
+                            onClick = {
+                                favoriteLocationToSave?.let { pt ->
+                                    favManager.addFavorite(
+                                        PlaceResult(
+                                            name      = favoriteNameToSave.trim(),
+                                            address   = favoriteAddressToSave.ifEmpty { "Favorito guardado" },
+                                            lat       = pt.latitude(),
+                                            lon       = pt.longitude(),
+                                            iconType  = selectedIconType
+                                        )
+                                    )
+                                    showSaveFavoriteDialog = false
+                                    isSavingFavorite       = false
+                                    Toast.makeText(context, "✓ Guardado en favoritos", Toast.LENGTH_SHORT).show()
+                                    isFollowingLocation = true
+                                    locationWhenFollowDisabled = null
+                                    autoCenterJob?.cancel()
+                                    val vp = mapView.viewport
+                                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                                }
+                            }
+                        ) { Text("Guardar") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            showSaveFavoriteDialog = false
+                            isSavingFavorite       = false
+                        }) { Text("Cancelar") }
+                    }
+                )
+            }
+
+        } // Cierra Box de HUD
+    }
+}
+
+/**
+ * Horizonte 3D con degradado de cielo y silueta arquitectónica de ciudad (estilo Cockpit HUD).
+ * Se funde suavemente en la línea del horizonte con las calles en perspectiva de 78°.
+ */
+@Composable
+private fun CockpitHorizonSkyBackdrop(
+    alpha: Float,
+    currentStyle: String,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val horizonY = h * 0.78f
+
+        val skyTop = when (currentStyle) {
+            "NEON" -> Color(0xFF06081E)
+            else   -> Color(0xFF0E3C75)
+        }
+        val skyMid = when (currentStyle) {
+            "NEON" -> Color(0xFF141D5E)
+            else   -> Color(0xFF2872BD)
+        }
+        val skyHorizon = when (currentStyle) {
+            "NEON" -> Color(0xFF263494)
+            else   -> Color(0xFF4B96E5)
+        }
+        val groundBlend = when (currentStyle) {
+            "NEON" -> Color(0xFF07061A)
+            else   -> Color(0xFF181E62)
         }
 
-        // ── Diálogo guardar favorito ──────────────────────────────────────────
-        if (showSaveFavoriteDialog) {
-            AlertDialog(
-                onDismissRequest = {
-                    showSaveFavoriteDialog = false
-                    isSavingFavorite = false
-                },
-                title = { Text("Guardar Favorito", fontWeight = FontWeight.Bold) },
-                text  = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // Coordenadas de referencia
-                        favoriteLocationToSave?.let { pt ->
-                            Text(
-                                "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}",
-                                fontSize = 11.sp,
-                                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                            )
-                        }
-                        TextField(
-                            value         = favoriteNameToSave,
-                            onValueChange = {
-                                favoriteNameToSave = it
-                                NavigationState.notifyUserInteraction()
-                            },
-                            label         = { Text("Nombre del lugar") },
-                            singleLine    = true,
-                            modifier      = Modifier.fillMaxWidth()
-                        )
-                        Text("Tipo de icono", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("Star" to Icons.Default.Star, "Home" to Icons.Default.Home, "Work" to Icons.Default.Work).forEach { (type, icon) ->
-                                FilterChip(
-                                    selected = selectedIconType == type,
-                                    onClick  = { selectedIconType = type },
-                                    label    = { Text(type) },
-                                    leadingIcon = { Icon(icon, null, modifier = Modifier.size(14.dp)) }
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        enabled = favoriteNameToSave.isNotBlank(),
-                        onClick = {
-                            favoriteLocationToSave?.let { pt ->
-                                favManager.addFavorite(
-                                    PlaceResult(
-                                        name      = favoriteNameToSave.trim(),
-                                        address   = favoriteAddressToSave.ifEmpty { "Favorito guardado" },
-                                        lat       = pt.latitude(),
-                                        lon       = pt.longitude(),
-                                        iconType  = selectedIconType
-                                    )
-                                )
-                                showSaveFavoriteDialog = false
-                                isSavingFavorite       = false
-                                Toast.makeText(context, "✓ Guardado en favoritos", Toast.LENGTH_SHORT).show()
-                                // Recentrar después de guardar
-                                isFollowingLocation = true
-                                locationWhenFollowDisabled = null
-                                autoCenterJob?.cancel()
-                                val vp = mapView.viewport
-                                val followState = vp.makeFollowPuckViewportState(
-                                    FollowPuckViewportStateOptions.Builder()
-                                        .pitch(55.0).zoom(18.5)
-                                        .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
-                                        .padding(com.mapbox.maps.EdgeInsets(360.0, leftInsetRef.value, 0.0, rightInsetRef.value))
-                                        .build()
-                                )
-                                vp.transitionTo(followState, vp.makeDefaultViewportTransition())
-                            }
-                        }
-                    ) { Text("Guardar") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showSaveFavoriteDialog = false
-                        isSavingFavorite       = false
-                    }) { Text("Cancelar") }
-                }
+        // 1. Degradado del cielo hasta la línea del horizonte
+        drawRect(
+            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(
+                    skyTop.copy(alpha = alpha),
+                    skyMid.copy(alpha = alpha),
+                    skyHorizon.copy(alpha = alpha * 0.96f)
+                ),
+                startY = 0f,
+                endY = horizonY
+            ),
+            size = androidx.compose.ui.geometry.Size(w, horizonY)
+        )
+
+        // 2. Silueta de edificios lejanos (capa trasera)
+        val backBuildingColor = Color(0xFF3168B8).copy(alpha = alpha * 0.55f)
+        val frontBuildingColor = Color(0xFF214A96).copy(alpha = alpha * 0.78f)
+        val buildingHeightsBack = floatArrayOf(
+            0.22f, 0.34f, 0.18f, 0.42f, 0.28f, 0.38f, 0.16f, 0.30f, 0.44f, 0.24f,
+            0.20f, 0.12f, 0.10f, 0.14f, 0.22f, 0.36f, 0.26f, 0.40f, 0.20f, 0.35f,
+            0.28f, 0.42f, 0.22f, 0.32f
+        )
+        val countBack = buildingHeightsBack.size
+        val stepW = w / countBack
+        for (i in 0 until countBack) {
+            // Dejar el corredor central ligeramente más despejado donde converge la carretera
+            val centerDist = kotlin.math.abs(i - countBack / 2f) / (countBack / 2f)
+            val scale = (0.35f + 0.65f * centerDist).coerceIn(0.25f, 1f)
+            val bh = horizonY * buildingHeightsBack[i] * scale
+            drawRect(
+                color = backBuildingColor,
+                topLeft = androidx.compose.ui.geometry.Offset(i * stepW, horizonY - bh),
+                size = androidx.compose.ui.geometry.Size(stepW * 0.92f, bh)
+            )
+            // Segunda fila frontal desplazada
+            val bhFront = bh * 0.68f
+            drawRect(
+                color = frontBuildingColor,
+                topLeft = androidx.compose.ui.geometry.Offset(i * stepW + stepW * 0.25f, horizonY - bhFront),
+                size = androidx.compose.ui.geometry.Size(stepW * 0.78f, bhFront)
             )
         }
 
-        } // Cierra Box de HUD con padding CarPlay
+        // 3. Línea de horizonte + transición atmosférica suave hacia el mapa 3D
+        drawRect(
+            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(
+                    groundBlend.copy(alpha = alpha * 0.98f),
+                    groundBlend.copy(alpha = alpha * 0.75f),
+                    Color.Transparent
+                ),
+                startY = horizonY - 2f,
+                endY = h
+            ),
+            topLeft = androidx.compose.ui.geometry.Offset(0f, horizonY - 2f),
+            size = androidx.compose.ui.geometry.Size(w, h - horizonY + 2f)
+        )
     }
 }
 
