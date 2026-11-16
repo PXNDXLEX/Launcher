@@ -59,10 +59,23 @@ import com.mapbox.maps.Style
 import com.mapbox.maps.dsl.cameraOptions
 import com.mapbox.maps.extension.style.expressions.generated.Expression
 import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.generated.backgroundLayer
 import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
 import com.mapbox.maps.extension.style.layers.generated.lineLayer
 import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
 import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
+import com.mapbox.maps.extension.style.layers.properties.generated.Visibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
@@ -132,16 +145,23 @@ class FavoritesManager(context: Context) {
     }
     fun addFavorite(place: PlaceResult) {
         val list = getFavorites().toMutableList()
-        if (list.none { it.name == place.name }) {
-            list.add(place)
-            val array = JSONArray()
-            list.forEach {
-                val obj = JSONObject()
-                obj.put("name", it.name); obj.put("address", it.address); obj.put("lat", it.lat); obj.put("lon", it.lon); obj.put("iconType", it.iconType)
-                array.put(obj)
-            }
-            prefs.edit().putString("favs", array.toString()).apply()
+        if (list.none { it.name.equals(place.name, ignoreCase = true) }) {
+            list.add(0, place)
+            saveList(list)
         }
+    }
+    fun removeFavorite(name: String) {
+        val list = getFavorites().filterNot { it.name.equals(name, ignoreCase = true) }
+        saveList(list)
+    }
+    private fun saveList(list: List<PlaceResult>) {
+        val array = JSONArray()
+        list.forEach {
+            val obj = JSONObject()
+            obj.put("name", it.name); obj.put("address", it.address); obj.put("lat", it.lat); obj.put("lon", it.lon); obj.put("iconType", it.iconType)
+            array.put(obj)
+        }
+        prefs.edit().putString("favs", array.toString()).apply()
     }
 }
 
@@ -228,6 +248,9 @@ fun NavigationMap(
     val isMapDarkMode = AppSettings.isMapDarkMode.value
     val configuration = LocalConfiguration.current  // detectar rotación
     var isFollowingLocation by rememberSaveable { mutableStateOf(true) }
+    var isAerialExploreMode by rememberSaveable { mutableStateOf(false) }
+    var favoritesVersion by remember { mutableStateOf(0) }
+    var selectedDestinationTitle by remember { mutableStateOf("") }
     // NO usar rememberSaveable aquí: al rotar queremos forzar re-centrado
     var hasInitializedPosition by remember { mutableStateOf(false) }
     // Solo se reproduce una vez por sesión (rememberSaveable evita que se reinicie al rotar)
@@ -264,23 +287,23 @@ fun NavigationMap(
     // Ruta tipo alfombra de carril luminosa verde esmeralda (idéntica a la guía de carril 3D)
     val routeColorHex = when (currentStyle) {
         "NEON" -> "#00FFA6"
-        else   -> "#34F5A6"
+        else   -> "#38F8A8"
     }
 
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx().toDouble() }
     val screenHeightPxRef = rememberUpdatedState(screenHeightPx)
 
-    // Helper unificado para cámara de persecución 3D (Chase Cam a 78°, auto centrado abajo)
+    // Helper unificado para cámara de persecución 3D (Chase Cam a 76°, zoom 19.75, auto grande y centrado)
     fun buildChaseFollowState() = mapView.viewport.makeFollowPuckViewportState(
         FollowPuckViewportStateOptions.Builder()
-            .pitch(78.0)
-            .zoom(18.8)
+            .pitch(76.0)
+            .zoom(19.75)
             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
             .padding(
                 com.mapbox.maps.EdgeInsets(
-                    (screenHeightPxRef.value * 0.46).coerceAtLeast(220.0),
+                    (screenHeightPxRef.value * 0.28).coerceAtLeast(120.0),
                     leftInsetRef.value,
-                    maxOf(screenHeightPxRef.value * 0.12, bottomInsetRef.value),
+                    maxOf(screenHeightPxRef.value * 0.16, bottomInsetRef.value),
                     rightInsetRef.value
                 )
             )
@@ -431,213 +454,187 @@ fun NavigationMap(
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
 
-            // ── Entorno 3D y Estética ─────────────────
+            // ── Entorno 3D y Estética (Cockpit Indigo & Carriles Anchos) ─────────────────
             val isNightMode = (style == "DARK" || style == "NEON")
             if (style != "SATELLITE") {
                 try {
-                    // Colores de edificios según el modo
-                    val buildingColor = if (isNightMode) {
-                        if (style == "NEON") "#090514" else "#1a1a2a" // Cyberpunk dark purple
-                    } else "#e0e0e0"
-                    val heightMult = if (isNightMode) 3.0 else 2.5
-
-                    if (loadedStyle.styleLayerExists("3d-buildings")) {
-                        loadedStyle.removeStyleLayer("3d-buildings")
-                    }
-                    if (loadedStyle.styleLayerExists("3d-buildings-roof")) {
-                        loadedStyle.removeStyleLayer("3d-buildings-roof")
-                    }
-
-                    if (isNightMode) {
-                        try {
-                            loadedStyle.removeStyleImage(BUILDING_FACADE_IMAGE_ID)
-                        } catch (e: Exception) {}
-                        try {
-                            val facadeBitmap = drawBuildingFacadeTexture(style == "NEON")
-                            loadedStyle.addImage(BUILDING_FACADE_IMAGE_ID, facadeBitmap)
-                        } catch (e: Exception) {}
-
-                        // Cuerpo/Paredes de edificios con la textura de ventanas
-                        loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
-                            sourceLayer("building")
-                            filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
-                            minZoom(14.0)
-                            fillExtrusionPattern(BUILDING_FACADE_IMAGE_ID)
-                            fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(heightMult)))
-                            fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(heightMult)))
-                            fillExtrusionOpacity(0.95)
-                        })
-
-                        // Techos de edificios con color sÃ³lido (para ocultar el patrÃ³n de ventanas en los techos)
-                        loadedStyle.addLayerAbove(fillExtrusionLayer("3d-buildings-roof", "composite") {
-                            sourceLayer("building")
-                            filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
-                            minZoom(14.0)
-                            fillExtrusionColor(buildingColor)
-                            val heightExpr = Expression.product(Expression.get("height"), Expression.literal(heightMult))
-                            val baseExpr = Expression.subtract(heightExpr, Expression.literal(0.15))
-                            fillExtrusionHeight(heightExpr)
-                            fillExtrusionBase(baseExpr)
-                            fillExtrusionOpacity(0.95)
-                        }, "3d-buildings")
-                    } else {
-                        // Modo DÃ­a (Sencillo, color sÃ³lido e iluminaciÃ³n nativa)
-                        loadedStyle.addLayer(fillExtrusionLayer("3d-buildings", "composite") {
-                            sourceLayer("building")
-                            filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
-                            minZoom(14.0)
-                            fillExtrusionColor(buildingColor)
-                            fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(heightMult)))
-                            fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(heightMult)))
-                            fillExtrusionOpacity(0.85)
-                            fillExtrusionAmbientOcclusionIntensity(0.6)
-                            fillExtrusionAmbientOcclusionRadius(4.0)
-                        })
-                    }
-                    // ── Reflejos de ventanas en el suelo (solo modo noche) ───────
-                    // Capa plana debajo de los edificios que simula la luz de ventanas
-                    // derramándose sobre las aceras y el asfalto
-                    if (isNightMode) {
-                        val glowColor = if (style == "NEON") "#FF0055" else "#2a1800" // Cyberpunk Hot Pink glow
-                        val glowOpacity = if (style == "NEON") 0.35 else 0.65
-                        loadedStyle.addLayerBelow(fillLayer("building-glow", "composite") {
-                            sourceLayer("building")
-                            filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
-                            minZoom(14.0)
-                            fillColor(glowColor)
-                            fillOpacity(glowOpacity)
-                        }, "3d-buildings")
-                    }
-                    
-                    // ── Mejorar estética de Parques / Áreas Verdes ─────────────────
-                    // Detectar primera capa de etiquetas para que nombres de calles queden visibles
                     val firstSymbolLayerId: String? = try {
                         loadedStyle.styleLayers.firstOrNull { it.type == "symbol" }?.id
                     } catch (e: Exception) { null }
-                    val labelRef = firstSymbolLayerId ?: "3d-buildings"
 
+                    // Limpiar capas personalizadas previas si se recarga el estilo
+                    listOf(
+                        "cockpit-ground-base", "3d-buildings", "3d-buildings-roof", "building-glow",
+                        "custom-green-areas", "custom-water", "custom-landcover",
+                        "custom-roads-casing", "custom-roads", "custom-roads-lane-dashes"
+                    ).forEach { layerId ->
+                        try {
+                            if (loadedStyle.styleLayerExists(layerId)) loadedStyle.removeStyleLayer(layerId)
+                        } catch (_: Exception) {}
+                    }
+
+                    // En modo DARK (Cockpit Original) eliminamos las capas grises de edificios base
+                    // para que el suelo azul real y las avenidas anchas se vean 100% limpias como en la referencia.
+                    if (style == "DARK") {
+                        try {
+                            loadedStyle.styleLayers.forEach { layerInfo ->
+                                if (layerInfo.id.contains("building", ignoreCase = true) ||
+                                    layerInfo.id.contains("structure", ignoreCase = true)
+                                ) {
+                                    try { loadedStyle.removeStyleLayer(layerInfo.id) } catch (_: Exception) {}
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // 1. Suelo base Royal Indigo continuo (elimina el suelo gris oscuro de Style.DARK)
+                    if (isNightMode) {
+                        val baseGroundHex = if (style == "NEON") "#07061C" else "#232584"
+                        try {
+                            val bgLayer = backgroundLayer("cockpit-ground-base") {
+                                backgroundColor(baseGroundHex)
+                            }
+                            if (firstSymbolLayerId != null) {
+                                loadedStyle.addLayerBelow(bgLayer, firstSymbolLayerId)
+                            } else {
+                                loadedStyle.addLayer(bgLayer)
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // 2. Agua, Tierra y Áreas Verdes en tonos índigo armónicos
                     val greenColor = if (isNightMode) {
-                        if (style == "NEON") "#0A0018" else "#161B58" // Deep royal indigo parks
+                        if (style == "NEON") "#0A001E" else "#1D2074"
                     } else "#b7e4c7"
 
                     try {
-                        loadedStyle.addLayerBelow(fillLayer("custom-green-areas", "composite") {
+                        val greenLayer = fillLayer("custom-green-areas", "composite") {
                             sourceLayer("landuse")
-                            filter(
-                                Expression.any(
-                                    Expression.eq(Expression.get("class"), Expression.literal("park")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("pitch")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("grass")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("forest")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("golf_course")),
-                                    Expression.eq(Expression.get("class"), Expression.literal("garden"))
-                                )
-                            )
                             fillColor(greenColor)
-                            fillOpacity(0.75)
-                        }, labelRef)
-                    } catch (e: Exception) {}
+                            fillOpacity(0.85)
+                        }
+                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(greenLayer, firstSymbolLayerId)
+                        else loadedStyle.addLayer(greenLayer)
+                    } catch (_: Exception) {}
 
-                    // ── Fondo (Agua y Tierra) para estética 3D Cockpit Indigo / Cyberpunk ──
                     if (isNightMode) {
-                        val waterHex = if (style == "NEON") "#040412" else "#111648"
-                        val landHex  = if (style == "NEON") "#07061A" else "#181E62"
+                        val waterHex = if (style == "NEON") "#040414" else "#161960"
+                        val landHex  = if (style == "NEON") "#07061C" else "#232584"
                         try {
-                            loadedStyle.addLayerBelow(fillLayer("custom-water", "composite") {
+                            val waterLayer = fillLayer("custom-water", "composite") {
                                 sourceLayer("water")
                                 fillColor(waterHex)
-                            }, labelRef)
-                            loadedStyle.addLayerBelow(fillLayer("custom-landcover", "composite") {
+                            }
+                            val landLayer = fillLayer("custom-landcover", "composite") {
                                 sourceLayer("landcover")
                                 fillColor(landHex)
-                            }, labelRef)
-                        } catch (e: Exception) {}
+                            }
+                            if (firstSymbolLayerId != null) {
+                                loadedStyle.addLayerBelow(waterLayer, firstSymbolLayerId)
+                                loadedStyle.addLayerBelow(landLayer, firstSymbolLayerId)
+                            } else {
+                                loadedStyle.addLayer(waterLayer)
+                                loadedStyle.addLayer(landLayer)
+                            }
+                        } catch (_: Exception) {}
                     }
 
+                    // 3. Calles y Avenidas de Gran Escala (proporción de carril ancho tipo Cockpit 3D)
                     val roadColor = if (isNightMode) {
-                        if (style == "NEON") "#090C24" else "#1F276E" // Deep royal-indigo asphalt
+                        if (style == "NEON") "#0D1030" else "#282C94" // Asfalto azul real profundo
                     } else "#2E355B"
 
-                    val casingColor = if (style == "NEON") "#00FFFF" else "#E8F0FF" // Crisp white/cyan lane borders
-                    val casingOpacity = if (style == "NEON") 0.85 else 0.90
+                    val casingColor = if (style == "NEON") "#00FFFF" else "#F4F8FF" // Líneas laterales blancas nítidas
+                    val casingOpacity = if (style == "NEON") 0.90 else 0.96
 
-                    val roadFilter = Expression.any(
-                        Expression.eq(Expression.get("class"), Expression.literal("motorway")),
-                        Expression.eq(Expression.get("class"), Expression.literal("trunk")),
-                        Expression.eq(Expression.get("class"), Expression.literal("primary")),
-                        Expression.eq(Expression.get("class"), Expression.literal("secondary")),
-                        Expression.eq(Expression.get("class"), Expression.literal("tertiary")),
-                        Expression.eq(Expression.get("class"), Expression.literal("street")),
-                        Expression.eq(Expression.get("class"), Expression.literal("street_limited"))
-                    )
-
-                    // 1. Líneas laterales blancas de carril (road casing)
+                    // 3A. Líneas exteriores blancas de la carretera (Casing ancho)
                     try {
-                        loadedStyle.addLayerBelow(lineLayer("custom-roads-casing", "composite") {
+                        val casingLayer = lineLayer("custom-roads-casing", "composite") {
                             sourceLayer("road")
-                            filter(roadFilter)
                             lineColor(casingColor)
                             lineWidth(
                                 Expression.interpolate(
                                     Expression.linear(), Expression.zoom(),
-                                    Expression.literal(12.0), Expression.literal(4.2),
-                                    Expression.literal(16.0), Expression.literal(13.0),
-                                    Expression.literal(19.0), Expression.literal(28.0)
+                                    Expression.literal(12.0), Expression.literal(5.2),
+                                    Expression.literal(15.5), Expression.literal(18.0),
+                                    Expression.literal(18.0), Expression.literal(56.0),
+                                    Expression.literal(20.0), Expression.literal(138.0)
                                 )
                             )
                             lineOpacity(casingOpacity)
                             lineCap(LineCap.ROUND)
                             lineJoin(LineJoin.ROUND)
-                        }, labelRef)
-                    } catch (e: Exception) {}
+                        }
+                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(casingLayer, firstSymbolLayerId)
+                        else loadedStyle.addLayer(casingLayer)
+                    } catch (_: Exception) {}
 
-                    // 2. Superficie de asfalto 3D
+                    // 3B. Cuerpo de asfalto 3D
                     try {
-                        loadedStyle.addLayerBelow(lineLayer("custom-roads", "composite") {
+                        val roadSurfaceLayer = lineLayer("custom-roads", "composite") {
                             sourceLayer("road")
-                            filter(roadFilter)
                             lineColor(roadColor)
                             lineWidth(
                                 Expression.interpolate(
                                     Expression.linear(), Expression.zoom(),
-                                    Expression.literal(12.0), Expression.literal(3.0),
-                                    Expression.literal(16.0), Expression.literal(10.5),
-                                    Expression.literal(19.0), Expression.literal(24.0)
+                                    Expression.literal(12.0), Expression.literal(3.8),
+                                    Expression.literal(15.5), Expression.literal(14.5),
+                                    Expression.literal(18.0), Expression.literal(48.0),
+                                    Expression.literal(20.0), Expression.literal(124.0)
                                 )
                             )
                             lineCap(LineCap.ROUND)
-                            lineJoin(LineJoin.ROUND)
-                        }, labelRef)
-                    } catch (e: Exception) {}
+                            lineJoin(LineCap.ROUND.let { LineJoin.ROUND })
+                        }
+                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(roadSurfaceLayer, firstSymbolLayerId)
+                        else loadedStyle.addLayer(roadSurfaceLayer)
+                    } catch (_: Exception) {}
 
-                    // 3. Líneas divisorias discontinuas en el centro de las calles
+                    // 3C. Líneas divisorias blancas discontinuas en el centro de los carriles
                     try {
-                        loadedStyle.addLayerBelow(lineLayer("custom-roads-lane-dashes", "composite") {
+                        val laneDashLayer = lineLayer("custom-roads-lane-dashes", "composite") {
                             sourceLayer("road")
-                            filter(roadFilter)
-                            lineColor("#D6E4FF")
-                            lineOpacity(0.72)
-                            lineDasharray(listOf(2.2, 2.8))
+                            lineColor("#E6F0FF")
+                            lineOpacity(0.85)
+                            lineDasharray(listOf(2.2, 2.6))
                             lineWidth(
                                 Expression.interpolate(
                                     Expression.linear(), Expression.zoom(),
-                                    Expression.literal(14.0), Expression.literal(0.6),
-                                    Expression.literal(17.0), Expression.literal(1.5),
-                                    Expression.literal(19.0), Expression.literal(2.4)
+                                    Expression.literal(14.0), Expression.literal(1.0),
+                                    Expression.literal(17.5), Expression.literal(2.6),
+                                    Expression.literal(20.0), Expression.literal(4.6)
                                 )
                             )
                             lineCap(LineCap.BUTT)
                             lineJoin(LineJoin.ROUND)
-                        }, labelRef)
-                    } catch (e: Exception) {}
+                        }
+                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(laneDashLayer, firstSymbolLayerId)
+                        else loadedStyle.addLayer(laneDashLayer)
+                    } catch (_: Exception) {}
+
+                    // Edificios 3D solo en modo NEON o LIGHT (y debajo de las etiquetas, sin tapar la calle en modo DARK Cockpit)
+                    if (style == "NEON" || style == "LIGHT") {
+                        val buildingColor = if (style == "NEON") "#090514" else "#e0e0e0"
+                        val heightMult = if (style == "NEON") 1.8 else 2.0
+                        try {
+                            loadedStyle.addLayerBelow(fillExtrusionLayer("3d-buildings", "composite") {
+                                sourceLayer("building")
+                                filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
+                                minZoom(15.0)
+                                fillExtrusionColor(buildingColor)
+                                fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(heightMult)))
+                                fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(heightMult)))
+                                fillExtrusionOpacity(0.75)
+                            }, "custom-roads-casing")
+                        } catch (_: Exception) {}
+                    }
 
                 } catch (e: Exception) {}
             }
 
-            // ── Efectos Especiales ─────────────────
+            // ── Efectos Especiales (Faros y Luces Traseras) ─────────────────
             if (isNightMode) {
                 try {
-                    // Añadir texturas al estilo
                     loadedStyle.addImage("car-headlights-glow", drawHeadlightsGlow())
                     loadedStyle.addImage("car-taillights-glow", drawTaillightsGlow())
                     
@@ -664,32 +661,33 @@ fun NavigationMap(
             }
 
             // ── Capas de Ruta Visuales (Alfombra luminosa de carril 3D) ──────
-            // Añadidas AL FINAL para garantizar que se dibujen SOBRE carreteras y áreas verdes
             loadedStyle.addLayer(lineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID) {
                 lineColor("#00E676")
                 lineWidth(
                     Expression.interpolate(
                         Expression.linear(), Expression.zoom(),
-                        Expression.literal(13.0), Expression.literal(10.0),
-                        Expression.literal(18.5), Expression.literal(26.0)
+                        Expression.literal(13.0), Expression.literal(12.0),
+                        Expression.literal(17.5), Expression.literal(32.0),
+                        Expression.literal(20.0), Expression.literal(62.0)
                     )
                 )
                 lineCap(LineCap.ROUND)
                 lineJoin(LineJoin.ROUND)
-                lineOpacity(0.32)
+                lineOpacity(0.34)
             })
             loadedStyle.addLayer(lineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID) {
                 lineColor(routeColorHex)
                 lineWidth(
                     Expression.interpolate(
                         Expression.linear(), Expression.zoom(),
-                        Expression.literal(13.0), Expression.literal(6.0),
-                        Expression.literal(18.5), Expression.literal(15.5)
+                        Expression.literal(13.0), Expression.literal(7.0),
+                        Expression.literal(17.5), Expression.literal(20.0),
+                        Expression.literal(20.0), Expression.literal(42.0)
                     )
                 )
                 lineCap(LineCap.ROUND)
                 lineJoin(LineJoin.ROUND)
-                lineOpacity(0.92)
+                lineOpacity(0.95)
             })
             loadedStyle.addLayer(lineLayer(HISTORY_LAYER_ID, HISTORY_SOURCE_ID) {
                 lineColor("#4CAF50")
@@ -1011,7 +1009,7 @@ fun NavigationMap(
                 vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
             }
 
-            val userInteracting = isSavingFavorite || isPlacingDestination
+            val userInteracting = isSavingFavorite || isPlacingDestination || isAerialExploreMode
             if (!isFollowingLocation && hasInitializedPosition && !userInteracting) {
                 val refLoc = locationWhenFollowDisabled
                 if (refLoc != null && loc.distanceTo(refLoc) >= 1f) {
@@ -1023,7 +1021,7 @@ fun NavigationMap(
                 }
             }
 
-            if (!isIntroAnimating && !NavigationState.isRouteActive.value && isFollowingLocation && hasInitializedPosition) {
+            if (!isIntroAnimating && !NavigationState.isRouteActive.value && isFollowingLocation && !isAerialExploreMode && hasInitializedPosition) {
                 val vp = mapView.viewport
                 if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
                     vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
@@ -1045,6 +1043,42 @@ fun NavigationMap(
         }
     }
 
+    // ── Funciones para alternar entre Vista 3D Conducción y Vista Aérea Temporal ──
+    val activateAerialExplore: () -> Unit = {
+        isAerialExploreMode = true
+        isFollowingLocation = false
+        autoCenterJob?.cancel()
+        mapView.viewport.idle()
+        val targetPt = selectedDestination ?: NavigationState.currentLocation.value?.let {
+            Point.fromLngLat(it.longitude, it.latitude)
+        }
+        mapView.camera.easeTo(
+            cameraOptions {
+                if (targetPt != null) center(targetPt)
+                zoom(16.0)
+                pitch(0.0)
+                bearing(0.0)
+                padding(com.mapbox.maps.EdgeInsets(0.0, 0.0, 0.0, 0.0))
+            },
+            MapAnimationOptions.mapAnimationOptions { duration(850) }
+        )
+    }
+
+    val returnTo3DChaseView: () -> Unit = {
+        isAerialExploreMode = false
+        isFollowingLocation = true
+        isPlacingDestination = false
+        locationWhenFollowDisabled = null
+        autoCenterJob?.cancel()
+        val vp = mapView.viewport
+        vp.transitionTo(
+            buildChaseFollowState(),
+            vp.makeDefaultViewportTransition(
+                DefaultViewportTransitionOptions.Builder().maxDurationMs(1050).build()
+            )
+        )
+    }
+
     // ── Intro cinematográfica: espera a que el mapa esté listo ───────────────
     LaunchedEffect(mapReady, pendingIntroPos) {
         val (carPos, carBearing) = pendingIntroPos ?: return@LaunchedEffect
@@ -1055,7 +1089,6 @@ fun NavigationMap(
         isIntroAnimating = true
 
         try {
-            // ── FASE 1: Frente inclinado del auto, acercamiento (zoom-in) ──
             mapView.mapboxMap.setCamera(
                 cameraOptions {
                     center(carPos)
@@ -1076,7 +1109,6 @@ fun NavigationMap(
             )
             delay(2000)
 
-            // ── FASE 2: Órbita suave alrededor del frente del auto ─────────
             mapView.camera.easeTo(
                 cameraOptions {
                     center(carPos)
@@ -1089,7 +1121,6 @@ fun NavigationMap(
             )
             delay(4200)
 
-            // ── FASE 3: Vuelo aéreo — vista del área (estilo águila) ───────
             mapView.camera.flyTo(
                 cameraOptions {
                     center(carPos)
@@ -1102,7 +1133,6 @@ fun NavigationMap(
             )
             delay(3700)
 
-            // ── FASE 4: Volver a navegación — activar follow mode 3D Chase Cam ──
             isFollowingLocation = true
             val vp = mapView.viewport
             vp.transitionTo(
@@ -1121,7 +1151,7 @@ fun NavigationMap(
 
     // ── Re-centrar al cambiar orientación (portrait ↔ landscape) ────────────
     LaunchedEffect(configuration.orientation) {
-        if (hasInitializedPosition && isFollowingLocation) {
+        if (hasInitializedPosition && isFollowingLocation && !isAerialExploreMode) {
             val vp = mapView.viewport
             vp.transitionTo(buildChaseFollowState(), vp.makeImmediateViewportTransition())
         }
@@ -1141,6 +1171,7 @@ fun NavigationMap(
         val dest = NavigationState.activeDestination.value
         val loc = NavigationState.currentLocation.value
         if (trigger > 0L && dest != null && loc != null) {
+            isAerialExploreMode = false
             selectedDestination = dest
             destAnnotation?.let { pointAnnotMgr?.delete(it) }
             val pm = pointAnnotMgr ?: mapView.annotations.createPointAnnotationManager().also { pointAnnotMgr = it }
@@ -1164,10 +1195,8 @@ fun NavigationMap(
 
     // ── UI ───────────────────────────────────────────────────────────────────
 
-    // Panel de ajuste de luces del auto en tiempo real
     val showGlowTuning = NavigationState.showGlowTuning.value
 
-    // Regenerar el bitmap del glow y subirlo al estilo Mapbox inmediatamente
     val refreshGlowOnMap: () -> Unit = {
         mapView.mapboxMap.getStyle { style ->
             try {
@@ -1177,7 +1206,6 @@ fun NavigationMap(
                 style.removeStyleImage("car-taillights-glow")
                 style.addImage("car-headlights-glow", headBmp)
                 style.addImage("car-taillights-glow", tailBmp)
-                // Aplicar escala del modelo si cambió
                 mapView.location.updateSettings {
                     locationPuck = getVehiclePuck(
                         context,
@@ -1187,11 +1215,16 @@ fun NavigationMap(
                         AppSettings.vehicle3DScale.value
                     )
                 }
-            } catch (e: Exception) { /* ignorar si el estilo no está listo */ }
+            } catch (e: Exception) { }
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    // Fondo base Royal Indigo para que jamás se vea un borde negro detrás del MapView
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF1F237A))
+    ) {
 
         val isBraking = NavigationState.isBraking.value
         LaunchedEffect(isBraking) {
@@ -1202,7 +1235,6 @@ fun NavigationMap(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 mapView.apply {
-                    // Desbloquear inclinación máxima hasta 85° para la cámara de persecución (Chase Cam 78°)
                     try {
                         mapView.mapboxMap.setBounds(
                             com.mapbox.maps.CameraBoundsOptions.Builder()
@@ -1212,23 +1244,22 @@ fun NavigationMap(
                         )
                     } catch (_: Exception) {}
 
-                    // Prevenir el flashazo del planeta entero antes del primer fix GPS
                     mapView.mapboxMap.setCamera(cameraOptions {
-                        zoom(14.0)
+                        zoom(15.0)
                         pitch(0.0)
                         bearing(0.0)
                     })
 
-                    // Inicializar el mapa con el estilo correcto
                     applyMapStyle(currentStyle)
 
-                    // Gestures: long-press para destino o para guardar favorito
+                    // Gestures: long-press con vuelo fluido de cámara hacia el punto marcado
                     gestures.addOnMapLongClickListener { point ->
                         val destPt = point
+                        val coordsStr = "${String.format("%.5f", destPt.latitude())}, ${String.format("%.5f", destPt.longitude())}"
                         if (NavigationState.isRouteActive.value) {
                             favoriteLocationToSave = destPt
                             favoriteNameToSave     = ""
-                            favoriteAddressToSave  = "${String.format("%.5f", destPt.latitude())}, ${String.format("%.5f", destPt.longitude())}"
+                            favoriteAddressToSave  = coordsStr
                             selectedIconType       = "Star"
                             isSavingFavorite       = true
                             showSaveFavoriteDialog = true
@@ -1236,10 +1267,13 @@ fun NavigationMap(
                             return@addOnMapLongClickListener true
                         }
 
-                        selectedDestination  = destPt
-                        routeDistanceText    = ""
-                        isFollowingLocation  = false
-                        isPlacingDestination = true
+                        selectedDestination      = destPt
+                        selectedDestinationTitle = "Punto seleccionado en el mapa"
+                        favoriteLocationToSave   = destPt
+                        favoriteAddressToSave    = coordsStr
+                        routeDistanceText        = ""
+                        isFollowingLocation      = false
+                        isPlacingDestination     = true
                         autoCenterJob?.cancel()
 
                         destAnnotation?.let { pointAnnotMgr?.delete(it) }
@@ -1256,10 +1290,20 @@ fun NavigationMap(
                         }.also { pointAnnotMgr = it }
                         val iconBmp = drawCustomPin(uiColor)
                         destAnnotation = pm.create(PointAnnotationOptions().withPoint(destPt).withIconImage(iconBmp))
+
+                        // Animación cinemática suave hacia el punto marcado en el mapa
+                        mapView.viewport.idle()
+                        mapView.camera.easeTo(
+                            cameraOptions {
+                                center(destPt)
+                                zoom(if (isAerialExploreMode) 16.5 else 17.2)
+                                pitch(if (isAerialExploreMode) 0.0 else 42.0)
+                            },
+                            MapAnimationOptions.mapAnimationOptions { duration(680) }
+                        )
                         true
                     }
 
-                    // Click normal — limpiar UI
                     gestures.addOnMapClickListener { _ ->
                         focusManager.clearFocus()
                         searchResults = emptyList()
@@ -1267,7 +1311,6 @@ fun NavigationMap(
                         false
                     }
 
-                    // Detectar gestos del usuario para desactivar el follow mode.
                     gestures.addOnMoveListener(object : com.mapbox.maps.plugin.gestures.OnMoveListener {
                         override fun onMoveBegin(detector: com.mapbox.android.gestures.MoveGestureDetector) {
                             if (isFollowingLocation) {
@@ -1280,14 +1323,15 @@ fun NavigationMap(
                         override fun onMove(detector: com.mapbox.android.gestures.MoveGestureDetector) = false
                         override fun onMoveEnd(detector: com.mapbox.android.gestures.MoveGestureDetector) {
                             autoCenterJob?.cancel()
+                            if (isAerialExploreMode) return
                             autoCenterJob = coroutineScope.launch {
                                 var elapsed = 0
                                 while (elapsed < 5000) {
                                     delay(200)
-                                    val userInteracting = isSavingFavorite || isPlacingDestination
+                                    val userInteracting = isSavingFavorite || isPlacingDestination || isAerialExploreMode
                                     if (!userInteracting) elapsed += 200
                                 }
-                                val userInteracting = isSavingFavorite || isPlacingDestination
+                                val userInteracting = isSavingFavorite || isPlacingDestination || isAerialExploreMode
                                 if (!userInteracting) {
                                     isFollowingLocation = true
                                     locationWhenFollowDisabled = null
@@ -1302,8 +1346,8 @@ fun NavigationMap(
                         if (!hasInitializedPosition && loc.latitude != 0.0) {
                             mapboxMap.setCamera(cameraOptions {
                                 center(Point.fromLngLat(loc.longitude, loc.latitude))
-                                zoom(18.8)
-                                pitch(78.0)
+                                zoom(19.75)
+                                pitch(76.0)
                                 bearing(gpsBearing)
                             })
                         }
@@ -1329,10 +1373,10 @@ fun NavigationMap(
             }
         )
 
-        // ── Horizonte Cielo + Silueta de Ciudad 3D (modo seguimiento Chase Cam) ──
+        // ── Horizonte Cielo + Silueta de Ciudad 3D (Cubre hasta 45% para sellar el horizonte sin franjas negras) ──
         val horizonAlpha by animateFloatAsState(
-            targetValue = if (isFollowingLocation && !isIntroAnimating) 1f else 0f,
-            animationSpec = tween(durationMillis = 480),
+            targetValue = if (isFollowingLocation && !isAerialExploreMode && !isIntroAnimating) 1f else 0f,
+            animationSpec = tween(durationMillis = 420),
             label = "horizonSkyAlpha"
         )
         if (horizonAlpha > 0.01f) {
@@ -1341,12 +1385,11 @@ fun NavigationMap(
                 currentStyle = currentStyle,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.28f)
+                    .fillMaxHeight(0.45f)
                     .align(Alignment.TopCenter)
             )
         }
 
-        // Velo de fundido suave al alternar estilo Día <-> Noche en tiempo real mientras conduces
         val styleVeilAlpha by animateFloatAsState(
             targetValue = if (isStyleTransitioning) 0.55f else 0f,
             animationSpec = tween(durationMillis = 420),
@@ -1370,18 +1413,21 @@ fun NavigationMap(
                     bottom = bottomOverlayPadding
                 )
         ) {
-            // ── ZONA SUPERIOR CENTRAL: Turn-by-Turn Card (como en la imagen: "200 m / Calle 26") o Buscador Compacto ──
+            // ── ZONA SUPERIOR CENTRAL: Turn-by-Turn Card ("200 m / Calle 26") o Buscador + Favoritos ──
             val nextStep = activeRouteSteps.firstOrNull()
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 10.dp, start = 240.dp, end = 120.dp),
+                    .padding(top = 10.dp, start = 235.dp, end = 175.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // 1. Banner Turn-by-Turn estilo Cockpit ("↱ 200 m / Calle 26")
                 AnimatedVisibility(
                     visible = NavigationState.isRouteActive.value,
-                    enter = slideInVertically { -it } + fadeIn(),
+                    enter = slideInVertically(
+                        initialOffsetY = { -it },
+                        animationSpec = spring(dampingRatio = 0.72f, stiffness = 360f)
+                    ) + fadeIn(),
                     exit = slideOutVertically { -it } + fadeOut()
                 ) {
                     val distDisplay = when {
@@ -1398,13 +1444,10 @@ fun NavigationMap(
 
                     Surface(
                         shape = RoundedCornerShape(22.dp),
-                        color = Color(0xFF1A256E).copy(alpha = 0.94f),
-                        shadowElevation = 12.dp,
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.5.dp,
-                            Color(0xFF4A66FF).copy(alpha = 0.55f)
-                        ),
-                        modifier = Modifier.widthIn(min = 210.dp, max = 310.dp)
+                        color = Color(0xFF1A256E).copy(alpha = 0.95f),
+                        shadowElevation = 14.dp,
+                        border = BorderStroke(1.5.dp, Color(0xFF4A66FF).copy(alpha = 0.60f)),
+                        modifier = Modifier.widthIn(min = 215.dp, max = 315.dp)
                     ) {
                         Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                             Column(
@@ -1457,7 +1500,6 @@ fun NavigationMap(
                                 )
                             }
 
-                            // Botón discreto para cancelar ruta activa en la esquina del banner
                             IconButton(
                                 onClick = {
                                     NavigationState.clearActiveRoute()
@@ -1482,7 +1524,7 @@ fun NavigationMap(
                     }
                 }
 
-                // 2. Barra de búsqueda compacta central (visible cuando no hay ruta activa)
+                // 2. Barra de búsqueda y Favoritos con animaciones elásticas modernas
                 AnimatedVisibility(
                     visible = !NavigationState.isRouteActive.value,
                     enter = fadeIn() + expandVertically(),
@@ -1490,40 +1532,46 @@ fun NavigationMap(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.widthIn(max = 320.dp)
+                        modifier = Modifier.widthIn(max = 350.dp)
                     ) {
+                        val favHeartScale by animateFloatAsState(
+                            targetValue = if (showFavorites) 1.12f else 1f,
+                            animationSpec = spring(dampingRatio = 0.5f, stiffness = 450f),
+                            label = "favHeartScale"
+                        )
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Surface(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(42.dp),
-                                shape = RoundedCornerShape(21.dp),
-                                color = Color(0xFF10173A).copy(alpha = 0.88f),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    Color.White.copy(alpha = 0.22f)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(22.dp),
+                                color = Color(0xFF0E1638).copy(alpha = 0.90f),
+                                border = BorderStroke(
+                                    1.2.dp,
+                                    if (isSearchFocused) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.25f)
                                 ),
-                                shadowElevation = 8.dp
+                                shadowElevation = 10.dp
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    modifier = Modifier.padding(horizontal = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         Icons.Default.Search,
                                         null,
                                         tint = Color(0xFF38F2A6),
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Box(modifier = Modifier.weight(1f)) {
                                         if (searchQuery.isEmpty()) {
                                             Text(
                                                 "¿A dónde vamos?",
-                                                color = Color.White.copy(alpha = 0.60f),
+                                                color = Color.White.copy(alpha = 0.65f),
                                                 fontSize = 13.sp,
                                                 maxLines = 1
                                             )
@@ -1542,6 +1590,7 @@ fun NavigationMap(
                                                 },
                                             textStyle = androidx.compose.ui.text.TextStyle(
                                                 fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
                                                 color = Color.White
                                             ),
                                             singleLine = true,
@@ -1549,6 +1598,7 @@ fun NavigationMap(
                                             keyboardActions = KeyboardActions(onSearch = {
                                                 if (searchQuery.isNotEmpty()) {
                                                     isSearching = true
+                                                    showFavorites = false
                                                     coroutineScope.launch {
                                                         searchResults = searchPlaces(
                                                             searchQuery,
@@ -1561,7 +1611,13 @@ fun NavigationMap(
                                             })
                                         )
                                     }
-                                    if (searchQuery.isNotEmpty()) {
+                                    if (isSearching) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color(0xFF38F2A6)
+                                        )
+                                    } else if (searchQuery.isNotEmpty()) {
                                         IconButton(
                                             onClick = { searchQuery = ""; searchResults = emptyList() },
                                             modifier = Modifier.size(26.dp)
@@ -1577,121 +1633,293 @@ fun NavigationMap(
                                 }
                             }
 
+                            // Botón de Favoritos con rebote elástico
                             Surface(
                                 onClick = {
                                     showFavorites = !showFavorites
                                     searchResults = emptyList()
                                 },
-                                shape = RoundedCornerShape(50),
-                                color = Color(0xFF10173A).copy(alpha = 0.88f),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (showFavorites) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.22f)
+                                shape = CircleShape,
+                                color = if (showFavorites) Color(0xFF183652) else Color(0xFF0E1638).copy(alpha = 0.90f),
+                                border = BorderStroke(
+                                    1.3.dp,
+                                    if (showFavorites) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.25f)
                                 ),
-                                modifier = Modifier.size(42.dp)
+                                shadowElevation = 8.dp,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .scale(favHeartScale)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        null,
+                                        contentDescription = "Favoritos",
                                         tint = if (showFavorites) Color(0xFF38F2A6) else Color.White,
-                                        modifier = Modifier.size(19.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
                         }
 
+                        // Panel Flotante Glassmorphic para Favoritos y Resultados de Búsqueda
                         AnimatedVisibility(
                             visible = searchResults.isNotEmpty() || showFavorites,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
+                            enter = scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = spring(dampingRatio = 0.72f, stiffness = 400f)
+                            ) + fadeIn(tween(180)) + expandVertically(),
+                            exit = scaleOut(targetScale = 0.92f) + fadeOut(tween(140)) + shrinkVertically()
                         ) {
-                            Card(
+                            val list = remember(showFavorites, searchResults, favoritesVersion) {
+                                if (showFavorites) favManager.getFavorites() else searchResults
+                            }
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 6.dp)
-                                    .heightIn(max = 230.dp),
-                                shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = Color(0xFF0E1535).copy(alpha = 0.96f)
-                                )
+                                    .padding(top = 8.dp)
+                                    .heightIn(max = 260.dp),
+                                shape = RoundedCornerShape(22.dp),
+                                color = Color(0xFF0B112E).copy(alpha = 0.96f),
+                                border = BorderStroke(
+                                    1.2.dp,
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Color(0xFF38F2A6).copy(alpha = 0.55f),
+                                            Color(0xFF4A78FF).copy(alpha = 0.45f)
+                                        )
+                                    )
+                                ),
+                                shadowElevation = 16.dp
                             ) {
-                                val list = if (showFavorites) favManager.getFavorites() else searchResults
-                                LazyColumn {
-                                    items(list) { place ->
-                                        ListItem(
-                                            colors = ListItemDefaults.colors(
-                                                containerColor = Color.Transparent,
-                                                headlineColor = Color.White,
-                                                supportingColor = Color.White.copy(alpha = 0.7f)
-                                            ),
-                                            headlineContent = {
-                                                Text(
-                                                    place.name,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    fontSize = 13.sp
-                                                )
-                                            },
-                                            supportingContent = {
-                                                Text(
-                                                    place.address,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    fontSize = 11.sp
-                                                )
-                                            },
-                                            leadingContent = {
-                                                Icon(
-                                                    when (place.iconType) {
-                                                        "Home" -> Icons.Default.Home
-                                                        "Work" -> Icons.Default.Work
-                                                        else -> Icons.Default.Place
-                                                    },
-                                                    null,
-                                                    tint = Color(0xFF38F2A6),
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            },
-                                            modifier = Modifier.clickable {
-                                                val destPt = Point.fromLngLat(place.lon, place.lat)
-                                                selectedDestination = destPt
-
-                                                destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                                                val pm = pointAnnotMgr
-                                                    ?: mapView.annotations.createPointAnnotationManager()
-                                                        .also { pointAnnotMgr = it }
-                                                val iconBmp = drawCustomPin(uiColor)
-                                                destAnnotation = pm.create(
-                                                    PointAnnotationOptions()
-                                                        .withPoint(destPt)
-                                                        .withIconImage(iconBmp)
-                                                )
-
-                                                mapView.camera.easeTo(
-                                                    cameraOptions { center(destPt); zoom(15.0) },
-                                                    MapAnimationOptions.mapAnimationOptions { duration(800) }
-                                                )
-
-                                                searchResults = emptyList()
-                                                showFavorites = false
-                                                focusManager.clearFocus()
-                                            },
-                                            trailingContent = {
-                                                if (place.distanceKm > 0) {
-                                                    Text(
-                                                        text = if (place.distanceKm < 1)
-                                                            "${(place.distanceKm * 1000).toInt()} m"
-                                                        else
-                                                            String.format("%.1f km", place.distanceKm),
-                                                        fontSize = 11.sp,
-                                                        color = Color(0xFF38F2A6),
-                                                        fontWeight = FontWeight.Bold
-                                                    )
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    // Cabecera del panel
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (showFavorites) "★ TUS DESTINOS FAVORITOS" else "RESULTADOS ENCONTRADOS",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 0.8.sp,
+                                            color = Color(0xFF38F2A6)
+                                        )
+                                        // Botón rápido para guardar ubicación actual como favorito
+                                        if (showFavorites) {
+                                            Surface(
+                                                onClick = {
+                                                    val loc = NavigationState.currentLocation.value
+                                                    if (loc != null && loc.latitude != 0.0) {
+                                                        val pt = Point.fromLngLat(loc.longitude, loc.latitude)
+                                                        favoriteLocationToSave = pt
+                                                        favoriteNameToSave = ""
+                                                        favoriteAddressToSave = "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}"
+                                                        selectedIconType = "Star"
+                                                        isSavingFavorite = true
+                                                        showSaveFavoriteDialog = true
+                                                        showFavorites = false
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(50),
+                                                color = Color(0xFF1A2A66),
+                                                border = BorderStroke(1.dp, Color(0xFF38F2A6).copy(alpha = 0.45f))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(Icons.Default.AddLocationAlt, null, tint = Color(0xFF38F2A6), modifier = Modifier.size(13.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Guardar Aquí", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                                 }
                                             }
-                                        )
+                                        }
+                                    }
+
+                                    if (list.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 22.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(
+                                                    Icons.Default.FavoriteBorder,
+                                                    null,
+                                                    tint = Color.White.copy(alpha = 0.35f),
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Text(
+                                                    "Mantén presionado el mapa para marcar o guardar favoritos",
+                                                    fontSize = 11.sp,
+                                                    color = Color.White.copy(alpha = 0.65f)
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            items(list) { place ->
+                                                Surface(
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    color = Color(0xFF151E4A).copy(alpha = 0.85f),
+                                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .clickable {
+                                                            val destPt = Point.fromLngLat(place.lon, place.lat)
+                                                            selectedDestination = destPt
+                                                            selectedDestinationTitle = place.name
+                                                            favoriteLocationToSave = destPt
+                                                            favoriteAddressToSave = place.address
+                                                            isFollowingLocation = false
+                                                            isPlacingDestination = true
+                                                            autoCenterJob?.cancel()
+
+                                                            destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                                            val pm = pointAnnotMgr
+                                                                ?: mapView.annotations.createPointAnnotationManager()
+                                                                    .also { pointAnnotMgr = it }
+                                                            val iconBmp = drawCustomPin(uiColor)
+                                                            destAnnotation = pm.create(
+                                                                PointAnnotationOptions()
+                                                                    .withPoint(destPt)
+                                                                    .withIconImage(iconBmp)
+                                                            )
+
+                                                            mapView.viewport.idle()
+                                                            mapView.camera.easeTo(
+                                                                cameraOptions {
+                                                                    center(destPt)
+                                                                    zoom(16.8)
+                                                                    pitch(40.0)
+                                                                },
+                                                                MapAnimationOptions.mapAnimationOptions { duration(720) }
+                                                            )
+
+                                                            searchResults = emptyList()
+                                                            showFavorites = false
+                                                            focusManager.clearFocus()
+                                                        }
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(34.dp)
+                                                                .background(
+                                                                    Color(0xFF38F2A6).copy(alpha = 0.16f),
+                                                                    CircleShape
+                                                                ),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                when (place.iconType) {
+                                                                    "Home" -> Icons.Default.Home
+                                                                    "Work" -> Icons.Default.Work
+                                                                    else -> Icons.Default.Star
+                                                                },
+                                                                null,
+                                                                tint = Color(0xFF38F2A6),
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                        }
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                place.name,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = Color.White,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                fontSize = 13.sp
+                                                            )
+                                                            Text(
+                                                                place.address.ifEmpty { "Ubicación guardada" },
+                                                                color = Color.White.copy(alpha = 0.65f),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                fontSize = 11.sp
+                                                            )
+                                                        }
+                                                        if (place.distanceKm > 0) {
+                                                            Text(
+                                                                text = if (place.distanceKm < 1)
+                                                                    "${(place.distanceKm * 1000).toInt()} m"
+                                                                else
+                                                                    String.format("%.1f km", place.distanceKm),
+                                                                fontSize = 11.sp,
+                                                                color = Color(0xFF38F2A6),
+                                                                fontWeight = FontWeight.Bold,
+                                                                modifier = Modifier.padding(end = 6.dp)
+                                                            )
+                                                        }
+                                                        // Botón directo "IR" con 1 toque
+                                                        Surface(
+                                                            onClick = {
+                                                                val destPt = Point.fromLngLat(place.lon, place.lat)
+                                                                isAerialExploreMode = false
+                                                                selectedDestination = destPt
+                                                                selectedDestinationTitle = place.name
+                                                                destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                                                val pm = pointAnnotMgr
+                                                                    ?: mapView.annotations.createPointAnnotationManager()
+                                                                        .also { pointAnnotMgr = it }
+                                                                val iconBmp = drawCustomPin(uiColor)
+                                                                destAnnotation = pm.create(
+                                                                    PointAnnotationOptions()
+                                                                        .withPoint(destPt)
+                                                                        .withIconImage(iconBmp)
+                                                                )
+                                                                searchResults = emptyList()
+                                                                showFavorites = false
+                                                                focusManager.clearFocus()
+                                                                NavigationState.currentLocation.value?.let { loc ->
+                                                                    calculateRoute(
+                                                                        Point.fromLngLat(loc.longitude, loc.latitude),
+                                                                        destPt
+                                                                    )
+                                                                }
+                                                            },
+                                                            shape = RoundedCornerShape(10.dp),
+                                                            color = Color(0xFF00E676)
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Icon(Icons.Default.Navigation, null, tint = Color(0xFF052216), modifier = Modifier.size(13.dp))
+                                                                Spacer(modifier = Modifier.width(3.dp))
+                                                                Text("IR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color(0xFF052216))
+                                                            }
+                                                        }
+                                                        if (showFavorites) {
+                                                            IconButton(
+                                                                onClick = {
+                                                                    favManager.removeFavorite(place.name)
+                                                                    favoritesVersion++
+                                                                },
+                                                                modifier = Modifier.size(28.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Default.DeleteOutline,
+                                                                    contentDescription = "Eliminar favorito",
+                                                                    tint = Color.White.copy(alpha = 0.55f),
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1699,57 +1927,150 @@ fun NavigationMap(
                     }
                 }
 
-                // 3. Píldora flotante para iniciar ruta cuando se ha marcado un destino
+                // 3. Tarjeta Glassmorphic Animada al marcar un Punto en el Mapa (con pulso neón + Guardar Favorito + Ruta 3D)
                 AnimatedVisibility(
                     visible = selectedDestination != null && !NavigationState.isRouteActive.value,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
+                    enter = scaleIn(
+                        initialScale = 0.86f,
+                        animationSpec = spring(dampingRatio = 0.65f, stiffness = 380f)
+                    ) + fadeIn(tween(180)) + expandVertically(),
+                    exit = scaleOut(targetScale = 0.88f) + fadeOut(tween(150)) + shrinkVertically()
                 ) {
+                    val destPt = selectedDestination
+                    val liveDistanceStr = remember(destPt, NavigationState.currentLocation.value) {
+                        val loc = NavigationState.currentLocation.value
+                        if (destPt != null && loc != null && loc.latitude != 0.0) {
+                            val res = FloatArray(1)
+                            android.location.Location.distanceBetween(
+                                loc.latitude, loc.longitude,
+                                destPt.latitude(), destPt.longitude(),
+                                res
+                            )
+                            if (res[0] < 1000f) "${res[0].toInt()} m de distancia"
+                            else String.format("%.1f km de distancia", res[0] / 1000f)
+                        } else "Destino listo para navegar"
+                    }
+
+                    val pulseInfinite = rememberInfiniteTransition(label = "pinPulse")
+                    val pulseScale by pulseInfinite.animateFloat(
+                        initialValue = 0.92f,
+                        targetValue = 1.18f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(850),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pinPulseScale"
+                    )
+
                     Surface(
                         modifier = Modifier
                             .padding(top = 8.dp)
-                            .widthIn(max = 310.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF141D52).copy(alpha = 0.95f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38F2A6).copy(alpha = 0.5f)),
-                        shadowElevation = 10.dp
+                            .widthIn(min = 290.dp, max = 365.dp),
+                        shape = RoundedCornerShape(22.dp),
+                        color = Color(0xFF0D1438).copy(alpha = 0.95f),
+                        border = BorderStroke(
+                            1.4.dp,
+                            Brush.linearGradient(
+                                listOf(Color(0xFF38F2A6), Color(0xFF4B7BFF))
+                            )
+                        ),
+                        shadowElevation = 16.dp
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Icono de destino con pulso radar animado
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .scale(pulseScale)
+                                    .background(Color(0xFF38F2A6).copy(alpha = 0.18f), CircleShape)
+                                    .border(1.dp, Color(0xFF38F2A6).copy(alpha = 0.65f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Place,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38F2A6),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Destino seleccionado",
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White.copy(alpha = 0.7f),
-                                    fontSize = 10.sp
+                                    text = selectedDestinationTitle.ifBlank { "Punto marcado" },
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    routeDistanceText.ifEmpty { "Listo para iniciar" },
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Black,
+                                    text = routeDistanceText.ifEmpty { liveDistanceStr },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = Color(0xFF38F2A6),
                                     maxLines = 1
                                 )
                             }
+
+                            // Botón para Guardar este punto en Favoritos con animación
+                            IconButton(
+                                onClick = {
+                                    destPt?.let { pt ->
+                                        favoriteLocationToSave = pt
+                                        favoriteNameToSave = if (selectedDestinationTitle != "Punto seleccionado en el mapa") selectedDestinationTitle else ""
+                                        favoriteAddressToSave = "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}"
+                                        selectedIconType = "Star"
+                                        isSavingFavorite = true
+                                        showSaveFavoriteDialog = true
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Color(0xFF1A265C), CircleShape)
+                            ) {
+                                Icon(
+                                    Icons.Default.StarBorder,
+                                    contentDescription = "Guardar en Favoritos",
+                                    tint = Color(0xFFFFD54F),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Botón Cancelar punto
                             IconButton(
                                 onClick = {
                                     selectedDestination = null
+                                    selectedDestinationTitle = ""
                                     routeDistanceText = ""
                                     isPlacingDestination = false
                                     destAnnotation?.let { pointAnnotMgr?.delete(it) }
                                     destAnnotation = null
+                                    if (!isAerialExploreMode) {
+                                        returnTo3DChaseView()
+                                    }
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Color(0xFF2A1832), CircleShape)
                             ) {
-                                Icon(Icons.Default.Close, "Cancelar", tint = Color.White, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, "Cancelar", tint = Color(0xFFFF6E7F), modifier = Modifier.size(16.dp))
                             }
+
                             Spacer(modifier = Modifier.width(6.dp))
+
+                            // Botón Iniciar Ruta 3D
                             Button(
                                 onClick = {
                                     NavigationState.currentLocation.value?.let { loc ->
                                         val dest = selectedDestination!!
+                                        isAerialExploreMode = false
                                         calculateRoute(
                                             Point.fromLngLat(loc.longitude, loc.latitude),
                                             Point.fromLngLat(dest.longitude(), dest.latitude())
@@ -1758,19 +2079,19 @@ fun NavigationMap(
                                 },
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                                modifier = Modifier.height(34.dp),
+                                modifier = Modifier.height(36.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp)
                             ) {
-                                Icon(Icons.Default.Directions, null, tint = Color(0xFF062016), modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Navigation, null, tint = Color(0xFF052015), modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("IR", fontWeight = FontWeight.Black, color = Color(0xFF062016), fontSize = 12.sp)
+                                Text("IR 3D", fontWeight = FontWeight.Black, color = Color(0xFF052015), fontSize = 12.sp)
                             }
                         }
                     }
                 }
             }
 
-            // ── CONTROLES RÁPIDOS DE MAPA (Esquina Superior Derecha, lejos de los relojes inferiores) ──
+            // ── CONTROLES RÁPIDOS DE MAPA (Esquina Superior Derecha: Vista Aérea 2D / 3D, Centrar, Luces, Estilo) ──
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -1778,20 +2099,51 @@ fun NavigationMap(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Botón recentrar — vuelve inmediatamente al ángulo 3D Chase Cam (78°)
-                AnimatedVisibility(visible = !isFollowingLocation) {
+                // Botón Principal: Alternar Vista Aérea Temporal (2D Explorar) <-> Conducción 3D (Chase Cam)
+                Surface(
+                    onClick = {
+                        if (isAerialExploreMode) {
+                            returnTo3DChaseView()
+                        } else {
+                            activateAerialExplore()
+                        }
+                    },
+                    shape = RoundedCornerShape(50),
+                    color = if (isAerialExploreMode) Color(0xFF00E5FF) else Color(0xFF10173A).copy(alpha = 0.90f),
+                    border = BorderStroke(
+                        1.2.dp,
+                        if (isAerialExploreMode) Color.White else Color(0xFF38F2A6).copy(alpha = 0.55f)
+                    ),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.height(40.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isAerialExploreMode) Icons.Default.DirectionsCar else Icons.Default.Explore,
+                            contentDescription = "Alternar Vista Aérea / 3D",
+                            tint = if (isAerialExploreMode) Color(0xFF051824) else Color(0xFF38F2A6),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = if (isAerialExploreMode) "3D AUTO" else "2D AÉREA",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isAerialExploreMode) Color(0xFF051824) else Color.White
+                        )
+                    }
+                }
+
+                // Botón recentrar — vuelve inmediatamente al ángulo 3D Chase Cam (76°)
+                AnimatedVisibility(visible = !isFollowingLocation && !isAerialExploreMode) {
                     SmallFloatingActionButton(
-                        onClick = {
-                            isFollowingLocation = true
-                            isPlacingDestination = false
-                            locationWhenFollowDisabled = null
-                            autoCenterJob?.cancel()
-                            val vp = mapView.viewport
-                            vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
-                        },
+                        onClick = returnTo3DChaseView,
                         containerColor = Color(0xFF00E676),
                         contentColor = Color(0xFF071E16),
-                        shape = RoundedCornerShape(50),
+                        shape = CircleShape,
                         modifier = Modifier.size(40.dp)
                     ) {
                         Icon(Icons.Default.MyLocation, "Centrar 3D", modifier = Modifier.size(20.dp))
@@ -1801,9 +2153,9 @@ fun NavigationMap(
                 // Botón ajuste de luces del vehículo 3D
                 SmallFloatingActionButton(
                     onClick = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
-                    containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0xFF10173A).copy(alpha = 0.85f),
+                    containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0xFF10173A).copy(alpha = 0.88f),
                     contentColor = Color.White,
-                    shape = RoundedCornerShape(50),
+                    shape = CircleShape,
                     modifier = Modifier.size(40.dp)
                 ) {
                     Text(if (showGlowTuning) "✕" else "🔦", fontSize = 14.sp)
@@ -1813,9 +2165,9 @@ fun NavigationMap(
                 Box {
                     SmallFloatingActionButton(
                         onClick = { showStyleSelector = !showStyleSelector },
-                        containerColor = Color(0xFF10173A).copy(alpha = 0.85f),
+                        containerColor = Color(0xFF10173A).copy(alpha = 0.88f),
                         contentColor = Color.White,
-                        shape = RoundedCornerShape(50),
+                        shape = CircleShape,
                         modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
@@ -1838,6 +2190,43 @@ fun NavigationMap(
                         DropdownMenuItem(text = { Text("Noche Cockpit") }, leadingIcon = { Icon(Icons.Default.DarkMode, null) },                                      onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
                         DropdownMenuItem(text = { Text("Neon Electric") }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00B0FF)) },                 onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
                         DropdownMenuItem(text = { Text("Satélite") },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF4CAF50)) },               onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
+                    }
+                }
+            }
+
+            // ── Píldora flotante inferior cuando está en Modo Exploración Aérea 2D ──
+            AnimatedVisibility(
+                visible = isAerialExploreMode,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 18.dp, bottom = 18.dp)
+            ) {
+                Surface(
+                    onClick = returnTo3DChaseView,
+                    shape = RoundedCornerShape(50),
+                    color = Color(0xFF00E676),
+                    shadowElevation = 12.dp,
+                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.7f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Navigation,
+                            contentDescription = null,
+                            tint = Color(0xFF042214),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "VOLVER A VISTA 3D",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF042214)
+                        )
                     }
                 }
             }
@@ -1882,79 +2271,237 @@ fun NavigationMap(
                 }
             }
 
-            // ── Diálogo guardar favorito ──────────────────────────────────────────
-            if (showSaveFavoriteDialog) {
-                AlertDialog(
-                    onDismissRequest = {
-                        showSaveFavoriteDialog = false
-                        isSavingFavorite = false
-                    },
-                    title = { Text("Guardar Favorito", fontWeight = FontWeight.Bold) },
-                    text  = {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            favoriteLocationToSave?.let { pt ->
-                                Text(
-                                    "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}",
-                                    fontSize = 11.sp,
-                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                                )
+            // ── Modal Glassmorphic Moderno para Guardar Favorito (reemplaza el AlertDialog simple) ──
+            AnimatedVisibility(
+                visible = showSaveFavoriteDialog,
+                enter = fadeIn(tween(180)) + scaleIn(
+                    initialScale = 0.85f,
+                    animationSpec = spring(dampingRatio = 0.68f, stiffness = 420f)
+                ),
+                exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.88f),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .widthIn(min = 320.dp, max = 420.dp)
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    color = Color(0xFF0B1130).copy(alpha = 0.97f),
+                    border = BorderStroke(
+                        1.6.dp,
+                        Brush.linearGradient(
+                            listOf(Color(0xFF38F2A6), Color(0xFF00E5FF), Color(0xFF5C6BC0))
+                        )
+                    ),
+                    shadowElevation = 24.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Cabecera con icono brillante
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(
+                                            Brush.linearGradient(listOf(Color(0xFF38F2A6), Color(0xFF00B0FF))),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Star, null, tint = Color(0xFF051B14), modifier = Modifier.size(22.dp))
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        "Nuevo Lugar Favorito",
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White
+                                    )
+                                    favoriteLocationToSave?.let { pt ->
+                                        Text(
+                                            "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF38F2A6)
+                                        )
+                                    }
+                                }
                             }
-                            TextField(
-                                value         = favoriteNameToSave,
-                                onValueChange = {
-                                    favoriteNameToSave = it
-                                    NavigationState.notifyUserInteraction()
+                            IconButton(
+                                onClick = {
+                                    showSaveFavoriteDialog = false
+                                    isSavingFavorite = false
                                 },
-                                label         = { Text("Nombre del lugar") },
-                                singleLine    = true,
-                                modifier      = Modifier.fillMaxWidth()
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(Icons.Default.Close, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                            }
+                        }
+
+                        // Selector de categoría con tarjetas interactivas animadas
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val categories = listOf(
+                                Triple("Star", "Favorito", Icons.Default.Star),
+                                Triple("Home", "Casa", Icons.Default.Home),
+                                Triple("Work", "Trabajo", Icons.Default.Work)
                             )
-                            Text("Tipo de icono", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("Star" to Icons.Default.Star, "Home" to Icons.Default.Home, "Work" to Icons.Default.Work).forEach { (type, icon) ->
-                                    FilterChip(
-                                        selected = selectedIconType == type,
-                                        onClick  = { selectedIconType = type },
-                                        label    = { Text(type) },
-                                        leadingIcon = { Icon(icon, null, modifier = Modifier.size(14.dp)) }
+                            categories.forEach { (typeKey, label, iconVec) ->
+                                val isSel = selectedIconType == typeKey
+                                val cardScale by animateFloatAsState(
+                                    targetValue = if (isSel) 1.04f else 0.97f,
+                                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 450f),
+                                    label = "catCardScale_$typeKey"
+                                )
+                                Surface(
+                                    onClick = {
+                                        selectedIconType = typeKey
+                                        if (favoriteNameToSave.isBlank() && typeKey != "Star") {
+                                            favoriteNameToSave = label
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = if (isSel) Color(0xFF193664) else Color(0xFF131B42),
+                                    border = BorderStroke(
+                                        if (isSel) 1.5.dp else 1.dp,
+                                        if (isSel) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.14f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .scale(cardScale)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 10.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            iconVec,
+                                            contentDescription = label,
+                                            tint = if (isSel) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSel) Color.White else Color.White.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Etiquetas rápidas (1 toque para rellenar nombre)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("Casa", "Trabajo", "Gym", "Centro", "Súper").forEach { quickTag ->
+                                Surface(
+                                    onClick = { favoriteNameToSave = quickTag },
+                                    shape = RoundedCornerShape(50),
+                                    color = if (favoriteNameToSave == quickTag) Color(0xFF38F2A6).copy(alpha = 0.22f) else Color(0xFF151E48),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (favoriteNameToSave == quickTag) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.15f)
+                                    )
+                                ) {
+                                    Text(
+                                        text = quickTag,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                     )
                                 }
                             }
                         }
-                    },
-                    confirmButton = {
-                        Button(
-                            enabled = favoriteNameToSave.isNotBlank(),
-                            onClick = {
-                                favoriteLocationToSave?.let { pt ->
-                                    favManager.addFavorite(
-                                        PlaceResult(
-                                            name      = favoriteNameToSave.trim(),
-                                            address   = favoriteAddressToSave.ifEmpty { "Favorito guardado" },
-                                            lat       = pt.latitude(),
-                                            lon       = pt.longitude(),
-                                            iconType  = selectedIconType
-                                        )
-                                    )
+
+                        // Campo de texto moderno
+                        OutlinedTextField(
+                            value = favoriteNameToSave,
+                            onValueChange = {
+                                favoriteNameToSave = it
+                                NavigationState.notifyUserInteraction()
+                            },
+                            placeholder = {
+                                Text("Escribe un nombre (ej. Casa, Oficina...)", color = Color.White.copy(alpha = 0.45f), fontSize = 13.sp)
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF38F2A6),
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                                cursorColor = Color(0xFF38F2A6),
+                                focusedContainerColor = Color(0xFF121A40),
+                                unfocusedContainerColor = Color(0xFF121A40)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Botones de acción
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = {
                                     showSaveFavoriteDialog = false
-                                    isSavingFavorite       = false
-                                    Toast.makeText(context, "✓ Guardado en favoritos", Toast.LENGTH_SHORT).show()
-                                    isFollowingLocation = true
-                                    locationWhenFollowDisabled = null
-                                    autoCenterJob?.cancel()
-                                    val vp = mapView.viewport
-                                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                                    isSavingFavorite = false
                                 }
+                            ) {
+                                Text("Cancelar", color = Color.White.copy(alpha = 0.75f), fontWeight = FontWeight.Bold)
                             }
-                        ) { Text("Guardar") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            showSaveFavoriteDialog = false
-                            isSavingFavorite       = false
-                        }) { Text("Cancelar") }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                enabled = favoriteNameToSave.isNotBlank(),
+                                onClick = {
+                                    favoriteLocationToSave?.let { pt ->
+                                        favManager.addFavorite(
+                                            PlaceResult(
+                                                name     = favoriteNameToSave.trim(),
+                                                address  = favoriteAddressToSave.ifEmpty { "Favorito guardado" },
+                                                lat      = pt.latitude(),
+                                                lon      = pt.longitude(),
+                                                iconType = selectedIconType
+                                            )
+                                        )
+                                        favoritesVersion++
+                                        showSaveFavoriteDialog = false
+                                        isSavingFavorite       = false
+                                        Toast.makeText(context, "★ Guardado en favoritos", Toast.LENGTH_SHORT).show()
+                                        if (!isAerialExploreMode) {
+                                            returnTo3DChaseView()
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF00E676),
+                                    disabledContainerColor = Color(0xFF233258)
+                                )
+                            ) {
+                                Icon(Icons.Default.Check, null, tint = Color(0xFF042014), modifier = Modifier.size(17.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Guardar Favorito", color = Color(0xFF042014), fontWeight = FontWeight.Black)
+                            }
+                        }
                     }
-                )
+                }
             }
 
         } // Cierra Box de HUD
@@ -1962,8 +2509,8 @@ fun NavigationMap(
 }
 
 /**
- * Horizonte 3D con degradado de cielo y silueta arquitectónica de ciudad (estilo Cockpit HUD).
- * Se funde suavemente en la línea del horizonte con las calles en perspectiva de 78°.
+ * Horizonte 3D con degradado de cielo, silueta de ciudad y faldón Royal Indigo continuo
+ * que sella el horizonte del mapa al 100% evitando cualquier franja negra de Mapbox.
  */
 @Composable
 private fun CockpitHorizonSkyBackdrop(
@@ -1974,23 +2521,24 @@ private fun CockpitHorizonSkyBackdrop(
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val horizonY = h * 0.78f
+        val horizonY = h * 0.56f
+        val solidGroundEndY = h * 0.84f
 
         val skyTop = when (currentStyle) {
             "NEON" -> Color(0xFF06081E)
-            else   -> Color(0xFF0E3C75)
+            else   -> Color(0xFF0C3B75)
         }
         val skyMid = when (currentStyle) {
             "NEON" -> Color(0xFF141D5E)
-            else   -> Color(0xFF2872BD)
+            else   -> Color(0xFF2672BE)
         }
         val skyHorizon = when (currentStyle) {
             "NEON" -> Color(0xFF263494)
-            else   -> Color(0xFF4B96E5)
+            else   -> Color(0xFF4D98E8)
         }
-        val groundBlend = when (currentStyle) {
-            "NEON" -> Color(0xFF07061A)
-            else   -> Color(0xFF181E62)
+        val groundColor = when (currentStyle) {
+            "NEON" -> Color(0xFF07061C)
+            else   -> Color(0xFF232584)
         }
 
         // 1. Degradado del cielo hasta la línea del horizonte
@@ -1999,7 +2547,7 @@ private fun CockpitHorizonSkyBackdrop(
                 colors = listOf(
                     skyTop.copy(alpha = alpha),
                     skyMid.copy(alpha = alpha),
-                    skyHorizon.copy(alpha = alpha * 0.96f)
+                    skyHorizon.copy(alpha = alpha)
                 ),
                 startY = 0f,
                 endY = horizonY
@@ -2007,27 +2555,25 @@ private fun CockpitHorizonSkyBackdrop(
             size = androidx.compose.ui.geometry.Size(w, horizonY)
         )
 
-        // 2. Silueta de edificios lejanos (capa trasera)
-        val backBuildingColor = Color(0xFF3168B8).copy(alpha = alpha * 0.55f)
-        val frontBuildingColor = Color(0xFF214A96).copy(alpha = alpha * 0.78f)
+        // 2. Silueta arquitectónica de ciudad en el horizonte
+        val backBuildingColor = Color(0xFF326AB8).copy(alpha = alpha * 0.58f)
+        val frontBuildingColor = Color(0xFF224B96).copy(alpha = alpha * 0.82f)
         val buildingHeightsBack = floatArrayOf(
-            0.22f, 0.34f, 0.18f, 0.42f, 0.28f, 0.38f, 0.16f, 0.30f, 0.44f, 0.24f,
-            0.20f, 0.12f, 0.10f, 0.14f, 0.22f, 0.36f, 0.26f, 0.40f, 0.20f, 0.35f,
-            0.28f, 0.42f, 0.22f, 0.32f
+            0.24f, 0.36f, 0.20f, 0.44f, 0.30f, 0.40f, 0.18f, 0.32f, 0.46f, 0.26f,
+            0.20f, 0.13f, 0.11f, 0.14f, 0.22f, 0.38f, 0.28f, 0.42f, 0.22f, 0.36f,
+            0.30f, 0.44f, 0.24f, 0.34f
         )
         val countBack = buildingHeightsBack.size
         val stepW = w / countBack
         for (i in 0 until countBack) {
-            // Dejar el corredor central ligeramente más despejado donde converge la carretera
             val centerDist = kotlin.math.abs(i - countBack / 2f) / (countBack / 2f)
-            val scale = (0.35f + 0.65f * centerDist).coerceIn(0.25f, 1f)
+            val scale = (0.38f + 0.62f * centerDist).coerceIn(0.28f, 1f)
             val bh = horizonY * buildingHeightsBack[i] * scale
             drawRect(
                 color = backBuildingColor,
                 topLeft = androidx.compose.ui.geometry.Offset(i * stepW, horizonY - bh),
                 size = androidx.compose.ui.geometry.Size(stepW * 0.92f, bh)
             )
-            // Segunda fila frontal desplazada
             val bhFront = bh * 0.68f
             drawRect(
                 color = frontBuildingColor,
@@ -2036,19 +2582,24 @@ private fun CockpitHorizonSkyBackdrop(
             )
         }
 
-        // 3. Línea de horizonte + transición atmosférica suave hacia el mapa 3D
+        // 3. Faldón sólido Royal Indigo bajo la línea del horizonte + fundido hacia las calles 3D
+        drawRect(
+            color = groundColor.copy(alpha = alpha),
+            topLeft = androidx.compose.ui.geometry.Offset(0f, horizonY - 1f),
+            size = androidx.compose.ui.geometry.Size(w, solidGroundEndY - horizonY + 2f)
+        )
         drawRect(
             brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                 colors = listOf(
-                    groundBlend.copy(alpha = alpha * 0.98f),
-                    groundBlend.copy(alpha = alpha * 0.75f),
+                    groundColor.copy(alpha = alpha),
+                    groundColor.copy(alpha = alpha * 0.55f),
                     Color.Transparent
                 ),
-                startY = horizonY - 2f,
+                startY = solidGroundEndY,
                 endY = h
             ),
-            topLeft = androidx.compose.ui.geometry.Offset(0f, horizonY - 2f),
-            size = androidx.compose.ui.geometry.Size(w, h - horizonY + 2f)
+            topLeft = androidx.compose.ui.geometry.Offset(0f, solidGroundEndY),
+            size = androidx.compose.ui.geometry.Size(w, h - solidGroundEndY)
         )
     }
 }
@@ -2103,7 +2654,7 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     } catch (e: Exception) { emptyList() }
 }
 
-// ── Helper para LocationPuck (3D o 2D) ───────────────────────────────────
+// ── Helper para LocationPuck (3D o 2D con presencia ampliada tipo Cockpit) ─────────
 fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int, scale: Float = 4f): com.mapbox.maps.plugin.LocationPuck {
     val modelAsset = when (vehicleType) {
         "SEDAN"     -> "asset://models/Sedan.glb"
@@ -2112,32 +2663,26 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
         "TAXI"      -> "asset://models/Taxi.glb"
         "STYLUS"    -> "asset://models/Stylus.glb"
         "CORSA"     -> "asset://models/Corsa.glb"
-        else        -> null // FLECHA, TRUCK o CUSTOM usan el renderizador 2D vectorial de alta nitidez
+        else        -> null
     }
 
     if (modelAsset != null) {
-        // Los modelos originales (Sedan, Hatchback) tienen un nodo interno en Blender con matriz x100.
-        // Los nuevos modelos al exportarse desde Blender (sin modificar la escala de la escena) 
-        // pueden quedar en escala de milímetros. Aplicamos un multiplicador de x500 para igualarlos
-        // al tamaño de un auto real (~4.5 - 5 metros) dentro del mapa.
-        val finalScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 500f else scale
+        // Multiplicador base x1.95 adicional para que el vehículo 3D tenga presencia protagonista en tercera persona
+        val baseScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 500f else scale
+        val finalScale = baseScale * 1.95f
 
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
-            // Escala vinculada al Slider de la UI (y ajustada por el multiplicador de base)
             modelScale = listOf(finalScale, finalScale, finalScale),
-            // Los modelos GLB tienen el frente hacia atrás respecto a Mapbox;
-            // se rota 180° en Z (yaw) para que el morro apunte en la dirección de movimiento.
             modelRotation = listOf(0f, 0f, 180f)
         )
     }
 
-    // Fallback a 2D para TRUCK o CUSTOM
     val bmp = try {
         if (vehicleType == "CUSTOM" && customPath.isNotEmpty()) {
             val file = java.io.File(customPath)
             if (file.exists()) android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                .let { android.graphics.Bitmap.createScaledBitmap(it, 120, 120, true) }
+                .let { android.graphics.Bitmap.createScaledBitmap(it, 150, 150, true) }
             else drawVehicleBitmap(context, "SEDAN", mapIconColor)
         } else {
             drawVehicleBitmap(context, vehicleType, mapIconColor)
@@ -2151,8 +2696,8 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
 
 // ── Helpers de dibujo (fallback 2D) ───────────────────────────────────────
 fun drawVehicleBitmap(context: Context, type: String, color: Int, heightScale: Float = 1.0f): Bitmap {
-    val width  = 140
-    val height = (140 * heightScale).toInt()
+    val width  = 160
+    val height = (160 * heightScale).toInt()
 
     val drawableResId = when (type) {
         "SEDAN", "STYLUS"    -> R.drawable.ic_sedan
@@ -2201,22 +2746,40 @@ fun drawVehicleBitmap(context: Context, type: String, color: Int, heightScale: F
 }
 
 fun drawCustomPin(color: Int): Bitmap {
-    val b      = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
+    val size = 112
+    val cx = size / 2f
+    val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(b)
-    val p      = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.color = color
-    // Sombra premium
-    p.setShadowLayer(10f, 0f, 5f, 0x99000000.toInt())
-    canvas.drawCircle(40f, 30f, 25f, p)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // Halo de radar neón en la punta inferior del pin
+    p.style = Paint.Style.FILL
+    p.shader = RadialGradient(
+        cx, 92f, 22f,
+        android.graphics.Color.argb(150, 56, 242, 166),
+        android.graphics.Color.TRANSPARENT,
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(cx, 92f, 22f, p)
+    p.shader = null
+
+    // Cuerpo del pin con brillo y sombra profunda
+    p.color = android.graphics.Color.parseColor("#00E676")
+    p.setShadowLayer(12f, 0f, 5f, 0xAA000000.toInt())
+    canvas.drawCircle(cx, 38f, 26f, p)
     val path = Path()
-    path.moveTo(15f, 35f)
-    path.lineTo(40f, 75f)
-    path.lineTo(65f, 35f)
+    path.moveTo(cx - 23f, 46f)
+    path.lineTo(cx, 92f)
+    path.lineTo(cx + 23f, 46f)
     path.close()
     canvas.drawPath(path, p)
     p.clearShadowLayer()
+
+    // Núcleo oscuro + centro blanco brillante
+    p.color = android.graphics.Color.parseColor("#0B1338")
+    canvas.drawCircle(cx, 38f, 14f, p)
     p.color = android.graphics.Color.WHITE
-    canvas.drawCircle(40f, 30f, 10f, p)
+    canvas.drawCircle(cx, 38f, 6.5f, p)
     return b
 }
 

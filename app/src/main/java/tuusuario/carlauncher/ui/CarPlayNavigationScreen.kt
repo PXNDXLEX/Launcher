@@ -4,9 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -54,19 +54,15 @@ import androidx.compose.ui.unit.sp
 import com.tuusuario.carlauncher.services.ArletAssistant
 import com.tuusuario.carlauncher.services.DashcamManager
 import com.tuusuario.carlauncher.services.GlobalState
-import com.tuusuario.carlauncher.services.SpeedRecordTracker
 import com.tuusuario.carlauncher.ui.widgets.SpeedometerWidget
 import kotlinx.coroutines.delay
-import kotlin.math.cos
-import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
- * Interfaz Cockpit HUD 3D para Modo Navegación / Seguimiento GPS:
- *  - Arriba Izquierda: Reproductor de Música HUD moderno con título, carátula, barra de progreso y botones circulares.
- *  - Abajo Izquierda: Pod circular de Velocímetro que muestra los 18 velocímetros creados (deslizar para cambiar estilo).
- *  - Abajo Derecha: Pod circular simétrico de Tacómetro / Telemetría con escala graduada y aguja dinámica.
+ * Interfaz Cockpit HUD 3D limpia y moderna para Modo Navegación / Seguimiento GPS:
+ *  - Arriba Izquierda: Reproductor de Música HUD con título, carátula, barra de progreso y botones circulares.
+ *  - Abajo Izquierda: Pod circular de Velocímetro con los 18 velocímetros creados (deslizar para cambiar estilo).
  *  - Abajo Centro: Barra Dock redondeada estilo cabina (Home, Velocímetro, Ajustes, Apps, Voz Sara / Dashcam).
+ *  (Sin tacómetro derecho para dejar el mapa 3D completamente despejado).
  */
 @Composable
 fun CarPlayNavigationOverlay(
@@ -80,7 +76,7 @@ fun CarPlayNavigationOverlay(
     onOpenSettings: () -> Unit
 ) {
     val navPanelPct = AppSettings.navPanelPercent.value.coerceIn(25f, 50f)
-    val scaleFactor = 0.88f + ((navPanelPct - 25f) / 25f) * 0.24f
+    val scaleFactor = 0.90f + ((navPanelPct - 25f) / 25f) * 0.24f
 
     BoxWithConstraints(
         modifier = Modifier
@@ -88,13 +84,16 @@ fun CarPlayNavigationOverlay(
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         val gaugeSizeRaw = if (isLandscape) {
-            (minOf(maxWidth * 0.27f, maxHeight * 0.56f) * scaleFactor).coerceIn(170.dp, 255.dp)
+            (minOf(maxWidth * 0.27f, maxHeight * 0.56f) * scaleFactor).coerceIn(172.dp, 255.dp)
         } else {
-            (minOf(maxWidth * 0.44f, maxHeight * 0.28f) * scaleFactor).coerceIn(148.dp, 210.dp)
+            (minOf(maxWidth * 0.44f, maxHeight * 0.28f) * scaleFactor).coerceIn(150.dp, 210.dp)
         }
         val animatedGaugeSize by animateDpAsState(
             targetValue = gaugeSizeRaw,
-            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            ),
             label = "cockpitGaugeSize"
         )
 
@@ -102,15 +101,21 @@ fun CarPlayNavigationOverlay(
         CockpitTopLeftMusicHud(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .widthIn(max = if (isLandscape) 265.dp else 235.dp),
+                .widthIn(max = if (isLandscape) 275.dp else 235.dp),
             onOpenYoutube = onOpenYoutube
         )
 
         // ── 2. ABAJO IZQUIERDA: POD DE VELOCÍMETRO (CON LOS 18 VELOCÍMETROS CREADOS) ──
         AnimatedVisibility(
             visible = isSplitMode,
-            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(tween(240)) + scaleIn(initialScale = 0.9f),
-            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(tween(180)) + scaleOut(targetScale = 0.9f),
+            enter = slideInHorizontally(
+                initialOffsetX = { -it },
+                animationSpec = spring(dampingRatio = 0.78f, stiffness = 360f)
+            ) + fadeIn(tween(220)) + scaleIn(initialScale = 0.88f),
+            exit = slideOutHorizontally(
+                targetOffsetX = { -it },
+                animationSpec = tween(200, easing = FastOutSlowInEasing)
+            ) + fadeOut(tween(180)) + scaleOut(targetScale = 0.88f),
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(bottom = if (isLandscape) 4.dp else 68.dp)
@@ -121,21 +126,7 @@ fun CarPlayNavigationOverlay(
             )
         }
 
-        // ── 3. ABAJO DERECHA: POD SIMÉTRICO DE TACÓMETRO / TELEMETRÍA ──
-        AnimatedVisibility(
-            visible = isSplitMode,
-            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(tween(240)) + scaleIn(initialScale = 0.9f),
-            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(tween(180)) + scaleOut(targetScale = 0.9f),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = if (isLandscape) 4.dp else 68.dp)
-        ) {
-            CockpitRightTelemetryPod(
-                size = animatedGaugeSize
-            )
-        }
-
-        // ── 4. ABAJO CENTRO: BARRA DOCK REDONDEADA COCKPIT ──
+        // ── 3. ABAJO CENTRO: BARRA DOCK REDONDEADA COCKPIT ──
         CockpitBottomCenterDock(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -151,7 +142,7 @@ fun CarPlayNavigationOverlay(
 }
 
 /**
- * Widget de Música HUD ubicado en la esquina superior izquierda (como en el diseño de referencia),
+ * Widget de Música HUD ubicado en la esquina superior izquierda,
  * integrando título de la canción, artista, miniatura de carátula, barra de progreso interactiva,
  * botones circulares con aro luminoso, acceso a YouTube PiP y modal expandido al tocar el título.
  */
@@ -194,7 +185,7 @@ private fun CockpitTopLeftMusicHud(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(7.dp)
     ) {
-        // Fila 1: Mini carátula + Título ("Bass Persuades") + Subtítulo artista (toque abre reproductor completo)
+        // Fila 1: Mini carátula + Título + Subtítulo artista (toque abre reproductor completo)
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(14.dp))
@@ -207,9 +198,9 @@ private fun CockpitTopLeftMusicHud(
                     bitmap = artImageBitmap,
                     contentDescription = "Carátula",
                     modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(9.dp)),
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.40f), RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Crop
                 )
                 Spacer(modifier = Modifier.width(9.dp))
@@ -218,7 +209,7 @@ private fun CockpitTopLeftMusicHud(
             Column(modifier = Modifier.weight(1f, fill = false)) {
                 Text(
                     text = songTitle.ifBlank { "Sin reproducción" },
-                    fontSize = 18.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White,
                     maxLines = 1,
@@ -231,7 +222,7 @@ private fun CockpitTopLeftMusicHud(
                         text = subtitleText,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFB8CEFF),
+                        color = Color(0xFFC2D6FF),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = TextStyle(shadow = titleShadow)
@@ -244,7 +235,7 @@ private fun CockpitTopLeftMusicHud(
         if (duration > 0L) {
             Box(
                 modifier = Modifier
-                    .width(196.dp)
+                    .width(204.dp)
                     .height(10.dp)
                     .pointerInput(duration) {
                         detectTapGestures { offset ->
@@ -276,9 +267,9 @@ private fun CockpitTopLeftMusicHud(
             }
         }
 
-        // Fila 2: Botones circulares translúcidos con aro luminoso (|<, Play/Pause, >|, BT/YouTube)
+        // Fila 2: Botones circulares translúcidos con aro luminoso (|<, Play/Pause, >|, BT, YouTube)
         Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             HudCircleMediaButton(
@@ -449,7 +440,7 @@ private fun CockpitSpeedometerPod(
             drawArc(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF8A94B8).copy(alpha = 0.65f),
+                        Color(0xFF8A94B8).copy(alpha = 0.68f),
                         Color(0xFF3E4668).copy(alpha = 0.35f)
                     )
                 ),
@@ -485,188 +476,13 @@ private fun CockpitSpeedometerPod(
 }
 
 /**
- * Pod Circular Derecho Simétrico: Reloj de Tacómetro / Telemetría con el mismo diseño visual
- * del medidor derecho de la imagen de referencia (arco metálico de 240°, marcas graduadas y aguja roja),
- * más lectura opcional de RPM / Récord Máximo al tocarlo.
- */
-@Composable
-private fun CockpitRightTelemetryPod(
-    size: Dp
-) {
-    val speedKmH = NavigationState.currentSpeedKmH.value
-    val todayMax = SpeedRecordTracker.todayMaxLive.value
-    var showTelemetryText by remember { mutableStateOf(false) }
-
-    // Simulación suave de RPM / carga dinámica en función de la velocidad para mover la aguja roja
-    val targetGaugeFraction = remember(speedKmH) {
-        when {
-            speedKmH <= 1f -> 0.04f
-            else -> {
-                // Simula cambios de marcha realistas (1ª..6ª) entre 15% y 88% del arco
-                val gearSpans = floatArrayOf(28f, 52f, 82f, 115f, 150f, 210f)
-                var gearIdx = 0
-                while (gearIdx < gearSpans.lastIndex && speedKmH > gearSpans[gearIdx]) {
-                    gearIdx++
-                }
-                val prevSpan = if (gearIdx == 0) 0f else gearSpans[gearIdx - 1]
-                val gearProgress = ((speedKmH - prevSpan) / (gearSpans[gearIdx] - prevSpan)).coerceIn(0f, 1f)
-                (0.18f + gearProgress * 0.68f).coerceIn(0.05f, 0.95f)
-            }
-        }
-    }
-
-    val animatedFraction by animateFloatAsState(
-        targetValue = targetGaugeFraction,
-        animationSpec = tween(durationMillis = 160, easing = LinearEasing),
-        label = "rightGaugeNeedle"
-    )
-
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .clickable { showTelemetryText = !showTelemetryText },
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = this.size.width
-            val h = this.size.height
-            val radius = minOf(w, h) / 2f
-            val center = Offset(w / 2f, h / 2f)
-
-            // 1. Fondo circular oscuro profundo con degradado radial idéntico a la imagen
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF151946).copy(alpha = 0.94f),
-                        Color(0xFF0A0C26).copy(alpha = 0.97f),
-                        Color(0xFF050614).copy(alpha = 0.92f)
-                    ),
-                    center = center,
-                    radius = radius
-                ),
-                radius = radius * 0.96f,
-                center = center
-            )
-
-            // 2. Bisel exterior arqueado (150° a 390°, 240° de barrido)
-            val outerInset = radius * 0.055f
-            drawArc(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF8C96BA).copy(alpha = 0.68f),
-                        Color(0xFF3A4264).copy(alpha = 0.32f)
-                    )
-                ),
-                startAngle = 150f,
-                sweepAngle = 240f,
-                useCenter = false,
-                topLeft = Offset(outerInset, outerInset),
-                size = Size(w - outerInset * 2f, h - outerInset * 2f),
-                style = Stroke(width = radius * 0.055f, cap = StrokeCap.Round)
-            )
-
-            // 3. Anillo interior oscuro sutil
-            val innerArcInset = radius * 0.14f
-            drawArc(
-                color = Color(0xFF2B3258).copy(alpha = 0.65f),
-                startAngle = 150f,
-                sweepAngle = 240f,
-                useCenter = false,
-                topLeft = Offset(innerArcInset, innerArcInset),
-                size = Size(w - innerArcInset * 2f, h - innerArcInset * 2f),
-                style = Stroke(width = radius * 0.025f, cap = StrokeCap.Round)
-            )
-
-            // 4. Marcas graduadas (ticks) alrededor del arco de 240°
-            val totalTicks = 24
-            val tickOuterR = radius * 0.84f
-            for (i in 0..totalTicks) {
-                val angleDeg = 150f + (i.toFloat() / totalTicks) * 240f
-                val angleRad = Math.toRadians(angleDeg.toDouble())
-                val isMajor = i % 3 == 0
-                val tickInnerR = if (isMajor) radius * 0.73f else radius * 0.78f
-                val startPt = Offset(
-                    center.x + (tickInnerR * cos(angleRad)).toFloat(),
-                    center.y + (tickInnerR * sin(angleRad)).toFloat()
-                )
-                val endPt = Offset(
-                    center.x + (tickOuterR * cos(angleRad)).toFloat(),
-                    center.y + (tickOuterR * sin(angleRad)).toFloat()
-                )
-                val tickColor = if (i >= 20) {
-                    Color(0xFFFF4D5E).copy(alpha = 0.85f)
-                } else {
-                    Color(0xFF8B93B8).copy(alpha = if (isMajor) 0.78f else 0.45f)
-                }
-                drawLine(
-                    color = tickColor,
-                    start = startPt,
-                    end = endPt,
-                    strokeWidth = if (isMajor) radius * 0.024f else radius * 0.014f,
-                    cap = StrokeCap.Round
-                )
-            }
-
-            // 5. Aguja indicadora roja en el borde (como en la imagen de referencia)
-            val needleAngleDeg = 150f + animatedFraction * 240f
-            val needleRad = Math.toRadians(needleAngleDeg.toDouble())
-            val needleStartR = radius * 0.66f
-            val needleEndR = radius * 0.90f
-            drawLine(
-                color = Color(0xFFFF3B4E),
-                start = Offset(
-                    center.x + (needleStartR * cos(needleRad)).toFloat(),
-                    center.y + (needleStartR * sin(needleRad)).toFloat()
-                ),
-                end = Offset(
-                    center.x + (needleEndR * cos(needleRad)).toFloat(),
-                    center.y + (needleEndR * sin(needleRad)).toFloat()
-                ),
-                strokeWidth = radius * 0.042f,
-                cap = StrokeCap.Round
-            )
-        }
-
-        // Si el usuario toca el reloj derecho, muestra/oculta datos de RPM y Récord del día en el centro
-        if (showTelemetryText) {
-            val rpmValue = (800 + (animatedFraction * 6200).roundToInt())
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "${rpmValue / 1000}.${(rpmValue % 1000) / 100}",
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White
-                )
-                Text(
-                    text = "x1000 RPM",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF9AB0FF)
-                )
-                if (todayMax >= 5f) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "MÁX ${todayMax.roundToInt()} km/h",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF38F2A6)
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Barra Dock Inferior Central estilo Cockpit (idéntica a la cápsula oscura inferior de la imagen):
+ * Barra Dock Inferior Central estilo Cockpit:
  * Contiene los 5 iconos principales:
  *  1. Home (con indicador luminoso cian debajo)
  *  2. Velocímetro
  *  3. Ajustes (Llave inglesa)
  *  4. Aplicaciones (Cuadrícula)
- *  5. Voz Sara / Conectividad (Toque activa asistente Sara; pulsación larga alterna relojes HUD)
- *  + Indicador compacto de grabación Dashcam si está activa.
+ *  5. Voz Sara / Conectividad (Toque activa asistente Sara; pulsación larga inicia/detiene Dashcam)
  */
 @Composable
 private fun CockpitBottomCenterDock(
@@ -706,7 +522,7 @@ private fun CockpitBottomCenterDock(
             horizontalArrangement = Arrangement.spacedBy(22.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 1. HOME (con esfera/halo oscuro e indicador cian luminoso debajo, como en la imagen)
+            // 1. HOME (con indicador cian luminoso debajo, como en la imagen)
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
@@ -731,7 +547,7 @@ private fun CockpitBottomCenterDock(
                 )
             }
 
-            // 2. VELOCÍMETRO (Toque abre velocímetro completo; pulsación larga muestra/oculta relojes HUD)
+            // 2. VELOCÍMETRO (Toque abre velocímetro completo; pulsación larga muestra/oculta reloj HUD)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -778,7 +594,7 @@ private fun CockpitBottomCenterDock(
                 )
             }
 
-            // 5. CONECTIVIDAD / ASISTENTE SARA & DASHCAM (Icono teléfono con ondas igual a la imagen)
+            // 5. CONECTIVIDAD / ASISTENTE SARA & DASHCAM
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
