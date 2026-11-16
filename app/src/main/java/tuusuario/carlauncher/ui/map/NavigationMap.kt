@@ -2237,43 +2237,6 @@ fun NavigationMap(
                 }
             }
 
-            // ── Píldora flotante inferior cuando está en Modo Exploración Aérea 2D ──
-            AnimatedVisibility(
-                visible = isAerialExploreMode,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 18.dp, bottom = 18.dp)
-            ) {
-                Surface(
-                    onClick = returnTo3DChaseView,
-                    shape = RoundedCornerShape(50),
-                    color = Color(0xFF00E676),
-                    shadowElevation = 12.dp,
-                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.7f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Navigation,
-                            contentDescription = null,
-                            tint = Color(0xFF042214),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "VOLVER A VISTA 3D",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFF042214)
-                        )
-                    }
-                }
-            }
-
             // ── Panel de ajuste de luces en tiempo real ────
             Box(
                 modifier = Modifier

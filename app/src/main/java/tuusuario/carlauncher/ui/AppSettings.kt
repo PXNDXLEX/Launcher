@@ -27,6 +27,8 @@ object AppSettings {
     val navSplitMode = mutableStateOf(true)
     // Porcentaje lateral/inferior ocupado por Música + Velocímetro frente al Mapa (25% a 50% máx)
     val navPanelPercent = mutableStateOf(38f)
+    // Modelo/estilo de reloj digital en el HUD de navegación (0..5: 6 modelos)
+    val digitalClockStyle = mutableStateOf(0)
 
     // Personalización de la tarjeta principal del vehículo (Home Bento)
     val userName = mutableStateOf("Lorena")
@@ -76,6 +78,7 @@ object AppSettings {
         autoThemeByTime.value = p.getBoolean("autoThemeByTime", false)
         navSplitMode.value = p.getBoolean("navSplitMode", true)
         navPanelPercent.value = p.getFloat("navPanelPercent", 38f).coerceIn(25f, 50f)
+        digitalClockStyle.value = p.getInt("digitalClockStyle", 0).coerceIn(0, 5)
 
         userName.value = p.getString("userName", "Lorena") ?: "Lorena"
         carBrandName.value = p.getString("carBrandName", "KIA") ?: "KIA"
@@ -126,6 +129,12 @@ object AppSettings {
     fun setSpeedoStyle(style: String) {
         speedoStyle.value = style
         prefs?.edit()?.putString("speedoStyle", style)?.apply()
+    }
+
+    fun setDigitalClockStyle(styleIndex: Int) {
+        val clamped = ((styleIndex % 6) + 6) % 6
+        digitalClockStyle.value = clamped
+        prefs?.edit()?.putInt("digitalClockStyle", clamped)?.apply()
     }
 
     fun setSpeedoColor(color: Int) {
