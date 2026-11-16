@@ -185,8 +185,19 @@ private const val BUILDING_FACADE_IMAGE_ID = "building-facade-windows"
 
 class MockLocationProvider : LocationProvider {
     val consumers = java.util.concurrent.CopyOnWriteArraySet<LocationConsumer>()
+    private var lastLat = Double.NaN
+    private var lastLon = Double.NaN
+    private var lastBearing = Double.NaN
+
     override fun registerLocationConsumer(locationConsumer: LocationConsumer) {
         consumers.add(locationConsumer)
+        if (!lastLat.isNaN() && !lastLon.isNaN()) {
+            val pt = com.mapbox.geojson.Point.fromLngLat(lastLon, lastLat)
+            locationConsumer.onLocationUpdated(pt) { duration = 0L }
+            if (!lastBearing.isNaN()) {
+                locationConsumer.onBearingUpdated(lastBearing) { duration = 0L }
+            }
+        }
     }
     override fun unRegisterLocationConsumer(locationConsumer: LocationConsumer) {
         consumers.remove(locationConsumer)
@@ -194,17 +205,33 @@ class MockLocationProvider : LocationProvider {
     fun updateLocation(
         point: com.mapbox.geojson.Point,
         bearing: Double,
-        animDurationMs: Long = 850L
+        animDurationMs: Long = 88L
     ) {
-        val dur = animDurationMs.coerceIn(50L, 1250L)
+        val dur = animDurationMs.coerceIn(32L, 1250L)
+        val posChanged = lastLat.isNaN() ||
+            kotlin.math.abs(point.latitude() - lastLat) > 1e-8 ||
+            kotlin.math.abs(point.longitude() - lastLon) > 1e-8
+        val brgChanged = lastBearing.isNaN() ||
+            kotlin.math.abs(bearing - lastBearing) > 0.04
+
+        if (!posChanged && !brgChanged) return
+
+        lastLat = point.latitude()
+        lastLon = point.longitude()
+        lastBearing = bearing
+
         consumers.forEach { consumer ->
-            consumer.onLocationUpdated(point) {
-                duration = dur
-                interpolator = LinearInterpolator()
+            if (posChanged) {
+                consumer.onLocationUpdated(point) {
+                    duration = dur
+                    interpolator = LinearInterpolator()
+                }
             }
-            consumer.onBearingUpdated(bearing) {
-                duration = dur
-                interpolator = LinearInterpolator()
+            if (brgChanged) {
+                consumer.onBearingUpdated(bearing) {
+                    duration = dur
+                    interpolator = LinearInterpolator()
+                }
             }
         }
     }
@@ -388,7 +415,7 @@ fun NavigationMap(
         val isNight = (styleName == "DARK" || styleName == "NEON")
         if (!isNight || !mapReady) return
         val nowMs = System.currentTimeMillis()
-        if (!force && (nowMs - lastGlowUpdateMs < 32L)) return
+        if (!force && (nowMs - lastGlowUpdateMs < 36L)) return
         lastGlowUpdateMs = nowMs
 
         val pos = lastIndicatorPos ?: NavigationState.currentLocation.value?.let { loc ->
@@ -409,8 +436,6 @@ fun NavigationMap(
                 )
             )
             style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)
-                ?.featureCollection(featureCollection)
-            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_TAILLIGHTS_SOURCE_ID)
                 ?.featureCollection(featureCollection)
         }
     }
@@ -793,7 +818,7 @@ fun NavigationMap(
                         iconSize(Expression.get("iconSize"))
                     })
 
-                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_TAILLIGHTS_LAYER_ID, CAR_TAILLIGHTS_SOURCE_ID) {
+                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_TAILLIGHTS_LAYER_ID, CAR_HEADLIGHTS_SOURCE_ID) {
                         iconImage("car-taillights-glow")
                         iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
                         iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
@@ -1021,19 +1046,23 @@ fun NavigationMap(
         }
     }
 
-    // ── Suscripción al motor GPS unificado en tiempo real (LocationEngine) ──
+    // ── Suscripción al motor GPS e Inercial unificado en tiempo real (LocationEngine) ──
     DisposableEffect(Unit) {
+        var lastRouteCheckMs = 0L
+        val distBuf = FloatArray(1)
+
         val listener = LocationEngine.Listener { loc, projectedLat, projectedLon, bearingDeg, _, animDurationMs, _ ->
-            // Lógica de ruta activa funciona siempre (incluso en pantalla Home)
-            if (currentRoutePoints.isNotEmpty() && selectedDestination != null) {
+            val nowMs = android.os.SystemClock.elapsedRealtime()
+            // Lógica de ruta activa (evaluada de forma eficiente ~3 veces por segundo usando la posición proyectada continua)
+            if (currentRoutePoints.isNotEmpty() && selectedDestination != null && (nowMs - lastRouteCheckMs >= 320L)) {
+                lastRouteCheckMs = nowMs
                 var minDistance = Float.MAX_VALUE
                 var closestIndex = 0
                 val searchLimit = minOf(100, currentRoutePoints.size)
-                val distBuf = FloatArray(1)
 
                 for (i in 0 until searchLimit) {
                     val pt = currentRoutePoints[i]
-                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, pt.latitude(), pt.longitude(), distBuf)
+                    android.location.Location.distanceBetween(projectedLat, projectedLon, pt.latitude(), pt.longitude(), distBuf)
                     if (distBuf[0] < minDistance) {
                         minDistance = distBuf[0]
                         closestIndex = i
@@ -1054,13 +1083,13 @@ fun NavigationMap(
 
                 if (activeRouteSteps.isNotEmpty()) {
                     val nextStep = activeRouteSteps[0]
-                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, nextStep.maneuverLat, nextStep.maneuverLon, distBuf)
+                    android.location.Location.distanceBetween(projectedLat, projectedLon, nextStep.maneuverLat, nextStep.maneuverLon, distBuf)
                     if (distBuf[0] < 20f) activeRouteSteps.removeAt(0)
                 }
 
                 if (currentRoutePoints.isNotEmpty() && currentRoutePoints.size < 10) {
                     val endPt = currentRoutePoints.last()
-                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, endPt.latitude(), endPt.longitude(), distBuf)
+                    android.location.Location.distanceBetween(projectedLat, projectedLon, endPt.latitude(), endPt.longitude(), distBuf)
                     if (distBuf[0] < 30f) {
                         showArrivalAlert = true
                         NavigationState.clearActiveRoute()
@@ -1083,7 +1112,7 @@ fun NavigationMap(
             if (!hasInitializedPosition && loc.latitude != 0.0) {
                 hasInitializedPosition = true
                 val vp = mapView.viewport
-                vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                vp.transitionTo(buildChaseFollowState(), vp.makeImmediateViewportTransition())
             }
 
             val userInteracting = isSavingFavorite || isPlacingDestination || isAerialExploreMode
@@ -1094,14 +1123,24 @@ fun NavigationMap(
                     locationWhenFollowDisabled = null
                     autoCenterJob?.cancel()
                     val vp = mapView.viewport
-                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                    vp.transitionTo(
+                        buildChaseFollowState(),
+                        vp.makeDefaultViewportTransition(
+                            DefaultViewportTransitionOptions.Builder().maxDurationMs(650).build()
+                        )
+                    )
                 }
             }
 
-            if (!isIntroAnimating && !NavigationState.isRouteActive.value && isFollowingLocation && !isAerialExploreMode && hasInitializedPosition) {
+            if (!isIntroAnimating && isFollowingLocation && !isAerialExploreMode && hasInitializedPosition) {
                 val vp = mapView.viewport
-                if (vp.status !is com.mapbox.maps.plugin.viewport.ViewportStatus.State) {
-                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.Idle) {
+                    vp.transitionTo(
+                        buildChaseFollowState(),
+                        vp.makeDefaultViewportTransition(
+                            DefaultViewportTransitionOptions.Builder().maxDurationMs(550).build()
+                        )
+                    )
                 }
             }
         }

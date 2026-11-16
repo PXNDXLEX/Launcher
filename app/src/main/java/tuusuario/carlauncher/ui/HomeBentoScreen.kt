@@ -949,7 +949,7 @@ private fun LiveMapboxMiniMap(
         }
     }
 
-    // Escuchar actualizaciones de GPS / Simulación en tiempo real a través de LocationEngine
+    // Escuchar actualizaciones de GPS / Simulación Inercial en tiempo real a través de LocationEngine
     DisposableEffect(Unit) {
         val listener = LocationEngine.Listener { loc, projectedLat, projectedLon, bearingDeg, _, animDurationMs, _ ->
             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@Listener
@@ -964,7 +964,7 @@ private fun LiveMapboxMiniMap(
                     bearing(bearingDeg)
                 },
                 MapAnimationOptions.mapAnimationOptions {
-                    duration(animDurationMs.coerceIn(120L, 900L))
+                    duration(animDurationMs.coerceIn(48L, 900L))
                 }
             )
         }
@@ -974,13 +974,13 @@ private fun LiveMapboxMiniMap(
         }
     }
 
-    // Reaccionar también si currentLocation cambia directamente
-    val currentLoc = NavigationState.currentLocation.value
-    LaunchedEffect(currentLoc, miniStyleReady) {
-        if (miniStyleReady && currentLoc != null && (currentLoc.latitude != 0.0 || currentLoc.longitude != 0.0)) {
-            val pt = Point.fromLngLat(currentLoc.longitude, currentLoc.latitude)
-            val brg = if (currentLoc.hasBearing()) currentLoc.bearing.toDouble() else 0.0
-            miniLocationProvider.updateLocation(pt, brg, animDurationMs = 150L)
+    // Sembrar posición inicial cuando el estilo del minimapa termina de cargar
+    LaunchedEffect(miniStyleReady) {
+        val seed = NavigationState.currentLocation.value
+        if (miniStyleReady && seed != null && (seed.latitude != 0.0 || seed.longitude != 0.0)) {
+            val pt = Point.fromLngLat(seed.longitude, seed.latitude)
+            val brg = if (seed.hasBearing()) seed.bearing.toDouble() else 0.0
+            miniLocationProvider.updateLocation(pt, brg, animDurationMs = 80L)
         }
     }
 
