@@ -100,9 +100,13 @@ import com.mapbox.maps.plugin.viewport.data.OverviewViewportStateOptions
 import com.mapbox.maps.plugin.viewport.viewport
 import com.mapbox.maps.plugin.viewport.data.DefaultViewportTransitionOptions
 import com.tuusuario.carlauncher.R
+import com.tuusuario.carlauncher.services.WeatherService
 import com.tuusuario.carlauncher.ui.AppSettings
 import com.tuusuario.carlauncher.ui.NavigationState
 import com.tuusuario.carlauncher.ui.RouteStep
+import androidx.compose.animation.core.LinearEasing
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -275,6 +279,30 @@ fun NavigationMap(
     var showArrivalAlert    by remember { mutableStateOf(false) }
     var isCalculatingRoute  by remember { mutableStateOf(false) }
     var showStyleSelector   by remember { mutableStateOf(false) }
+    var showWeatherSelector by remember { mutableStateOf(false) }
+
+    val weatherSnapshot = WeatherService.weather.value
+    val selectedWeatherMode = AppSettings.mapWeatherMode.value
+    // Determina el efecto climático activo (Automático por GPS o seleccionado manualmente)
+    val effectiveWeatherEffect = remember(
+        selectedWeatherMode,
+        weatherSnapshot.currentCode,
+        weatherSnapshot.windSpeedKmH
+    ) {
+        if (selectedWeatherMode != "AUTO") {
+            selectedWeatherMode
+        } else {
+            val code = weatherSnapshot.currentCode
+            when {
+                code in listOf(95, 96, 99) -> "STORM"
+                code in 51..67 || code in 80..82 -> "RAIN"
+                code in 71..77 || code in listOf(85, 86) -> "SNOW"
+                weatherSnapshot.windSpeedKmH >= 20f -> "WIND"
+                code in listOf(2, 3, 45, 48) -> "CLOUDS"
+                else -> "CLEAR"
+            }
+        }
+    }
 
     // Progreso animado para la transición 3D
     val perspectiveProgress by animateFloatAsState(
@@ -1462,6 +1490,15 @@ fun NavigationMap(
             )
         }
 
+        // ── Capa de Animaciones Climáticas Atmosféricas (Lluvia, Viento, Tormenta, Sol/Estrellas, Nubes, Nieve) ──
+        if (isVisible && effectiveWeatherEffect != "OFF") {
+            CockpitWeatherOverlay(
+                weatherEffect = effectiveWeatherEffect,
+                isDayMode = currentStyle == "LIGHT",
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
         val styleVeilAlpha by animateFloatAsState(
             targetValue = if (isStyleTransitioning) 0.55f else 0f,
             animationSpec = tween(durationMillis = 420),
@@ -2251,6 +2288,82 @@ fun NavigationMap(
                     Text(if (showGlowTuning) "✕" else "🔦", fontSize = 14.sp)
                 }
 
+                // Selector de Animación Climática en el Mapa (Clima GPS en vivo o manual)
+                Box {
+                    val weatherEmoji = when (effectiveWeatherEffect) {
+                        "RAIN"   -> "🌧️"
+                        "STORM"  -> "⛈️"
+                        "WIND"   -> "💨"
+                        "SNOW"   -> "❄️"
+                        "CLOUDS" -> "☁️"
+                        "OFF"    -> "🚫"
+                        else     -> if (currentStyle == "LIGHT") "☀️" else "✨"
+                    }
+                    Surface(
+                        onClick = { showWeatherSelector = !showWeatherSelector },
+                        shape = RoundedCornerShape(50),
+                        color = Color(0xFF10173A).copy(alpha = 0.88f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (selectedWeatherMode != "AUTO") Color(0xFF38F2A6) else Color.White.copy(alpha = 0.28f)
+                        ),
+                        shadowElevation = 6.dp,
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(text = weatherEmoji, fontSize = 14.sp)
+                            Text(
+                                text = "${weatherSnapshot.currentTempC}°",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showWeatherSelector,
+                        onDismissRequest = { showWeatherSelector = false },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("🛰️ Automático (GPS: ${weatherSnapshot.currentLabel})") },
+                            onClick = { AppSettings.setMapWeatherMode("AUTO"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🌧️ Lluvia") },
+                            onClick = { AppSettings.setMapWeatherMode("RAIN"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("💨 Viento Aerodinámico") },
+                            onClick = { AppSettings.setMapWeatherMode("WIND"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("⛈️ Tormenta Eléctrica") },
+                            onClick = { AppSettings.setMapWeatherMode("STORM"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("☀️/✨ Despejado (Sol / Estrellas)") },
+                            onClick = { AppSettings.setMapWeatherMode("CLEAR"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("☁️ Nubes / Bruma") },
+                            onClick = { AppSettings.setMapWeatherMode("CLOUDS"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("❄️ Nieve") },
+                            onClick = { AppSettings.setMapWeatherMode("SNOW"); showWeatherSelector = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🚫 Desactivar Clima") },
+                            onClick = { AppSettings.setMapWeatherMode("OFF"); showWeatherSelector = false }
+                        )
+                    }
+                }
+
                 // Selector de estilo de mapa
                 Box {
                     SmallFloatingActionButton(
@@ -2661,6 +2774,341 @@ private fun CockpitHorizonSkyBackdrop(
             topLeft = androidx.compose.ui.geometry.Offset(0f, horizonY - 1f),
             size = androidx.compose.ui.geometry.Size(w, h - horizonY + 1f)
         )
+    }
+}
+
+/**
+ * Motor de Animaciones Climáticas Atmosféricas 60 FPS para Modo Día y Modo Noche (no intrusivo pero notorio):
+ *  - RAIN: Gotas diagonales con estela luminosa + ondas de impacto (splashes) en los bordes del asfalto.
+ *  - WIND: Cinturones aerodinámicos de viento curvos (aero ribbons) + partículas rápidas arrastradas.
+ *  - STORM: Lluvia intensa inclinada + ráfagas de viento + relámpagos ramificados en el horizonte superior.
+ *  - CLEAR: En Modo Día rayos solares dinámicos (god rays) y partículas cálidas; en Modo Noche cielo estrellado centelleante + estrella fugaz.
+ *  - CLOUDS: Nubes volumétricas suaves desplazándose por el horizonte superior.
+ *  - SNOW: Copos de nieve con caída sinusoidal y destello cristalino.
+ */
+@Composable
+private fun CockpitWeatherOverlay(
+    weatherEffect: String,
+    isDayMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "cockpitWeatherLoop")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "weatherPhase"
+    )
+    val slowPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 14000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "weatherSlowPhase"
+    )
+
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val twoPi = (Math.PI * 2.0).toFloat()
+
+        // Atenuador suave en la zona central inferior donde va el auto 3D para nunca obstruir la visión del vehículo
+        fun carZoneAttenuation(x: Float, y: Float): Float {
+            val dx = kotlin.math.abs(x - w * 0.5f) / (w * 0.22f)
+            val dy = kotlin.math.abs(y - h * 0.70f) / (h * 0.20f)
+            return if (dx < 1f && dy < 1f) 0.32f else 1f
+        }
+
+        when (weatherEffect) {
+            "RAIN", "STORM" -> {
+                val isStorm = weatherEffect == "STORM"
+                val dropCount = if (isStorm) 68 else 48
+                val slantX = if (isStorm) -w * 0.14f else -w * 0.06f
+                val dropColor = if (isDayMode) {
+                    Color(0xFF1565C0)
+                } else {
+                    Color(0xFF80E8FF)
+                }
+                val dropHighlight = if (isDayMode) {
+                    Color.White
+                } else {
+                    Color(0xFFE0F7FA)
+                }
+
+                // 1. Relámpago ramificado en el horizonte superior (solo en STORM)
+                if (isStorm) {
+                    val flashWindow = (phase * 3f) % 1f
+                    if (flashWindow < 0.08f) {
+                        val flashIntensity = (1f - (flashWindow / 0.08f)).coerceIn(0f, 1f)
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFFD0F0FF).copy(alpha = flashIntensity * 0.38f),
+                                    Color.Transparent
+                                ),
+                                startY = 0f,
+                                endY = h * 0.45f
+                            ),
+                            size = androidx.compose.ui.geometry.Size(w, h * 0.45f)
+                        )
+                        val boltX = w * (0.28f + (((phase * 10f).toInt() % 3) * 0.22f))
+                        val boltColor = Color.White.copy(alpha = flashIntensity * 0.92f)
+                        drawLine(
+                            color = boltColor,
+                            start = androidx.compose.ui.geometry.Offset(boltX, h * 0.02f),
+                            end = androidx.compose.ui.geometry.Offset(boltX - 18f, h * 0.10f),
+                            strokeWidth = 3.2f
+                        )
+                        drawLine(
+                            color = boltColor,
+                            start = androidx.compose.ui.geometry.Offset(boltX - 18f, h * 0.10f),
+                            end = androidx.compose.ui.geometry.Offset(boltX + 8f, h * 0.16f),
+                            strokeWidth = 2.8f
+                        )
+                        drawLine(
+                            color = boltColor,
+                            start = androidx.compose.ui.geometry.Offset(boltX + 8f, h * 0.16f),
+                            end = androidx.compose.ui.geometry.Offset(boltX - 12f, h * 0.24f),
+                            strokeWidth = 2.2f
+                        )
+                    }
+                }
+
+                // 2. Gotas de lluvia diagonales a 60 FPS
+                val speedMult = if (isStorm) 3f else 2f
+                for (i in 0 until dropCount) {
+                    val seed = (i * 73 + 19) % 100 / 100f
+                    val speedVar = 1f + (i % 3) * 0.5f
+                    val progress = ((phase * speedMult * speedVar) + seed) % 1f
+                    val startX = ((i * 137) % 100 / 100f) * (w * 1.15f)
+                    val curX = startX + slantX * progress
+                    val curY = progress * h
+                    val len = (if (isStorm) 38f else 28f) * (0.75f + (i % 4) * 0.15f)
+                    val dx = (slantX / h) * len
+                    val atten = carZoneAttenuation(curX, curY)
+                    val alpha = (if (isDayMode) 0.58f else 0.65f) * atten
+
+                    drawLine(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                dropColor.copy(alpha = alpha),
+                                dropHighlight.copy(alpha = alpha * 0.95f)
+                            ),
+                            start = androidx.compose.ui.geometry.Offset(curX - dx, curY - len),
+                            end = androidx.compose.ui.geometry.Offset(curX, curY)
+                        ),
+                        start = androidx.compose.ui.geometry.Offset(curX - dx, curY - len),
+                        end = androidx.compose.ui.geometry.Offset(curX, curY),
+                        strokeWidth = if (isStorm) 2.4f else 2.0f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                }
+
+                // 3. Ondas de impacto (splashes) sobre el asfalto en la mitad inferior
+                val splashCount = if (isStorm) 18 else 12
+                for (i in 0 until splashCount) {
+                    val seed = (i * 41 + 7) % 100 / 100f
+                    val rippleProg = ((phase * 3f) + seed) % 1f
+                    val sx = ((i * 89 + 13) % 100 / 100f) * w
+                    val sy = h * (0.45f + ((i * 53) % 100 / 100f) * 0.48f)
+                    val atten = carZoneAttenuation(sx, sy)
+                    val rx = 4f + rippleProg * 22f
+                    val ry = rx * 0.36f
+                    val rAlpha = (1f - rippleProg) * (if (isDayMode) 0.48f else 0.55f) * atten
+                    drawOval(
+                        color = dropHighlight.copy(alpha = rAlpha),
+                        topLeft = androidx.compose.ui.geometry.Offset(sx - rx, sy - ry),
+                        size = androidx.compose.ui.geometry.Size(rx * 2f, ry * 2f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f)
+                    )
+                }
+            }
+
+            "WIND" -> {
+                val windColor = if (isDayMode) Color(0xFF0277BD) else Color(0xFF80F8FF)
+                val windHighlight = if (isDayMode) Color.White else Color(0xFFB2EBF2)
+
+                // 1. Cinturones aerodinámicos de viento (ribbons ondulados que cruzan la pantalla)
+                for (i in 0 until 18) {
+                    val seed = (i * 59 + 11) % 100 / 100f
+                    val speed = if (i % 2 == 0) 2f else 1.5f
+                    val prog = ((phase * speed) + seed) % 1f
+                    val ribbonLen = w * (0.18f + (i % 4) * 0.05f)
+                    val headX = -ribbonLen + prog * (w + ribbonLen * 2f)
+                    val baseY = h * (0.06f + ((i * 47) % 100 / 100f) * 0.80f)
+                    val atten = carZoneAttenuation(headX, baseY)
+                    val alpha = (if (isDayMode) 0.52f else 0.58f) * atten
+
+                    val segments = 8
+                    val segW = ribbonLen / segments
+                    for (s in 0 until segments) {
+                        val x0 = headX - s * segW
+                        val x1 = headX - (s + 1) * segW
+                        val wave0 = sin((x0 / w) * twoPi * 2.2f + i) * 7f
+                        val wave1 = sin((x1 / w) * twoPi * 2.2f + i) * 7f
+                        val segAlpha = alpha * (1f - s.toFloat() / segments)
+                        drawLine(
+                            color = if (s < 2) windHighlight.copy(alpha = segAlpha) else windColor.copy(alpha = segAlpha),
+                            start = androidx.compose.ui.geometry.Offset(x0, baseY + wave0),
+                            end = androidx.compose.ui.geometry.Offset(x1, baseY + wave1),
+                            strokeWidth = 2.4f * (1f - s.toFloat() / (segments * 1.3f)),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                    }
+                }
+
+                // 2. Partículas aerodinámicas rápidas arrastradas por el viento
+                for (i in 0 until 24) {
+                    val seed = (i * 37 + 5) % 100 / 100f
+                    val prog = ((phase * 3f) + seed) % 1f
+                    val px = prog * w
+                    val py = h * (0.08f + ((i * 67) % 100 / 100f) * 0.78f) + sin(prog * twoPi * 2f + i) * 10f
+                    val atten = carZoneAttenuation(px, py)
+                    drawCircle(
+                        color = windHighlight.copy(alpha = 0.65f * atten),
+                        radius = 2.2f + (i % 3) * 0.8f,
+                        center = androidx.compose.ui.geometry.Offset(px, py)
+                    )
+                }
+            }
+
+            "SNOW" -> {
+                val snowColor = if (isDayMode) Color(0xFF0288D1) else Color.White
+                for (i in 0 until 46) {
+                    val seed = (i * 61 + 17) % 100 / 100f
+                    val prog = (phase + seed) % 1f
+                    val sway = sin((prog * twoPi * 1.5f) + i) * 22f
+                    val sx = (((i * 113) % 100 / 100f) * w + sway + w) % w
+                    val sy = prog * h
+                    val atten = carZoneAttenuation(sx, sy)
+                    val r = 2.5f + (i % 4) * 1.2f
+                    val alpha = (if (isDayMode) 0.68f else 0.80f) * atten
+
+                    drawCircle(
+                        color = snowColor.copy(alpha = alpha * 0.35f),
+                        radius = r * 1.9f,
+                        center = androidx.compose.ui.geometry.Offset(sx, sy)
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = alpha),
+                        radius = r,
+                        center = androidx.compose.ui.geometry.Offset(sx, sy)
+                    )
+                }
+            }
+
+            "CLOUDS" -> {
+                // Nubes volumétricas suaves desplazándose por la franja superior del horizonte
+                val cloudColor = if (isDayMode) Color.White else Color(0xFF90CAF9)
+                for (i in 0 until 7) {
+                    val seed = i / 7f
+                    val prog = (slowPhase + seed) % 1f
+                    val cx = -w * 0.2f + prog * (w * 1.4f)
+                    val cy = h * (0.05f + (i % 3) * 0.055f)
+                    val cw = w * (0.22f + (i % 3) * 0.06f)
+                    val ch = cw * 0.28f
+                    val cAlpha = if (isDayMode) 0.34f else 0.22f
+
+                    drawOval(
+                        brush = Brush.radialGradient(
+                            colors = listOf(cloudColor.copy(alpha = cAlpha), Color.Transparent),
+                            center = androidx.compose.ui.geometry.Offset(cx, cy),
+                            radius = cw * 0.6f
+                        ),
+                        topLeft = androidx.compose.ui.geometry.Offset(cx - cw * 0.5f, cy - ch * 0.5f),
+                        size = androidx.compose.ui.geometry.Size(cw, ch)
+                    )
+                }
+            }
+
+            else -> {
+                // CLEAR: En Modo Día -> Sol + Rayos Solares Dinámicos; En Modo Noche -> Estrellas Centelleantes + Estrella Fugaz
+                if (isDayMode) {
+                    val sunX = w * 0.72f
+                    val sunY = h * 0.08f
+                    val pulse = 0.90f + 0.10f * sin(phase * twoPi)
+
+                    // Halo solar cálido
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFFFFF59D).copy(alpha = 0.52f * pulse),
+                                Color(0xFFFFD54F).copy(alpha = 0.20f * pulse),
+                                Color.Transparent
+                            ),
+                            center = androidx.compose.ui.geometry.Offset(sunX, sunY),
+                            radius = w * 0.22f
+                        ),
+                        radius = w * 0.22f,
+                        center = androidx.compose.ui.geometry.Offset(sunX, sunY)
+                    )
+
+                    // Haces de luz solar diagonales suaves (Sunbeams)
+                    for (b in 0 until 5) {
+                        val angleOffset = sin(phase * twoPi + b) * 0.03f
+                        val beamEndX = sunX - w * (0.12f + b * 0.11f + angleOffset)
+                        val beamEndY = h * 0.42f
+                        drawLine(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFFFF9C4).copy(alpha = 0.22f),
+                                    Color.Transparent
+                                ),
+                                start = androidx.compose.ui.geometry.Offset(sunX, sunY),
+                                end = androidx.compose.ui.geometry.Offset(beamEndX, beamEndY)
+                            ),
+                            start = androidx.compose.ui.geometry.Offset(sunX, sunY),
+                            end = androidx.compose.ui.geometry.Offset(beamEndX, beamEndY),
+                            strokeWidth = 28f + b * 8f,
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                    }
+                } else {
+                    // Modo Noche: Estrellas centelleantes en la franja superior del cielo + Estrella fugaz
+                    for (i in 0 until 36) {
+                        val sx = ((i * 97 + 13) % 100 / 100f) * w
+                        val sy = ((i * 53 + 7) % 100 / 100f) * (h * 0.20f)
+                        val twinkle = (0.35f + 0.65f * ((sin(phase * twoPi + i * 1.7f) + 1f) * 0.5f))
+                        val starR = if (i % 5 == 0) 2.3f else 1.4f
+                        drawCircle(
+                            color = Color.White.copy(alpha = twinkle * 0.85f),
+                            radius = starR,
+                            center = androidx.compose.ui.geometry.Offset(sx, sy)
+                        )
+                    }
+
+                    // Estrella fugaz sutil cada ciclo en el cielo nocturno
+                    if (phase < 0.22f) {
+                        val shootProg = phase / 0.22f
+                        val startX = w * 0.78f
+                        val startY = h * 0.03f
+                        val curX = startX - shootProg * (w * 0.32f)
+                        val curY = startY + shootProg * (h * 0.13f)
+                        drawLine(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color(0xFF80E8FF).copy(alpha = (1f - shootProg) * 0.85f),
+                                    Color.White.copy(alpha = 1f - shootProg)
+                                ),
+                                start = androidx.compose.ui.geometry.Offset(curX + 45f, curY - 16f),
+                                end = androidx.compose.ui.geometry.Offset(curX, curY)
+                            ),
+                            start = androidx.compose.ui.geometry.Offset(curX + 45f, curY - 16f),
+                            end = androidx.compose.ui.geometry.Offset(curX, curY),
+                            strokeWidth = 2.4f,
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

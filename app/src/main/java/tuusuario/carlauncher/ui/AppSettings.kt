@@ -29,6 +29,8 @@ object AppSettings {
     val navPanelPercent = mutableStateOf(38f)
     // Modelo/estilo de reloj digital en el HUD de navegación (0..5: 6 modelos)
     val digitalClockStyle = mutableStateOf(0)
+    // Modo de animación climática en el mapa ("AUTO", "RAIN", "WIND", "STORM", "CLEAR", "CLOUDS", "SNOW", "OFF")
+    val mapWeatherMode = mutableStateOf("AUTO")
 
     // Personalización de la tarjeta principal del vehículo (Home Bento)
     val userName = mutableStateOf("Lorena")
@@ -79,6 +81,7 @@ object AppSettings {
         navSplitMode.value = p.getBoolean("navSplitMode", true)
         navPanelPercent.value = p.getFloat("navPanelPercent", 38f).coerceIn(25f, 50f)
         digitalClockStyle.value = p.getInt("digitalClockStyle", 0).coerceIn(0, 5)
+        mapWeatherMode.value = p.getString("mapWeatherMode", "AUTO") ?: "AUTO"
 
         userName.value = p.getString("userName", "Lorena") ?: "Lorena"
         carBrandName.value = p.getString("carBrandName", "KIA") ?: "KIA"
@@ -135,6 +138,11 @@ object AppSettings {
         val clamped = ((styleIndex % 6) + 6) % 6
         digitalClockStyle.value = clamped
         prefs?.edit()?.putInt("digitalClockStyle", clamped)?.apply()
+    }
+
+    fun setMapWeatherMode(mode: String) {
+        mapWeatherMode.value = mode
+        prefs?.edit()?.putString("mapWeatherMode", mode)?.apply()
     }
 
     fun setSpeedoColor(color: Int) {

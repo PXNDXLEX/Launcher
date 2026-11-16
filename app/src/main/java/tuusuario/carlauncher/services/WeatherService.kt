@@ -26,6 +26,7 @@ data class WeatherSnapshot(
     val nextCode: Int,
     val maxTempC: Int = 24,
     val minTempC: Int = 14,
+    val windSpeedKmH: Float = 10f,
     val isLoaded: Boolean = true
 )
 
@@ -75,6 +76,7 @@ object WeatherService {
                 nextCode = prefs.getInt("nextCode", 2),
                 maxTempC = prefs.getInt("maxTempC", maxOf(curr + 2, 24)),
                 minTempC = prefs.getInt("minTempC", minOf(curr - 4, 14)),
+                windSpeedKmH = prefs.getFloat("windSpeedKmH", 10f),
                 isLoaded = true
             )
         }
@@ -99,7 +101,7 @@ object WeatherService {
         val appCtx = context.applicationContext
         ioScope.launch {
             try {
-                val urlStr = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code&timezone=auto&forecast_days=2"
+                val urlStr = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code,is_day,wind_speed_10m&hourly=temperature_2m,weather_code&timezone=auto&forecast_days=2"
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 7000
@@ -119,6 +121,7 @@ object WeatherService {
                 val currTemp = current.getDouble("temperature_2m").roundToInt()
                 val currCode = current.getInt("weather_code")
                 val isDay = current.optInt("is_day", 1) == 1
+                val windKmH = current.optDouble("wind_speed_10m", 10.0).toFloat()
 
                 val hourly = root.getJSONObject("hourly")
                 val times = hourly.getJSONArray("time")
@@ -160,6 +163,7 @@ object WeatherService {
                     nextCode = nextCode,
                     maxTempC = dayMax,
                     minTempC = dayMin,
+                    windSpeedKmH = windKmH,
                     isLoaded = true
                 )
 
@@ -181,6 +185,7 @@ object WeatherService {
                     .putInt("nextCode", snap.nextCode)
                     .putInt("maxTempC", snap.maxTempC)
                     .putInt("minTempC", snap.minTempC)
+                    .putFloat("windSpeedKmH", snap.windSpeedKmH)
                     .apply()
             } catch (_: Exception) {
             } finally {
