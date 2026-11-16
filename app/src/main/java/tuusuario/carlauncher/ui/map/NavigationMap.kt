@@ -293,17 +293,17 @@ fun NavigationMap(
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx().toDouble() }
     val screenHeightPxRef = rememberUpdatedState(screenHeightPx)
 
-    // Helper unificado para cámara de persecución 3D (Chase Cam a 76°, zoom 19.75, auto grande y centrado)
+    // Helper unificado para cámara de persecución 3D (Chase Cam a 75°, zoom 19.75, horizonte alto y despejado)
     fun buildChaseFollowState() = mapView.viewport.makeFollowPuckViewportState(
         FollowPuckViewportStateOptions.Builder()
-            .pitch(76.0)
+            .pitch(75.0)
             .zoom(19.75)
             .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
             .padding(
                 com.mapbox.maps.EdgeInsets(
-                    (screenHeightPxRef.value * 0.28).coerceAtLeast(120.0),
+                    (screenHeightPxRef.value * 0.11).coerceAtLeast(44.0),
                     leftInsetRef.value,
-                    maxOf(screenHeightPxRef.value * 0.16, bottomInsetRef.value),
+                    maxOf(screenHeightPxRef.value * 0.15, bottomInsetRef.value),
                     rightInsetRef.value
                 )
             )
@@ -497,14 +497,10 @@ fun NavigationMap(
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
 
-            // ── Entorno 3D y Estética (Cockpit Indigo & Carriles Anchos) ─────────────────
+            // ── Entorno 3D y Estética (Modo Día y Modo Noche Cockpit con Carriles Anchos) ──
             val isNightMode = (style == "DARK" || style == "NEON")
             if (style != "SATELLITE") {
                 try {
-                    val firstSymbolLayerId: String? = try {
-                        loadedStyle.styleLayers.firstOrNull { it.type == "symbol" }?.id
-                    } catch (e: Exception) { null }
-
                     // Limpiar capas personalizadas previas si se recarga el estilo
                     listOf(
                         "cockpit-ground-base", "3d-buildings", "3d-buildings-roof", "building-glow",
@@ -516,13 +512,21 @@ fun NavigationMap(
                         } catch (_: Exception) {}
                     }
 
-                    // En modo DARK (Cockpit Original) eliminamos las capas grises de edificios base
-                    // para que el suelo azul real y las avenidas anchas se vean 100% limpias como en la referencia.
-                    if (style == "DARK") {
+                    // Eliminar capas base de edificios y carreteras por defecto en DARK y LIGHT
+                    // para que no salgan cajas grises debajo del auto ni líneas blancas superpuestas en Modo Día.
+                    if (style == "DARK" || style == "LIGHT") {
                         try {
-                            loadedStyle.styleLayers.forEach { layerInfo ->
-                                if (layerInfo.id.contains("building", ignoreCase = true) ||
-                                    layerInfo.id.contains("structure", ignoreCase = true)
+                            val layersSnapshot = loadedStyle.styleLayers.toList()
+                            layersSnapshot.forEach { layerInfo ->
+                                val idLower = layerInfo.id.lowercase()
+                                val isSymbol = layerInfo.type == "symbol"
+                                if (!isSymbol && (
+                                        idLower.contains("building") ||
+                                        idLower.contains("structure") ||
+                                        idLower.contains("road") ||
+                                        idLower.contains("bridge") ||
+                                        idLower.contains("tunnel")
+                                    )
                                 ) {
                                     try { loadedStyle.removeStyleLayer(layerInfo.id) } catch (_: Exception) {}
                                 }
@@ -530,67 +534,78 @@ fun NavigationMap(
                         } catch (_: Exception) {}
                     }
 
-                    // 1. Suelo base Royal Indigo continuo (elimina el suelo gris oscuro de Style.DARK)
-                    if (isNightMode) {
-                        val baseGroundHex = if (style == "NEON") "#07061C" else "#232584"
-                        try {
-                            val bgLayer = backgroundLayer("cockpit-ground-base") {
-                                backgroundColor(baseGroundHex)
-                            }
-                            if (firstSymbolLayerId != null) {
-                                loadedStyle.addLayerBelow(bgLayer, firstSymbolLayerId)
-                            } else {
-                                loadedStyle.addLayer(bgLayer)
-                            }
-                        } catch (_: Exception) {}
+                    // 1. Suelo base continuo (Plata suave de alto contraste en Día, Royal Indigo en Noche)
+                    val baseGroundHex = when (style) {
+                        "NEON"  -> "#07061C"
+                        "DARK"  -> "#232584"
+                        else    -> "#E6ECF5" // Modo Día limpio
+                    }
+                    val waterHex = when (style) {
+                        "NEON"  -> "#040414"
+                        "DARK"  -> "#161960"
+                        else    -> "#82C2F8" // Agua azul cielo en Modo Día
+                    }
+                    val greenColor = when (style) {
+                        "NEON"  -> "#0A001E"
+                        "DARK"  -> "#1D2074"
+                        else    -> "#C5E8D0" // Parques verde menta suave en Modo Día
                     }
 
-                    // 2. Agua, Tierra y Áreas Verdes en tonos índigo armónicos
-                    val greenColor = if (isNightMode) {
-                        if (style == "NEON") "#0A001E" else "#1D2074"
-                    } else "#b7e4c7"
+                    // Buscar la primera etiqueta de texto/nombre de calle para dibujar suelo y calles justo debajo de los nombres
+                    val topSymbolLayerId: String? = try {
+                        loadedStyle.styleLayers.firstOrNull { it.type == "symbol" }?.id
+                    } catch (e: Exception) { null }
 
+                    try {
+                        val bgLayer = backgroundLayer("cockpit-ground-base") {
+                            backgroundColor(baseGroundHex)
+                        }
+                        if (topSymbolLayerId != null) loadedStyle.addLayerBelow(bgLayer, topSymbolLayerId)
+                        else loadedStyle.addLayer(bgLayer)
+                    } catch (_: Exception) {}
+
+                    // 2. Parques, Tierra y Agua
                     try {
                         val greenLayer = fillLayer("custom-green-areas", "composite") {
                             sourceLayer("landuse")
                             fillColor(greenColor)
-                            fillOpacity(0.85)
+                            fillOpacity(0.88)
                         }
-                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(greenLayer, firstSymbolLayerId)
-                        else loadedStyle.addLayer(greenLayer)
+                        val waterLayer = fillLayer("custom-water", "composite") {
+                            sourceLayer("water")
+                            fillColor(waterHex)
+                        }
+                        val landLayer = fillLayer("custom-landcover", "composite") {
+                            sourceLayer("landcover")
+                            fillColor(baseGroundHex)
+                        }
+                        if (topSymbolLayerId != null) {
+                            loadedStyle.addLayerBelow(landLayer, topSymbolLayerId)
+                            loadedStyle.addLayerBelow(greenLayer, topSymbolLayerId)
+                            loadedStyle.addLayerBelow(waterLayer, topSymbolLayerId)
+                        } else {
+                            loadedStyle.addLayer(landLayer)
+                            loadedStyle.addLayer(greenLayer)
+                            loadedStyle.addLayer(waterLayer)
+                        }
                     } catch (_: Exception) {}
 
-                    if (isNightMode) {
-                        val waterHex = if (style == "NEON") "#040414" else "#161960"
-                        val landHex  = if (style == "NEON") "#07061C" else "#232584"
-                        try {
-                            val waterLayer = fillLayer("custom-water", "composite") {
-                                sourceLayer("water")
-                                fillColor(waterHex)
-                            }
-                            val landLayer = fillLayer("custom-landcover", "composite") {
-                                sourceLayer("landcover")
-                                fillColor(landHex)
-                            }
-                            if (firstSymbolLayerId != null) {
-                                loadedStyle.addLayerBelow(waterLayer, firstSymbolLayerId)
-                                loadedStyle.addLayerBelow(landLayer, firstSymbolLayerId)
-                            } else {
-                                loadedStyle.addLayer(waterLayer)
-                                loadedStyle.addLayer(landLayer)
-                            }
-                        } catch (_: Exception) {}
+                    // 3. Calles y Avenidas de Gran Escala (Modo Día con asfalto pizarra y bordes definidos; Modo Noche Royal Indigo)
+                    val roadColor = when (style) {
+                        "NEON" -> "#0D1030"
+                        "DARK" -> "#282C94"
+                        else   -> "#475569" // Asfalto gris pizarra de alto contraste en Modo Día
                     }
 
-                    // 3. Calles y Avenidas de Gran Escala (proporción de carril ancho tipo Cockpit 3D)
-                    val roadColor = if (isNightMode) {
-                        if (style == "NEON") "#0D1030" else "#282C94" // Asfalto azul real profundo
-                    } else "#2E355B"
-
-                    val casingColor = if (style == "NEON") "#00FFFF" else "#F4F8FF" // Líneas laterales blancas nítidas
+                    val casingColor = when (style) {
+                        "NEON" -> "#00FFFF"
+                        "DARK" -> "#F4F8FF"
+                        else   -> "#1E293B" // Bordillo oscuro nítido en Modo Día para resaltar sobre el suelo claro
+                    }
                     val casingOpacity = if (style == "NEON") 0.90 else 0.96
+                    val dashColor = if (isNightMode) "#E6F0FF" else "#FFFFFF"
 
-                    // 3A. Líneas exteriores blancas de la carretera (Casing ancho)
+                    // 3A. Líneas exteriores / bordillos de la carretera (Casing ancho)
                     try {
                         val casingLayer = lineLayer("custom-roads-casing", "composite") {
                             sourceLayer("road")
@@ -608,7 +623,7 @@ fun NavigationMap(
                             lineCap(LineCap.ROUND)
                             lineJoin(LineJoin.ROUND)
                         }
-                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(casingLayer, firstSymbolLayerId)
+                        if (topSymbolLayerId != null) loadedStyle.addLayerBelow(casingLayer, topSymbolLayerId)
                         else loadedStyle.addLayer(casingLayer)
                     } catch (_: Exception) {}
 
@@ -627,9 +642,9 @@ fun NavigationMap(
                                 )
                             )
                             lineCap(LineCap.ROUND)
-                            lineJoin(LineCap.ROUND.let { LineJoin.ROUND })
+                            lineJoin(LineJoin.ROUND)
                         }
-                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(roadSurfaceLayer, firstSymbolLayerId)
+                        if (topSymbolLayerId != null) loadedStyle.addLayerBelow(roadSurfaceLayer, topSymbolLayerId)
                         else loadedStyle.addLayer(roadSurfaceLayer)
                     } catch (_: Exception) {}
 
@@ -637,8 +652,8 @@ fun NavigationMap(
                     try {
                         val laneDashLayer = lineLayer("custom-roads-lane-dashes", "composite") {
                             sourceLayer("road")
-                            lineColor("#E6F0FF")
-                            lineOpacity(0.85)
+                            lineColor(dashColor)
+                            lineOpacity(0.92)
                             lineDasharray(listOf(2.2, 2.6))
                             lineWidth(
                                 Expression.interpolate(
@@ -651,22 +666,20 @@ fun NavigationMap(
                             lineCap(LineCap.BUTT)
                             lineJoin(LineJoin.ROUND)
                         }
-                        if (firstSymbolLayerId != null) loadedStyle.addLayerBelow(laneDashLayer, firstSymbolLayerId)
+                        if (topSymbolLayerId != null) loadedStyle.addLayerBelow(laneDashLayer, topSymbolLayerId)
                         else loadedStyle.addLayer(laneDashLayer)
                     } catch (_: Exception) {}
 
-                    // Edificios 3D solo en modo NEON o LIGHT (y debajo de las etiquetas, sin tapar la calle en modo DARK Cockpit)
-                    if (style == "NEON" || style == "LIGHT") {
-                        val buildingColor = if (style == "NEON") "#090514" else "#e0e0e0"
-                        val heightMult = if (style == "NEON") 1.8 else 2.0
+                    // Edificios 3D únicamente en modo NEON (debajo de las calles)
+                    if (style == "NEON") {
                         try {
                             loadedStyle.addLayerBelow(fillExtrusionLayer("3d-buildings", "composite") {
                                 sourceLayer("building")
                                 filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
                                 minZoom(15.0)
-                                fillExtrusionColor(buildingColor)
-                                fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(heightMult)))
-                                fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(heightMult)))
+                                fillExtrusionColor("#090514")
+                                fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(1.8)))
+                                fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(1.8)))
                                 fillExtrusionOpacity(0.75)
                             }, "custom-roads-casing")
                         } catch (_: Exception) {}
@@ -1262,11 +1275,17 @@ fun NavigationMap(
         }
     }
 
-    // Fondo base Royal Indigo para que jamás se vea un borde negro detrás del MapView
+    val isPortrait = configuration.screenHeightDp > configuration.screenWidthDp
+    val outerMapBgColor = when (currentStyle) {
+        "LIGHT" -> Color(0xFFE6ECF5)
+        "NEON"  -> Color(0xFF07061C)
+        else    -> Color(0xFF1F237A)
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF1F237A))
+            .background(outerMapBgColor)
     ) {
 
         val isBraking = NavigationState.isBraking.value
@@ -1311,7 +1330,7 @@ fun NavigationMap(
                         }
 
                         selectedDestination      = destPt
-                        selectedDestinationTitle = "Punto seleccionado en el mapa"
+                        selectedDestinationTitle = "Punto seleccionado"
                         favoriteLocationToSave   = destPt
                         favoriteAddressToSave    = coordsStr
                         routeDistanceText        = ""
@@ -1339,8 +1358,8 @@ fun NavigationMap(
                         mapView.camera.easeTo(
                             cameraOptions {
                                 center(destPt)
-                                zoom(if (isAerialExploreMode) 16.5 else 17.2)
-                                pitch(if (isAerialExploreMode) 0.0 else 42.0)
+                                zoom(if (isAerialExploreMode) 16.5 else 17.5)
+                                pitch(if (isAerialExploreMode) 0.0 else 48.0)
                             },
                             MapAnimationOptions.mapAnimationOptions { duration(680) }
                         )
@@ -1390,7 +1409,7 @@ fun NavigationMap(
                             mapboxMap.setCamera(cameraOptions {
                                 center(Point.fromLngLat(loc.longitude, loc.latitude))
                                 zoom(19.75)
-                                pitch(76.0)
+                                pitch(75.0)
                                 bearing(gpsBearing)
                             })
                         }
@@ -1416,10 +1435,10 @@ fun NavigationMap(
             }
         )
 
-        // ── Horizonte Cielo + Silueta de Ciudad 3D (Cubre hasta 45% para sellar el horizonte sin franjas negras) ──
+        // ── Horizonte Cielo + Silueta de Ciudad 3D (Acotado al 23% superior del cielo, sin neblina sobre las calles) ──
         val horizonAlpha by animateFloatAsState(
-            targetValue = if (isFollowingLocation && !isAerialExploreMode && !isIntroAnimating) 1f else 0f,
-            animationSpec = tween(durationMillis = 420),
+            targetValue = if (isFollowingLocation && !isAerialExploreMode && !isIntroAnimating && currentStyle != "SATELLITE") 1f else 0f,
+            animationSpec = tween(durationMillis = 380),
             label = "horizonSkyAlpha"
         )
         if (horizonAlpha > 0.01f) {
@@ -1428,7 +1447,7 @@ fun NavigationMap(
                 currentStyle = currentStyle,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.45f)
+                    .fillMaxHeight(0.23f)
                     .align(Alignment.TopCenter)
             )
         }
@@ -1456,12 +1475,19 @@ fun NavigationMap(
                     bottom = bottomOverlayPadding
                 )
         ) {
-            // ── ZONA SUPERIOR CENTRAL: Turn-by-Turn Card ("200 m / Calle 26") o Buscador + Favoritos ──
+            // ── ZONA SUPERIOR CENTRAL ADAPTABLE (Horizontal: entre reloj y botones; Vertical: ancho completo debajo del reloj) ──
             val nextStep = activeRouteSteps.firstOrNull()
             Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 10.dp, start = 235.dp, end = 175.dp),
+                modifier = if (isPortrait) {
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 96.dp, start = 14.dp, end = 14.dp)
+                        .fillMaxWidth()
+                } else {
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 10.dp, start = 230.dp, end = 215.dp)
+                },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // 1. Banner Turn-by-Turn estilo Cockpit ("↱ 200 m / Calle 26")
@@ -2006,9 +2032,15 @@ fun NavigationMap(
                     )
 
                     Surface(
-                        modifier = Modifier
-                            .padding(top = 8.dp)
-                            .widthIn(min = 290.dp, max = 365.dp),
+                        modifier = if (isPortrait) {
+                            Modifier
+                                .padding(top = 8.dp)
+                                .fillMaxWidth()
+                        } else {
+                            Modifier
+                                .padding(top = 8.dp)
+                                .widthIn(min = 340.dp, max = 440.dp)
+                        },
                         shape = RoundedCornerShape(22.dp),
                         color = Color(0xFF0D1438).copy(alpha = 0.95f),
                         border = BorderStroke(
@@ -2020,7 +2052,7 @@ fun NavigationMap(
                         shadowElevation = 16.dp
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Icono de destino con pulso radar animado
@@ -2044,10 +2076,10 @@ fun NavigationMap(
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = selectedDestinationTitle.ifBlank { "Punto marcado" },
+                                    text = selectedDestinationTitle.ifBlank { "Punto seleccionado" },
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White,
-                                    fontSize = 13.sp,
+                                    fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -2060,12 +2092,14 @@ fun NavigationMap(
                                 )
                             }
 
+                            Spacer(modifier = Modifier.width(8.dp))
+
                             // Botón para Guardar este punto en Favoritos con animación
                             IconButton(
                                 onClick = {
                                     destPt?.let { pt ->
                                         favoriteLocationToSave = pt
-                                        favoriteNameToSave = if (selectedDestinationTitle != "Punto seleccionado en el mapa") selectedDestinationTitle else ""
+                                        favoriteNameToSave = if (selectedDestinationTitle != "Punto seleccionado" && selectedDestinationTitle != "Punto seleccionado en el mapa") selectedDestinationTitle else ""
                                         favoriteAddressToSave = "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}"
                                         selectedIconType = "Star"
                                         isSavingFavorite = true
@@ -2515,8 +2549,8 @@ fun NavigationMap(
 }
 
 /**
- * Horizonte 3D con degradado de cielo, silueta de ciudad y faldón Royal Indigo continuo
- * que sella el horizonte del mapa al 100% evitando cualquier franja negra de Mapbox.
+ * Horizonte 3D con degradado de cielo y silueta de ciudad acotado exclusivamente a la franja superior del cielo (23%),
+ * adaptando sus colores a Modo Día (LIGHT) y Modo Noche (DARK / NEON) sin crear neblina sobre las calles.
  */
 @Composable
 private fun CockpitHorizonSkyBackdrop(
@@ -2527,24 +2561,29 @@ private fun CockpitHorizonSkyBackdrop(
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val horizonY = h * 0.56f
-        val solidGroundEndY = h * 0.84f
+        val horizonY = h * 0.90f
+
+        val isDay = currentStyle == "LIGHT"
 
         val skyTop = when (currentStyle) {
-            "NEON" -> Color(0xFF06081E)
-            else   -> Color(0xFF0C3B75)
+            "NEON"  -> Color(0xFF06081E)
+            "LIGHT" -> Color(0xFF2276DC)
+            else    -> Color(0xFF0C3B75)
         }
         val skyMid = when (currentStyle) {
-            "NEON" -> Color(0xFF141D5E)
-            else   -> Color(0xFF2672BE)
+            "NEON"  -> Color(0xFF141D5E)
+            "LIGHT" -> Color(0xFF62B2F8)
+            else    -> Color(0xFF2672BE)
         }
         val skyHorizon = when (currentStyle) {
-            "NEON" -> Color(0xFF263494)
-            else   -> Color(0xFF4D98E8)
+            "NEON"  -> Color(0xFF263494)
+            "LIGHT" -> Color(0xFFB5E0FF)
+            else    -> Color(0xFF4D98E8)
         }
         val groundColor = when (currentStyle) {
-            "NEON" -> Color(0xFF07061C)
-            else   -> Color(0xFF232584)
+            "NEON"  -> Color(0xFF07061C)
+            "LIGHT" -> Color(0xFFE6ECF5)
+            else    -> Color(0xFF232584)
         }
 
         // 1. Degradado del cielo hasta la línea del horizonte
@@ -2562,8 +2601,16 @@ private fun CockpitHorizonSkyBackdrop(
         )
 
         // 2. Silueta arquitectónica de ciudad en el horizonte
-        val backBuildingColor = Color(0xFF326AB8).copy(alpha = alpha * 0.58f)
-        val frontBuildingColor = Color(0xFF224B96).copy(alpha = alpha * 0.82f)
+        val backBuildingColor = if (isDay) {
+            Color(0xFF72B6F2).copy(alpha = alpha * 0.55f)
+        } else {
+            Color(0xFF326AB8).copy(alpha = alpha * 0.58f)
+        }
+        val frontBuildingColor = if (isDay) {
+            Color(0xFF4F98DF).copy(alpha = alpha * 0.75f)
+        } else {
+            Color(0xFF224B96).copy(alpha = alpha * 0.82f)
+        }
         val buildingHeightsBack = floatArrayOf(
             0.24f, 0.36f, 0.20f, 0.44f, 0.30f, 0.40f, 0.18f, 0.32f, 0.46f, 0.26f,
             0.20f, 0.13f, 0.11f, 0.14f, 0.22f, 0.38f, 0.28f, 0.42f, 0.22f, 0.36f,
@@ -2588,24 +2635,18 @@ private fun CockpitHorizonSkyBackdrop(
             )
         }
 
-        // 3. Faldón sólido Royal Indigo bajo la línea del horizonte + fundido hacia las calles 3D
-        drawRect(
-            color = groundColor.copy(alpha = alpha),
-            topLeft = androidx.compose.ui.geometry.Offset(0f, horizonY - 1f),
-            size = androidx.compose.ui.geometry.Size(w, solidGroundEndY - horizonY + 2f)
-        )
+        // 3. Borde suave mínimo en la línea exacta del horizonte (sin invadir la calle)
         drawRect(
             brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                 colors = listOf(
-                    groundColor.copy(alpha = alpha),
-                    groundColor.copy(alpha = alpha * 0.55f),
+                    groundColor.copy(alpha = alpha * 0.85f),
                     Color.Transparent
                 ),
-                startY = solidGroundEndY,
+                startY = horizonY - 1f,
                 endY = h
             ),
-            topLeft = androidx.compose.ui.geometry.Offset(0f, solidGroundEndY),
-            size = androidx.compose.ui.geometry.Size(w, h - solidGroundEndY)
+            topLeft = androidx.compose.ui.geometry.Offset(0f, horizonY - 1f),
+            size = androidx.compose.ui.geometry.Size(w, h - horizonY + 1f)
         )
     }
 }
