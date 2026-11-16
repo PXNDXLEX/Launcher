@@ -10,7 +10,7 @@ object AppSettings {
     val speedoStyle = mutableStateOf("PREMIUM")
     val speedoColor = mutableStateOf(Color.parseColor("#1A6BFF"))
     val vehicleType = mutableStateOf("STYLUS") // Modelo 3D por defecto acorde al Kia Rio Stylus
-    val vehicle3DScale = mutableStateOf(0.012f) // Escala del modelo 3D
+    val vehicle3DScale = mutableStateOf(0.300f) // Escala del modelo 3D preferida en vista 3D Cockpit
     val uiColor = mutableStateOf(Color.parseColor("#1A6BFF"))
     val mapIconColor = mutableStateOf(Color.parseColor("#FFD600"))
     val isDarkMode = mutableStateOf(false) // Estilo claro moderno por defecto (como referencia)
@@ -112,7 +112,7 @@ object AppSettings {
 
     private fun loadVehicleSpecificSettings(type: String) {
         val prefix = "${type}_"
-        val defaultScale = if (type == "STYLUS" || type == "CORSA") 0.012f else 0.15f
+        val defaultScale = if (type == "STYLUS" || type == "CORSA") 0.300f else 0.15f
         vehicle3DScale.value = prefs?.getFloat(prefix + "vehicle3DScale", defaultScale) ?: defaultScale
         glowCarHalfW.value   = prefs?.getFloat(prefix + "glowCarHalfW",   22f)  ?: 22f
         glowHeadY.value      = prefs?.getFloat(prefix + "glowHeadY",      240f) ?: 240f

@@ -333,6 +333,49 @@ fun NavigationMap(
     var isStyleTransitioning by remember { mutableStateOf(false) }
     var prevIndicatorPosListener by remember { mutableStateOf<OnIndicatorPositionChangedListener?>(null) }
     var prevIndicatorBearingListener by remember { mutableStateOf<OnIndicatorBearingChangedListener?>(null) }
+    var lastIndicatorPos by remember { mutableStateOf<com.mapbox.geojson.Point?>(null) }
+    var lastIndicatorBearing by remember { mutableStateOf(0.0) }
+    var lastGlowUpdateMs by remember { mutableStateOf(0L) }
+
+    // Escala efectiva de las luces sincronizada con el tamaño 3D del vehículo (0.300) y el modo Aéreo 2D / 3D
+    fun computeEffectiveGlowIconSize(): Double {
+        val modelScaleFactor = (AppSettings.vehicle3DScale.value / 0.042f).coerceIn(1.0f, 8.5f)
+        val aerialFactor = if (isAerialExploreMode) 0.14f else 1.0f
+        return (AppSettings.glowIconSize.value * modelScaleFactor * aerialFactor).toDouble()
+    }
+
+    // Actualiza la posición, rotación y tamaño de los faros y luces traseras en tiempo real (incluso estacionado)
+    fun pushGlowFeatureToMap(force: Boolean = false) {
+        val styleName = AppSettings.mapStyle.value
+        val isNight = (styleName == "DARK" || styleName == "NEON")
+        if (!isNight || !mapReady) return
+        val nowMs = System.currentTimeMillis()
+        if (!force && (nowMs - lastGlowUpdateMs < 32L)) return
+        lastGlowUpdateMs = nowMs
+
+        val pos = lastIndicatorPos ?: NavigationState.currentLocation.value?.let { loc ->
+            if (loc.latitude != 0.0) com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude) else null
+        } ?: return
+
+        val bearingVal = if (lastIndicatorBearing != 0.0) lastIndicatorBearing else gpsBearing
+        val effectiveSize = computeEffectiveGlowIconSize()
+
+        mapView.mapboxMap.getStyle { style ->
+            val featureCollection = com.mapbox.geojson.FeatureCollection.fromFeature(
+                com.mapbox.geojson.Feature.fromGeometry(
+                    pos,
+                    com.google.gson.JsonObject().apply {
+                        addProperty("bearing", bearingVal)
+                        addProperty("iconSize", effectiveSize)
+                    }
+                )
+            )
+            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)
+                ?.featureCollection(featureCollection)
+            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_TAILLIGHTS_SOURCE_ID)
+                ?.featureCollection(featureCollection)
+        }
+    }
 
     // Mientras se ejecuta una búsqueda de red activa mantenemos vivo el temporizador;
     // cada toque o tecla restablece los 30 segundos exactos al dejar de interactuar
@@ -632,34 +675,6 @@ fun NavigationMap(
                 } catch (e: Exception) {}
             }
 
-            // ── Efectos Especiales (Faros y Luces Traseras) ─────────────────
-            if (isNightMode) {
-                try {
-                    loadedStyle.addImage("car-headlights-glow", drawHeadlightsGlow())
-                    loadedStyle.addImage("car-taillights-glow", drawTaillightsGlow())
-                    
-                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_HEADLIGHTS_LAYER_ID, CAR_HEADLIGHTS_SOURCE_ID) {
-                        iconImage("car-headlights-glow")
-                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
-                        iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
-                        iconRotate(Expression.get("bearing"))
-                        iconAllowOverlap(true)
-                        iconIgnorePlacement(true)
-                        iconSize(Expression.get("iconSize"))
-                    })
-
-                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_TAILLIGHTS_LAYER_ID, CAR_TAILLIGHTS_SOURCE_ID) {
-                        iconImage("car-taillights-glow")
-                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
-                        iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
-                        iconRotate(Expression.get("bearing"))
-                        iconAllowOverlap(true)
-                        iconIgnorePlacement(true)
-                        iconSize(Expression.get("iconSize"))
-                    })
-                } catch (e: Exception) {}
-            }
-
             // ── Capas de Ruta Visuales (Alfombra luminosa de carril 3D) ──────
             loadedStyle.addLayer(lineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID) {
                 lineColor("#00E676")
@@ -702,67 +717,78 @@ fun NavigationMap(
                 lineJoin(LineJoin.ROUND)
             })
 
-            // (Las capas estéticas terminan aquí)
-            
+            // ── Efectos Especiales (Faros Delanteros y Luces Traseras SOBRE la calle y ruta) ──
+            if (isNightMode) {
+                try {
+                    if (loadedStyle.styleLayerExists(CAR_HEADLIGHTS_LAYER_ID)) {
+                        loadedStyle.removeStyleLayer(CAR_HEADLIGHTS_LAYER_ID)
+                    }
+                    if (loadedStyle.styleLayerExists(CAR_TAILLIGHTS_LAYER_ID)) {
+                        loadedStyle.removeStyleLayer(CAR_TAILLIGHTS_LAYER_ID)
+                    }
+                    try { loadedStyle.removeStyleImage("car-headlights-glow") } catch (_: Exception) {}
+                    try { loadedStyle.removeStyleImage("car-taillights-glow") } catch (_: Exception) {}
+
+                    loadedStyle.addImage("car-headlights-glow", drawHeadlightsGlow())
+                    loadedStyle.addImage("car-taillights-glow", drawTaillightsGlow())
+
+                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_HEADLIGHTS_LAYER_ID, CAR_HEADLIGHTS_SOURCE_ID) {
+                        iconImage("car-headlights-glow")
+                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
+                        iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
+                        iconRotate(Expression.get("bearing"))
+                        iconAllowOverlap(true)
+                        iconIgnorePlacement(true)
+                        iconSize(Expression.get("iconSize"))
+                    })
+
+                    loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_TAILLIGHTS_LAYER_ID, CAR_TAILLIGHTS_SOURCE_ID) {
+                        iconImage("car-taillights-glow")
+                        iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
+                        iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
+                        iconRotate(Expression.get("bearing"))
+                        iconAllowOverlap(true)
+                        iconIgnorePlacement(true)
+                        iconSize(Expression.get("iconSize"))
+                    })
+                } catch (e: Exception) {}
+            }
+
             // LocationComponent — puck del vehículo
             val locPlugin = mapView.location
             try {
-                // Si esto compila, lo usamos
                 locPlugin.setLocationProvider(mockLocationProvider)
             } catch (e: Exception) {}
 
             locPlugin.updateSettings {
                 enabled = true
-                pulsingEnabled = true
-                pulsingColor = android.graphics.Color.parseColor(
-                    when (style) { "NEON" -> "#FF9100"; else -> "#2979FF" }
-                )
-                // Fundamental: habilitar el bearing del puck y usar HEADING (brújula)
+                pulsingEnabled = false
                 puckBearingEnabled = true
                 puckBearing = PuckBearing.HEADING
-                locationPuck = getVehiclePuck(context, AppSettings.vehicleType.value, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
-            }
-
-            // Forzar actualización de ubicación para que el modelo 3D aparezca inmediatamente
-            // al cambiar el estilo (día/noche), de lo contrario Mapbox espera un evento de GPS real
-            NavigationState.currentLocation.value?.let { loc ->
-                mockLocationProvider.updateLocation(
-                    com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude),
-                    if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing,
-                    animDurationMs = 80L
+                locationPuck = getVehiclePuck(
+                    context,
+                    AppSettings.vehicleType.value,
+                    AppSettings.customVehicleIconPath.value,
+                    mapIconColor,
+                    AppSettings.vehicle3DScale.value,
+                    isAerialMode = isAerialExploreMode
                 )
             }
 
-            // ── Heading-up SIEMPRE activo: brujula + GPS bearing (con actualización fluida a 30 FPS) ──
-            var lastIndicatorPos: com.mapbox.geojson.Point? = null
-            var lastIndicatorBearing: Double = 0.0
-            var lastGlowUpdateMs: Long = 0L
-            val updateGlow = {
-                val nowMs = System.currentTimeMillis()
-                if (isNightMode && isVisibleState.value && (nowMs - lastGlowUpdateMs >= 32L)) {
-                    lastGlowUpdateMs = nowMs
-                    lastIndicatorPos?.let { pos ->
-                        mapView.mapboxMap.getStyle { style ->
-                            val featureCollection = com.mapbox.geojson.FeatureCollection.fromFeature(
-                                com.mapbox.geojson.Feature.fromGeometry(
-                                    pos,
-                                    com.google.gson.JsonObject().apply {
-                                        addProperty("bearing", lastIndicatorBearing)
-                                        addProperty("iconSize", AppSettings.glowIconSize.value.toDouble())
-                                    }
-                                )
-                            )
-                            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
-                            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_TAILLIGHTS_SOURCE_ID)?.featureCollection(featureCollection)
-                        }
-                    }
-                }
+            // Forzar actualización de ubicación e iluminar las luces de inmediato (incluso a 0 km/h)
+            NavigationState.currentLocation.value?.let { loc ->
+                val pt = com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude)
+                val brg = if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
+                lastIndicatorPos = pt
+                lastIndicatorBearing = brg
+                mockLocationProvider.updateLocation(pt, brg, animDurationMs = 80L)
+                pushGlowFeatureToMap(force = true)
             }
 
             prevIndicatorPosListener?.let { locPlugin.removeOnIndicatorPositionChangedListener(it) }
             val posListener = OnIndicatorPositionChangedListener { point ->
                 lastIndicatorPos = point
-                updateGlow()
+                pushGlowFeatureToMap(force = false)
             }
             prevIndicatorPosListener = posListener
             locPlugin.addOnIndicatorPositionChangedListener(posListener)
@@ -770,7 +796,7 @@ fun NavigationMap(
             prevIndicatorBearingListener?.let { locPlugin.removeOnIndicatorBearingChangedListener(it) }
             val bearingListener = OnIndicatorBearingChangedListener { newBearing ->
                 lastIndicatorBearing = newBearing
-                updateGlow()
+                pushGlowFeatureToMap(force = false)
                 gpsBearing = newBearing
                 lastKnownBearing = newBearing.toFloat()
             }
@@ -1185,12 +1211,27 @@ fun NavigationMap(
         }
     }
 
-    // ── Reaccionar a cambios de tipo de vehículo/escala/color ────────────
-    LaunchedEffect(vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value) {
+    // ── Reaccionar a cambios de tipo de vehículo, escala 3D, tamaño de luz o modo Aéreo 2D / 3D ──
+    LaunchedEffect(
+        vehicleType,
+        AppSettings.customVehicleIconPath.value,
+        mapIconColor,
+        AppSettings.vehicle3DScale.value,
+        AppSettings.glowIconSize.value,
+        isAerialExploreMode
+    ) {
         if (!mapReady) return@LaunchedEffect
         mapView.location.updateSettings {
-            locationPuck = getVehiclePuck(context, vehicleType, AppSettings.customVehicleIconPath.value, mapIconColor, AppSettings.vehicle3DScale.value)
+            locationPuck = getVehiclePuck(
+                context,
+                vehicleType,
+                AppSettings.customVehicleIconPath.value,
+                mapIconColor,
+                AppSettings.vehicle3DScale.value,
+                isAerialMode = isAerialExploreMode
+            )
         }
+        pushGlowFeatureToMap(force = true)
     }
 
     // ── UI ───────────────────────────────────────────────────────────────────
@@ -1202,8 +1243,8 @@ fun NavigationMap(
             try {
                 val headBmp = drawHeadlightsGlow()
                 val tailBmp = drawTaillightsGlow()
-                style.removeStyleImage("car-headlights-glow")
-                style.removeStyleImage("car-taillights-glow")
+                try { style.removeStyleImage("car-headlights-glow") } catch (_: Exception) {}
+                try { style.removeStyleImage("car-taillights-glow") } catch (_: Exception) {}
                 style.addImage("car-headlights-glow", headBmp)
                 style.addImage("car-taillights-glow", tailBmp)
                 mapView.location.updateSettings {
@@ -1212,9 +1253,11 @@ fun NavigationMap(
                         AppSettings.vehicleType.value,
                         AppSettings.customVehicleIconPath.value,
                         AppSettings.mapIconColor.value,
-                        AppSettings.vehicle3DScale.value
+                        AppSettings.vehicle3DScale.value,
+                        isAerialMode = isAerialExploreMode
                     )
                 }
+                pushGlowFeatureToMap(force = true)
             } catch (e: Exception) { }
         }
     }
@@ -2654,8 +2697,15 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     } catch (e: Exception) { emptyList() }
 }
 
-// ── Helper para LocationPuck (3D o 2D con presencia ampliada tipo Cockpit) ─────────
-fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, mapIconColor: Int, scale: Float = 4f): com.mapbox.maps.plugin.LocationPuck {
+// ── Helper para LocationPuck (3D protagonista en Chase Cam y compacto en Vista Aérea 2D) ─────────
+fun getVehiclePuck(
+    context: Context,
+    vehicleType: String,
+    customPath: String,
+    mapIconColor: Int,
+    scale: Float = 0.300f,
+    isAerialMode: Boolean = false
+): com.mapbox.maps.plugin.LocationPuck {
     val modelAsset = when (vehicleType) {
         "SEDAN"     -> "asset://models/Sedan.glb"
         "HATCHBACK" -> "asset://models/Hatchback.glb"
@@ -2667,9 +2717,11 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
     }
 
     if (modelAsset != null) {
-        // Multiplicador base x1.95 adicional para que el vehículo 3D tenga presencia protagonista en tercera persona
         val baseScale = if (vehicleType == "STYLUS" || vehicleType == "CORSA") scale * 500f else scale
-        val finalScale = baseScale * 1.95f
+        // En vista 3D de conducción mantiene el tamaño protagonista (0.300 * 1.95f);
+        // en Vista Aérea 2D se reduce a 0.24f (~8 veces más pequeño) para no tapar el mapa al hacer zoom.
+        val modeMultiplier = if (isAerialMode) 0.24f else 1.95f
+        val finalScale = baseScale * modeMultiplier
 
         return com.mapbox.maps.plugin.LocationPuck3D(
             modelUri = modelAsset,
@@ -2678,11 +2730,12 @@ fun getVehiclePuck(context: Context, vehicleType: String, customPath: String, ma
         )
     }
 
+    val bmpSize = if (isAerialMode) 76 else 150
     val bmp = try {
         if (vehicleType == "CUSTOM" && customPath.isNotEmpty()) {
             val file = java.io.File(customPath)
             if (file.exists()) android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                .let { android.graphics.Bitmap.createScaledBitmap(it, 150, 150, true) }
+                .let { android.graphics.Bitmap.createScaledBitmap(it, bmpSize, bmpSize, true) }
             else drawVehicleBitmap(context, "SEDAN", mapIconColor)
         } else {
             drawVehicleBitmap(context, vehicleType, mapIconColor)
@@ -2798,30 +2851,50 @@ fun drawHeadlightsGlow(
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    val beamColor   = android.graphics.Color.argb(100, 255, 255, 200)
-    val transparent = android.graphics.Color.TRANSPARENT
+    val beamCoreColor = android.graphics.Color.argb(235, 255, 253, 225)
+    val beamMidColor  = android.graphics.Color.argb(120, 200, 235, 255)
+    val transparent   = android.graphics.Color.TRANSPARENT
 
-    // === HEADLIGHTS ===
+    // === CONOS DE FAROS DELANTEROS ===
     val leftPath = Path()
-    leftPath.moveTo(cx - carHalfW - 2f, headY)
+    leftPath.moveTo(cx - carHalfW - 3f, headY)
     leftPath.lineTo(cx - carHalfW - headSpread, headReach)
-    leftPath.lineTo(cx - 5f, headReach)
+    leftPath.lineTo(cx - 2f, headReach)
     leftPath.close()
-    paint.shader = LinearGradient(cx - carHalfW, headY, cx - carHalfW, headReach, beamColor, transparent, Shader.TileMode.CLAMP)
+    paint.shader = LinearGradient(
+        cx - carHalfW, headY,
+        cx - carHalfW, headReach,
+        intArrayOf(beamCoreColor, beamMidColor, transparent),
+        floatArrayOf(0f, 0.45f, 1f),
+        Shader.TileMode.CLAMP
+    )
     canvas.drawPath(leftPath, paint)
 
     val rightPath = Path()
-    rightPath.moveTo(cx + carHalfW + 2f, headY)
+    rightPath.moveTo(cx + carHalfW + 3f, headY)
     rightPath.lineTo(cx + carHalfW + headSpread, headReach)
-    rightPath.lineTo(cx + 5f, headReach)
+    rightPath.lineTo(cx + 2f, headReach)
     rightPath.close()
-    paint.shader = LinearGradient(cx + carHalfW, headY, cx + carHalfW, headReach, beamColor, transparent, Shader.TileMode.CLAMP)
+    paint.shader = LinearGradient(
+        cx + carHalfW, headY,
+        cx + carHalfW, headReach,
+        intArrayOf(beamCoreColor, beamMidColor, transparent),
+        floatArrayOf(0f, 0.45f, 1f),
+        Shader.TileMode.CLAMP
+    )
     canvas.drawPath(rightPath, paint)
 
-    // === GROUND REFLECTION ===
-    val reflColor = android.graphics.Color.argb(40, 255, 220, 150)
-    paint.shader = RadialGradient(cx, 256f, 45f, reflColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx, 256f, 45f, paint)
+    // === FOCOS INTENSOS EN EL PARACHOQUES DELANTERO ===
+    val bulbColor = android.graphics.Color.argb(245, 255, 255, 240)
+    paint.shader = RadialGradient(cx - carHalfW, headY, 16f, bulbColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx - carHalfW, headY, 16f, paint)
+    paint.shader = RadialGradient(cx + carHalfW, headY, 16f, bulbColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx + carHalfW, headY, 16f, paint)
+
+    // === REFLEJO AMBIENTAL DELANTERO EN EL ASFALTO ===
+    val reflColor = android.graphics.Color.argb(95, 255, 240, 195)
+    paint.shader = RadialGradient(cx, (headY + headReach) * 0.5f, 68f, reflColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx, (headY + headReach) * 0.5f, 68f, paint)
 
     return bitmap
 }
@@ -2840,18 +2913,34 @@ fun drawTaillightsGlow(
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     val transparent = android.graphics.Color.TRANSPARENT
-    
-    // Si está frenando, la intensidad al 100% y radio +50%. Si no, tenues (70 alfa).
-    val alpha = if (isBraking) 255 else 70
-    val radius = if (isBraking) tailRadius * 1.5f else tailRadius
-    val tailColor = android.graphics.Color.argb(alpha, 255, 15, 15)
 
-    // === TAILLIGHTS ===
-    paint.shader = RadialGradient(cx - carHalfW, tailY, radius, tailColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx - carHalfW, tailY, radius, paint)
+    // Intensidad alta y visible en modo noche normal (215 alfa) y máxima al frenar (255 alfa)
+    val alpha = if (isBraking) 255 else 215
+    val effRadius = (if (isBraking) tailRadius * 1.6f else tailRadius * 1.15f).coerceAtLeast(16f)
+    val tailCoreColor = android.graphics.Color.argb(alpha, 255, 30, 50)
+    val tailMidColor  = android.graphics.Color.argb((alpha * 0.6f).toInt(), 255, 10, 25)
 
-    paint.shader = RadialGradient(cx + carHalfW, tailY, radius, tailColor, transparent, Shader.TileMode.CLAMP)
-    canvas.drawCircle(cx + carHalfW, tailY, radius, paint)
+    // === LUCES TRASERAS IZQUIERDA Y DERECHA ===
+    paint.shader = RadialGradient(
+        cx - carHalfW, tailY, effRadius,
+        intArrayOf(tailCoreColor, tailMidColor, transparent),
+        floatArrayOf(0f, 0.5f, 1f),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(cx - carHalfW, tailY, effRadius, paint)
+
+    paint.shader = RadialGradient(
+        cx + carHalfW, tailY, effRadius,
+        intArrayOf(tailCoreColor, tailMidColor, transparent),
+        floatArrayOf(0f, 0.5f, 1f),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(cx + carHalfW, tailY, effRadius, paint)
+
+    // === REFLEJO ROJO EN EL ASFALTO TRASERO ===
+    val rearAmbColor = android.graphics.Color.argb(if (isBraking) 130 else 85, 255, 20, 40)
+    paint.shader = RadialGradient(cx, tailY + effRadius * 0.35f, effRadius * 1.45f, rearAmbColor, transparent, Shader.TileMode.CLAMP)
+    canvas.drawCircle(cx, tailY + effRadius * 0.35f, effRadius * 1.45f, paint)
 
     return bitmap
 }
