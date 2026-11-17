@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Choreographer
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -30,22 +31,23 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
- * Motor GPS + Cinemática Inercial Predictiva (Dead-Reckoning Continuo + Predicción de Giros por Frenado).
+ * Motor Cinemático Inercial Sincronizado por VSYNC (60/120 FPS nativos sin ValueAnimator intermedio).
  *
- * Cómo elimina el retardo y los frenazos del modelo 3D sin gastar más batería:
- *  1. Desacopla el movimiento del modelo 3D de la frecuencia del hardware GPS (1 Hz / 0.5 Hz):
- *     un bucle cinemático propio corre cada ~50ms (20 Hz) proyectando hacia adelante un horizonte
- *     de 90ms que Mapbox interpola a 60/120 FPS de forma ininterrumpida (el ValueAnimator nunca
- *     llega al final de su recorrido mientras el auto se mueve, eliminando los "frenazos").
- *  2. En rectas: con las ubicaciones registradas y la velocidad en vivo del velocímetro, el auto
- *     simula avance rectilíneo continuo filtrando el ruido lateral del GPS.
- *  3. En curvas y esquinas: detecta caídas de velocidad (frenado previo al giro) combinadas con
- *     cambios de trayectoria en el historial de ubicaciones (y/o geometría de la ruta activa),
- *     reduciendo la proyección frontal para no pasarse de la esquina y aplicando velocidad angular
- *     predictiva (yaw rate) para girar con fluidez.
- *  4. Corrección elástica sin saltos hacia atrás: cuando llega un nuevo fix GPS, cualquier diferencia
- *     longitudinal se absorbe modulando suavemente la velocidad de avance (0.55x..1.45x) sin detener
- *     ni retroceder jamás el vehículo 3D.
+ * Por qué elimina al 100% los tirones ("frenazos" y acelerones):
+ *  1. Sincronización directa con `Choreographer` (VSYNC de pantalla a 60/120 Hz) enviando `animDurationMs = 0L`:
+ *     En Mapbox v11, pasar `duration > 0` cancela y reinicia un `ValueAnimator` en cada actualización,
+ *     congelando 1 cuadro (`fraction = 0`) en cada reinicio. Con `Choreographer` + `duration = 0L`,
+ *     la posición del auto 3D y de la cámara se calculan y aplican directamente cuadro por cuadro en
+ *     el pulso exacto de refresco de pantalla (cero reinicios de `ValueAnimator`).
+ *  2. Filtro de Inercia Física (Slew-Rate Limiter):
+ *     Un auto real tiene masa y no puede cambiar su velocidad un 40% en 50ms cuando llega un paquete GPS
+ *     con ruido. La velocidad de avance en el mapa (`currentSimSpeedMps`) usa la velocidad física real
+ *     sobre el suelo y está limitada por aceleración/desaceleración física máxima, manteniendo una
+ *     velocidad 100% constante y fluida en rectas.
+ *  3. Detección de Giros por Frenado + Trayectoria:
+ *     Cuando el velocímetro detecta que la velocidad desciende y las ubicaciones registradas cambian
+ *     de rumbo, el vehículo reduce suavemente su velocidad de entrada y aplica velocidad angular
+ *     continua para doblar la esquina sin pasarse de largo.
  */
 object LocationEngine {
 
@@ -64,13 +66,11 @@ object LocationEngine {
     private data class GpsBreadcrumb(
         val lat: Double,
         val lon: Double,
-        val speedKmH: Float,
+        val speedMps: Float,
         val courseDeg: Double,
         val elapsedMs: Long
     )
 
-    private const val KINEMATIC_TICK_MS = 50L
-    private const val MAPBOX_HORIZON_MS = 88L
     private const val METERS_PER_DEG_LAT = 111320.0
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -81,23 +81,28 @@ object LocationEngine {
     private var isRunning = false
     private var currentBatterySaverState: Boolean? = null
     private var simulationJob: Job? = null
-    private var kinematicLoopJob: Job? = null
 
-    // Historial de ubicaciones registradas para análisis de trayectoria y giros
+    // Loop VSYNC de hardware (Choreographer a 60/120 FPS exactos)
+    private var isVsyncLoopActive = false
+    private var lastFrameTimeNanos: Long = 0L
+    private var lastSpeedUiPushElapsedMs: Long = 0L
+
+    // Historial de ubicaciones registradas para análisis de trayectoria
     private val breadcrumbs = ArrayDeque<GpsBreadcrumb>(8)
     private var lastFixElapsedMs: Long = 0L
     private var prevAcceptedLoc: Location? = null
     private var lastValidBearingDeg: Double = 0.0
     private var lastFixIsMock: Boolean = false
 
-    // Estimador continuo de velocidad y desaceleración para el velocímetro y detector de curvas
-    private var targetGpsSpeedKmH: Float = 0f
-    private var smoothedSpeedKmH: Float = 0f
-    private var gpsAccelKmHPerSec: Float = 0f
-    private var recentPeakSpeedKmH: Float = 0f
+    // Velocidad para el velocímetro (calibrada) y velocidad física real sobre el suelo (m/s)
+    private var targetDisplaySpeedKmH: Float = 0f
+    private var smoothedDisplaySpeedKmH: Float = 0f
+    private var targetGroundSpeedMps: Double = 0.0
+    private var gpsAccelMps2: Double = 0.0
+    private var recentPeakSpeedMps: Double = 0.0
     private var lastSpeedFixElapsedMs: Long = 0L
 
-    // Estado cinemático continuo del vehículo 3D en el mapa
+    // Estado cinemático inercial continuo del auto 3D
     private var hasSimState: Boolean = false
     private var simLat: Double = 0.0
     private var simLon: Double = 0.0
@@ -107,15 +112,25 @@ object LocationEngine {
     private var currentAngularVelDegPerSec: Double = 0.0
     private var predictedYawRateDegPerSec: Double = 0.0
 
-    // Errores elásticos respecto al ancla GPS (se absorben progresivamente en movimiento)
+    // Discrepancia suavizada respecto al GPS (absorbida con deriva suave sin tirones)
     private var lonErrorMeters: Double = 0.0
     private var latErrorMeters: Double = 0.0
 
-    // Indicadores dinámicos de maniobra de giro y frenado
+    // Estado de maniobra (recta vs. frenado y giro)
     private var isTurningManeuver: Boolean = false
     private var isSpeedDescending: Boolean = false
     private var turnIntensity: Float = 0f
     private var stationaryNotified: Boolean = false
+
+    private val vsyncFrameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!isVsyncLoopActive) return
+            onVsyncFrame(frameTimeNanos)
+            if (isVsyncLoopActive) {
+                Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -136,9 +151,8 @@ object LocationEngine {
             fusedClient = LocationServices.getFusedLocationProviderClient(ctx)
         }
         refreshHardwareRequest()
-        ensureKinematicLoopRunning()
+        ensureVsyncLoopRunning()
 
-        // Semilla inicial rápida con la última ubicación conocida del sistema mientras llega el primer satélite
         if (NavigationState.currentLocation.value == null &&
             ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         ) {
@@ -163,10 +177,8 @@ object LocationEngine {
         if (isRunning && currentBatterySaverState == batterySaver) return
 
         client.removeLocationUpdates(locationCallback)
-        // Intervalos eficientes para la batería sin retención (maxUpdateDelayMillis = 0L);
-        // la fluidez a 60/120 FPS la aporta el motor cinemático inercial entre cada lectura GPS.
-        val interval = if (batterySaver) 1800L else 450L
-        val minInterval = if (batterySaver) 900L else 200L
+        val interval = if (batterySaver) 1800L else 500L
+        val minInterval = if (batterySaver) 900L else 250L
 
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
             .setMinUpdateIntervalMillis(minInterval)
@@ -178,7 +190,7 @@ object LocationEngine {
         client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
         isRunning = true
         currentBatterySaverState = batterySaver
-        ensureKinematicLoopRunning()
+        ensureVsyncLoopRunning()
     }
 
     fun stop() {
@@ -186,220 +198,205 @@ object LocationEngine {
         isRunning = false
         currentBatterySaverState = null
         if (!AppSettings.isGpsSimulationMode.value) {
-            kinematicLoopJob?.cancel()
-            kinematicLoopJob = null
+            stopVsyncLoop()
         }
     }
 
+    private fun ensureVsyncLoopRunning() {
+        if (isVsyncLoopActive) return
+        isVsyncLoopActive = true
+        lastFrameTimeNanos = 0L
+        Choreographer.getInstance().postFrameCallback(vsyncFrameCallback)
+    }
+
+    private fun stopVsyncLoop() {
+        if (!isVsyncLoopActive) return
+        isVsyncLoopActive = false
+        Choreographer.getInstance().removeFrameCallback(vsyncFrameCallback)
+    }
+
     /**
-     * Bucle cinemático maestro (~20 Hz / cada 50ms):
-     * Actualiza tanto el velocímetro como la posición/rotación simulada del auto 3D en el mapa.
+     * Se ejecuta en cada pulso VSYNC de pantalla (cada 8.3ms a 120Hz o 16.6ms a 60Hz).
+     * Integra velocidad y rumbo con inercia física real (cero cambios bruscos de velocidad).
      */
-    private fun ensureKinematicLoopRunning() {
-        if (kinematicLoopJob?.isActive == true) return
-        kinematicLoopJob = mainScope.launch {
-            var prevTickElapsedMs = SystemClock.elapsedRealtime()
+    private fun onVsyncFrame(frameTimeNanos: Long) {
+        val dtSec = if (lastFrameTimeNanos > 0L) {
+            ((frameTimeNanos - lastFrameTimeNanos) / 1_000_000_000.0).coerceIn(0.002, 0.050)
+        } else {
+            0.016
+        }
+        lastFrameTimeNanos = frameTimeNanos
 
-            while (isActive) {
-                delay(KINEMATIC_TICK_MS)
-                val nowElapsed = SystemClock.elapsedRealtime()
-                val dtSec = ((nowElapsed - prevTickElapsedMs) / 1000.0).coerceIn(0.015, 0.140)
-                prevTickElapsedMs = nowElapsed
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val dtSinceFixSec = if (lastSpeedFixElapsedMs > 0L) {
+            ((nowElapsed - lastSpeedFixElapsedMs) / 1000.0).coerceAtLeast(0.0)
+        } else 0.0
 
-                val dtSinceFixSec = if (lastSpeedFixElapsedMs > 0L) {
-                    ((nowElapsed - lastSpeedFixElapsedMs) / 1000f).coerceAtLeast(0f)
-                } else 0f
+        // ── 1. Actualizar velocidad del velocímetro (a ~25 Hz para no sobrecargar recomposición UI) ──
+        val maxCoastSec = if (AppSettings.batterySaverMode.value) 4.5 else 3.2
+        val coastMultiplier = when {
+            targetGroundSpeedMps <= 0.08 -> 0.0
+            !AppSettings.isGpsSimulationMode.value && dtSinceFixSec > 2.2 && targetGroundSpeedMps < 1.2 -> 0.0
+            !AppSettings.isGpsSimulationMode.value && dtSinceFixSec > maxCoastSec -> {
+                exp(-(dtSinceFixSec - maxCoastSec) * 0.80)
+            }
+            else -> 1.0
+        }
 
-                // ── 1. Interpolación continua de velocidad para el velocímetro y el motor inercial ──
-                val maxCoastSec = if (AppSettings.batterySaverMode.value) 4.2f else 3.0f
-                val effectiveTargetSpeedKmH = when {
-                    targetGpsSpeedKmH <= 0.25f -> 0f
-                    !AppSettings.isGpsSimulationMode.value && dtSinceFixSec > 2.0f && targetGpsSpeedKmH < 4.5f -> 0f
-                    !AppSettings.isGpsSimulationMode.value && dtSinceFixSec > maxCoastSec -> {
-                        val overtime = dtSinceFixSec - maxCoastSec
-                        (targetGpsSpeedKmH * exp(-overtime * 0.85f)).coerceAtLeast(0f)
-                    }
-                    else -> {
-                        // Si el auto viene frenando (aceleración negativa), reflejar la caída de velocidad de inmediato
-                        val predWindow = if (gpsAccelKmHPerSec < 0f) {
-                            dtSinceFixSec.coerceAtMost(1.5f)
-                        } else {
-                            dtSinceFixSec.coerceAtMost(0.75f)
-                        }
-                        val accelWeight = if (gpsAccelKmHPerSec < 0f) 0.68f else 0.36f
-                        (targetGpsSpeedKmH + gpsAccelKmHPerSec * predWindow * accelWeight).coerceIn(0f, 260f)
-                    }
-                }
+        // Si el auto viene frenando fuerte, proyectar esa desaceleración suavemente entre fixes GPS
+        val brakingPredictMps = if (gpsAccelMps2 < -0.4 && dtSinceFixSec < 1.4) {
+            gpsAccelMps2 * dtSinceFixSec.coerceAtMost(1.1) * 0.55
+        } else 0.0
 
-                val speedDiff = effectiveTargetSpeedKmH - smoothedSpeedKmH
-                if (abs(speedDiff) > 0.02f) {
-                    val alpha = when {
-                        effectiveTargetSpeedKmH == 0f && smoothedSpeedKmH < 2.5f -> 0.34f
-                        speedDiff < -3.0f -> 0.28f // Respuesta rápida al desacelerar antes de una esquina
-                        else -> 0.22f
-                    }
-                    smoothedSpeedKmH += speedDiff * alpha
-                    if (effectiveTargetSpeedKmH == 0f && smoothedSpeedKmH < 0.35f) {
-                        smoothedSpeedKmH = 0f
-                    }
-                    if (abs(NavigationState.currentSpeedKmH.value - smoothedSpeedKmH) >= 0.04f ||
-                        (smoothedSpeedKmH == 0f && NavigationState.currentSpeedKmH.value != 0f)
-                    ) {
-                        NavigationState.currentSpeedKmH.value = smoothedSpeedKmH
-                    }
-                }
+        val liveGroundTargetMps = ((targetGroundSpeedMps + brakingPredictMps) * coastMultiplier).coerceIn(0.0, 75.0)
+        val liveDisplayTargetKmH = (targetDisplaySpeedKmH * coastMultiplier.toFloat() + (brakingPredictMps * 3.6).toFloat())
+            .coerceIn(0f, 260f)
 
-                // decaimiento suave del pico reciente de velocidad
-                recentPeakSpeedKmH = maxOf(smoothedSpeedKmH, (recentPeakSpeedKmH - (1.8f * dtSec.toFloat())).coerceAtLeast(0f))
-
-                // ── 2. Avance cinemático continuo del modelo 3D sobre el mapa ──
-                val baseLoc = NavigationState.currentLocation.value ?: continue
-                if (!hasSimState || (baseLoc.latitude == 0.0 && baseLoc.longitude == 0.0)) continue
-
-                val baseSpeedMps = (smoothedSpeedKmH / 3.6).coerceAtLeast(0.0)
-
-                if (smoothedSpeedKmH < 0.65f && hypot(lonErrorMeters, latErrorMeters) < 0.35) {
-                    // Auto detenido: frenar suavemente sin tirones ni rotaciones residuales
-                    currentSimSpeedMps = 0.0
-                    currentAngularVelDegPerSec = 0.0
-                    predictedYawRateDegPerSec = 0.0
-                    if (!stationaryNotified) {
-                        stationaryNotified = true
-                        dispatchToListeners(
-                            baseLoc = baseLoc,
-                            lat = simLat,
-                            lon = simLon,
-                            bearing = simBearingDeg,
-                            speedKmH = 0f,
-                            animMs = MAPBOX_HORIZON_MS
-                        )
-                    }
-                    continue
-                }
-                stationaryNotified = false
-
-                // 2A. Modulación elástica de velocidad longitudinal:
-                // Si el modelo 3D quedó ligeramente detrás del GPS (lonErrorMeters > 0) acelera hasta 1.45x;
-                // si la simulación inercial se adelantó ligeramente al GPS (lonErrorMeters < 0), NO frena en seco
-                // ni retrocede: simplemente reduce el paso a 0.55x..0.85x para que el GPS lo alcance en movimiento.
-                val desiredSimSpeedMps = if (baseSpeedMps < 0.18) {
-                    0.0
-                } else {
-                    val lonGain = if (abs(lonErrorMeters) < 2.2) 0.72 else 1.18
-                    val speedCorrection = lonErrorMeters * lonGain
-                    val minSpeedFactor = if (isTurningManeuver || isSpeedDescending) 0.45 else 0.58
-                    val maxSpeedFactor = 1.46
-                    (baseSpeedMps + speedCorrection).coerceIn(
-                        baseSpeedMps * minSpeedFactor,
-                        maxOf(baseSpeedMps * maxSpeedFactor, 1.1)
-                    )
-                }
-
-                // Filtro de velocidad continua (evita cambios bruscos de velocidad al llegar un paquete GPS)
-                val velAlpha = if (desiredSimSpeedMps < currentSimSpeedMps && isSpeedDescending) 0.38 else 0.26
-                currentSimSpeedMps += (desiredSimSpeedMps - currentSimSpeedMps) * velAlpha
-                if (desiredSimSpeedMps == 0.0 && currentSimSpeedMps < 0.06) {
-                    currentSimSpeedMps = 0.0
-                }
-
-                // Descontar del error longitudinal lo que acabamos de compensar en este paso
-                val consumedLonError = (currentSimSpeedMps - baseSpeedMps) * dtSec
-                lonErrorMeters = (lonErrorMeters - consumedLonError).coerceIn(-22.0, 22.0)
-                if (dtSinceFixSec > 2.2f) {
-                    // Sin fix reciente, converger gradualmente a la velocidad pura del velocímetro
-                    lonErrorMeters *= 0.92
-                }
-
-                // 2B. Cálculo de trayectoria: seguir recto en crucero vs. girar cuando baja la velocidad y cambia el rumbo
-                if (currentSimSpeedMps > 0.15) {
-                    if (isTurningManeuver && dtSinceFixSec < 1.75f && abs(predictedYawRateDegPerSec) > 0.25) {
-                        // Proyectar el giro continuamente entre paquetes GPS usando la tasa angular calculada
-                        targetBearingDeg = normalizeDeg(targetBearingDeg + predictedYawRateDegPerSec * dtSec)
-                        // Si la velocidad viene descendiendo (entrando a esquina), sostener el giro; al salir, enderezar
-                        val yawDecay = if (isSpeedDescending) 0.93 else 0.87
-                        predictedYawRateDegPerSec *= yawDecay
-                    } else {
-                        predictedYawRateDegPerSec = 0.0
-                    }
-
-                    // Asistencia sutil con la geometría de la ruta activa cuando el usuario se acerca a una curva/esquina
-                    val routeHintBearing = computeActiveRouteCurveHint(simLat, simLon, targetBearingDeg, currentSimSpeedMps)
-                    if (routeHintBearing != null) {
-                        val blendWeight = if (isSpeedDescending || isTurningManeuver) 0.24 else 0.10
-                        targetBearingDeg = lerpAngleDeg(targetBearingDeg, routeHintBearing, blendWeight)
-                    }
-
-                    // Sesgo suave de dirección hacia la línea de trayectoria real si existe error lateral
-                    val maxSteerBias = if (isTurningManeuver) 18.0 else 6.5
-                    val steerBiasGain = if (isTurningManeuver) 2.5 else 0.95
-                    val steerBiasDeg = (latErrorMeters * steerBiasGain).coerceIn(-maxSteerBias, maxSteerBias)
-                    val effectiveTargetBearing = normalizeDeg(targetBearingDeg + steerBiasDeg)
-
-                    val angleDiff = shortestAngleDeltaDeg(simBearingDeg, effectiveTargetBearing)
-                    val desiredAngVel = if (!isTurningManeuver) {
-                        // Modo Recto: amortigua micro-oscilaciones del GPS para que el auto avance firme y derecho
-                        if (abs(angleDiff) < 1.1) angleDiff * 1.1 else (angleDiff * 2.5).coerceIn(-32.0, 32.0)
-                    } else {
-                        // Modo Giro Activo (velocidad descendió + trayectoria cambió): rotación ágil y fluida en la esquina
-                        val turnRateGain = 4.2 + 2.2 * turnIntensity
-                        (angleDiff * turnRateGain + predictedYawRateDegPerSec * 0.30).coerceIn(-88.0, 88.0)
-                    }
-
-                    val angAlpha = if (isTurningManeuver) 0.44 else 0.24
-                    currentAngularVelDegPerSec += (desiredAngVel - currentAngularVelDegPerSec) * angAlpha
-
-                    var stepAngle = currentAngularVelDegPerSec * dtSec
-                    if (abs(predictedYawRateDegPerSec) < 1.0 && abs(stepAngle) > abs(angleDiff)) {
-                        stepAngle = angleDiff
-                    }
-                    simBearingDeg = normalizeDeg(simBearingDeg + stepAngle)
-                } else {
-                    currentAngularVelDegPerSec = 0.0
-                }
-
-                // 2C. Integrar posición (avance frontal + convergencia lateral diagonal suave)
-                val forwardStepM = currentSimSpeedMps * dtSec
-                val maxLatStepM = forwardStepM * (if (isTurningManeuver) 0.62 else 0.35)
-                val latPullFactor = if (isTurningManeuver) 0.22 else 0.10
-                val latStepM = if (forwardStepM > 0.01) {
-                    (latErrorMeters * latPullFactor).coerceIn(-maxLatStepM, maxLatStepM)
-                } else 0.0
-                latErrorMeters -= latStepM
-
-                val radHeading = Math.toRadians(simBearingDeg)
-                val cosH = cos(radHeading)
-                val sinH = sin(radHeading)
-                // Vector avance (cosH, sinH) + Vector derecha (-sinH, cosH)
-                val northStepM = forwardStepM * cosH - latStepM * sinH
-                val eastStepM = forwardStepM * sinH + latStepM * cosH
-
-                val cosLat = cos(Math.toRadians(simLat)).coerceAtLeast(0.15)
-                simLat += northStepM / METERS_PER_DEG_LAT
-                simLon += eastStepM / (METERS_PER_DEG_LAT * cosLat)
-
-                // 2D. Proyección de horizonte exacto para Mapbox (MAPBOX_HORIZON_MS = 88ms):
-                // Al proyectar el punto objetivo a 88ms con duración de animación de 88ms y actualizar cada 50ms,
-                // la velocidad del modelo 3D dentro de Mapbox coincide al 100% con currentSimSpeedMps y el
-                // animador jamás se detiene antes del siguiente pulso.
-                val horizonSec = MAPBOX_HORIZON_MS / 1000.0
-                val horizonDistM = currentSimSpeedMps * horizonSec
-                val midHorizonBearingRad = Math.toRadians(
-                    normalizeDeg(simBearingDeg + currentAngularVelDegPerSec * horizonSec * 0.5)
-                )
-                val horizonLat = simLat + (horizonDistM * cos(midHorizonBearingRad)) / METERS_PER_DEG_LAT
-                val horizonLon = simLon + (horizonDistM * sin(midHorizonBearingRad)) / (METERS_PER_DEG_LAT * cosLat)
-                val horizonBearing = normalizeDeg(simBearingDeg + currentAngularVelDegPerSec * horizonSec)
-
-                dispatchToListeners(
-                    baseLoc = baseLoc,
-                    lat = horizonLat,
-                    lon = horizonLon,
-                    bearing = horizonBearing,
-                    speedKmH = smoothedSpeedKmH,
-                    animMs = MAPBOX_HORIZON_MS
-                )
+        val displayDiff = liveDisplayTargetKmH - smoothedDisplaySpeedKmH
+        if (abs(displayDiff) > 0.01f) {
+            val stepAlpha = (dtSec * 7.5).toFloat().coerceIn(0.04f, 0.35f)
+            smoothedDisplaySpeedKmH += displayDiff * stepAlpha
+            if (liveDisplayTargetKmH == 0f && smoothedDisplaySpeedKmH < 0.35f) {
+                smoothedDisplaySpeedKmH = 0f
             }
         }
+
+        if (nowElapsed - lastSpeedUiPushElapsedMs >= 40L ||
+            (smoothedDisplaySpeedKmH == 0f && NavigationState.currentSpeedKmH.value != 0f)
+        ) {
+            if (abs(NavigationState.currentSpeedKmH.value - smoothedDisplaySpeedKmH) >= 0.08f ||
+                (smoothedDisplaySpeedKmH == 0f && NavigationState.currentSpeedKmH.value != 0f)
+            ) {
+                NavigationState.currentSpeedKmH.value = smoothedDisplaySpeedKmH
+                lastSpeedUiPushElapsedMs = nowElapsed
+            }
+        }
+
+        recentPeakSpeedMps = maxOf(liveGroundTargetMps, (recentPeakSpeedMps - 0.45 * dtSec).coerceAtLeast(0.0))
+
+        // ── 2. Cinemática continua del vehículo 3D sobre el mapa ──
+        val baseLoc = NavigationState.currentLocation.value ?: return
+        if (!hasSimState || (baseLoc.latitude == 0.0 && baseLoc.longitude == 0.0)) return
+
+        // Ajuste longitudinal ultra-suave con zona muerta para ignorar el ruido natural del GPS (±4.5m):
+        // Nunca frena ni acelera bruscamente (máximo ±10% de deriva gradual).
+        val desiredSpeedMps = if (liveGroundTargetMps < 0.15) {
+            0.0
+        } else {
+            val effectiveLonErr = when {
+                abs(lonErrorMeters) <= 4.5 -> lonErrorMeters * 0.03 // Zona muerta: velocidad 99% constante
+                lonErrorMeters > 4.5 -> (lonErrorMeters - 4.5) * 0.12
+                else -> (lonErrorMeters + 4.5) * 0.12
+            }
+            val minSpeed = liveGroundTargetMps * 0.90
+            val maxSpeed = maxOf(liveGroundTargetMps * 1.10, 0.8)
+            (liveGroundTargetMps + effectiveLonErr).coerceIn(minSpeed, maxSpeed)
+        }
+
+        // Limitador físico de inercia (Slew-Rate Limiter):
+        // Impide matemáticamente cualquier tirón o frenazo al actualizar el GPS
+        val maxAccelMps2 = 3.5 // máx +12.6 km/h por segundo
+        val maxDecelMps2 = if (isSpeedDescending || desiredSpeedMps == 0.0) 6.0 else 2.2 // crucero súper estable
+        val speedDelta = desiredSpeedMps - currentSimSpeedMps
+        val maxUp = maxAccelMps2 * dtSec
+        val maxDown = maxDecelMps2 * dtSec
+        currentSimSpeedMps = (currentSimSpeedMps + speedDelta.coerceIn(-maxDown, maxUp)).coerceAtLeast(0.0)
+
+        if (desiredSpeedMps == 0.0 && currentSimSpeedMps < 0.04) {
+            currentSimSpeedMps = 0.0
+        }
+
+        if (currentSimSpeedMps <= 0.0) {
+            currentAngularVelDegPerSec = 0.0
+            predictedYawRateDegPerSec = 0.0
+            if (!stationaryNotified) {
+                stationaryNotified = true
+                dispatchToListeners(
+                    baseLoc = baseLoc,
+                    lat = simLat,
+                    lon = simLon,
+                    bearing = simBearingDeg,
+                    speedKmH = 0f,
+                    animMs = 0L
+                )
+            }
+            return
+        }
+        stationaryNotified = false
+
+        // Descontar lentamente el error longitudinal consumido
+        val consumedLon = (currentSimSpeedMps - liveGroundTargetMps) * dtSec
+        lonErrorMeters = (lonErrorMeters - consumedLon).coerceIn(-25.0, 25.0)
+        lonErrorMeters *= (1.0 - 0.15 * dtSec)
+
+        // ── 3. Dirección: Recta estable vs. Giro fluido cuando baja la velocidad y cambia la trayectoria ──
+        if (isTurningManeuver && dtSinceFixSec < 1.8 && abs(predictedYawRateDegPerSec) > 0.2) {
+            targetBearingDeg = normalizeDeg(targetBearingDeg + predictedYawRateDegPerSec * dtSec)
+            val decayRate = if (isSpeedDescending) 0.85 else 1.45
+            predictedYawRateDegPerSec *= exp(-decayRate * dtSec)
+        } else {
+            predictedYawRateDegPerSec = 0.0
+        }
+
+        val routeHintBearing = computeActiveRouteCurveHint(simLat, simLon, targetBearingDeg, currentSimSpeedMps)
+        if (routeHintBearing != null) {
+            val routeBlend = (if (isSpeedDescending || isTurningManeuver) 1.8 else 0.7) * dtSec
+            targetBearingDeg = lerpAngleDeg(targetBearingDeg, routeHintBearing, routeBlend)
+        }
+
+        // Corrección suave de carril mediante ángulo de dirección (nunca desplazando el auto de lado en seco)
+        val maxSteerBiasDeg = if (isTurningManeuver) 14.0 else 5.0
+        val steerGain = if (isTurningManeuver) 1.8 else 0.65
+        val steerBiasDeg = (latErrorMeters * steerGain).coerceIn(-maxSteerBiasDeg, maxSteerBiasDeg)
+        val effectiveTargetBearing = normalizeDeg(targetBearingDeg + steerBiasDeg)
+
+        val angleDiff = shortestAngleDeltaDeg(simBearingDeg, effectiveTargetBearing)
+        val desiredAngVelDegPerSec = if (!isTurningManeuver) {
+            // En recta: movimiento de volante muy amortiguado para que la cámara y el auto vayan firmes
+            (angleDiff * 1.8).coerceIn(-20.0, 20.0)
+        } else {
+            // En giro (frenado + cambio de trayectoria): giro continuo y natural en la esquina
+            val gain = 3.6 + 1.8 * turnIntensity
+            (angleDiff * gain + predictedYawRateDegPerSec * 0.25).coerceIn(-80.0, 80.0)
+        }
+
+        // Limitador de aceleración angular (volante suave sin latigazos)
+        val maxAngAccel = (if (isTurningManeuver) 150.0 else 45.0) * dtSec
+        val angVelDelta = (desiredAngVelDegPerSec - currentAngularVelDegPerSec).coerceIn(-maxAngAccel, maxAngAccel)
+        currentAngularVelDegPerSec += angVelDelta
+
+        var stepAngle = currentAngularVelDegPerSec * dtSec
+        if (abs(predictedYawRateDegPerSec) < 0.8 && abs(stepAngle) > abs(angleDiff)) {
+            stepAngle = angleDiff
+        }
+        simBearingDeg = normalizeDeg(simBearingDeg + stepAngle)
+
+        // ── 4. Integrar avance en coordenadas geográficas ──
+        val forwardStepM = currentSimSpeedMps * dtSec
+        val maxLatDriftM = forwardStepM * (if (isTurningManeuver) 0.28 else 0.10)
+        val latStepM = (latErrorMeters * (if (isTurningManeuver) 1.4 else 0.5) * dtSec)
+            .coerceIn(-maxLatDriftM, maxLatDriftM)
+        latErrorMeters -= latStepM
+
+        val radHeading = Math.toRadians(simBearingDeg)
+        val cosH = cos(radHeading)
+        val sinH = sin(radHeading)
+        val northStepM = forwardStepM * cosH - latStepM * sinH
+        val eastStepM = forwardStepM * sinH + latStepM * cosH
+
+        val cosLat = cos(Math.toRadians(simLat)).coerceAtLeast(0.15)
+        simLat += northStepM / METERS_PER_DEG_LAT
+        simLon += eastStepM / (METERS_PER_DEG_LAT * cosLat)
+
+        // Enviar actualización síncrona de cuadro VSYNC (animDurationMs = 0L)
+        dispatchToListeners(
+            baseLoc = baseLoc,
+            lat = simLat,
+            lon = simLon,
+            bearing = simBearingDeg,
+            speedKmH = smoothedDisplaySpeedKmH,
+            animMs = 0L
+        )
     }
 
     fun updateSimulationMode(enabled: Boolean) {
@@ -408,9 +405,8 @@ object LocationEngine {
         lastFixElapsedMs = 0L
         if (!enabled) return
 
-        ensureKinematicLoopRunning()
+        ensureVsyncLoopRunning()
 
-        // Simulación de alta frecuencia (10 Hz / cada 100ms) con aceleración, crucero y frenado reales
         simulationJob = mainScope.launch {
             var angle = 0.0
             val centerLat = NavigationState.currentLocation.value?.latitude?.takeIf { it != 0.0 } ?: 10.998
@@ -420,12 +416,12 @@ object LocationEngine {
             var tick = 0
 
             while (isActive && AppSettings.isGpsSimulationMode.value) {
-                val cyclePos = tick % 220 // Ciclo de 22 segundos a 10 Hz
+                val cyclePos = tick % 220
                 val desiredKmH = when {
-                    cyclePos < 45 -> 68f * (cyclePos / 45f)               // Aceleración fluida 0 -> 68 km/h
-                    cyclePos < 130 -> 68f + 10f * sin((cyclePos - 45) * 0.08f) // Crucero dinámico 58..78 km/h
-                    cyclePos < 175 -> 68f * (1f - (cyclePos - 130) / 45f) // Frenado progresivo -> 0 km/h
-                    else -> 0f                                            // Detenido en semáforo (luces de freno)
+                    cyclePos < 45 -> 68f * (cyclePos / 45f)
+                    cyclePos < 130 -> 68f + 10f * sin((cyclePos - 45) * 0.08f)
+                    cyclePos < 175 -> 68f * (1f - (cyclePos - 130) / 45f)
+                    else -> 0f
                 }.coerceAtLeast(0f)
 
                 simSpeedKmH += (desiredKmH - simSpeedKmH) * 0.25f
@@ -467,11 +463,14 @@ object LocationEngine {
 
     private fun processLocation(loc: Location, isMock: Boolean) {
         val nowElapsed = SystemClock.elapsedRealtime()
-        val fixIntervalMs = if (lastFixElapsedMs > 0L) {
-            (nowElapsed - lastFixElapsedMs).coerceIn(60L, 3500L)
-        } else {
-            if (isMock) 100L else 900L
+        val rawIntervalMs = if (lastFixElapsedMs > 0L) (nowElapsed - lastFixElapsedMs) else 900L
+
+        // Ignorar callbacks duplicados del FusedLocationProvider que llegan con < 60ms y distancia casi 0
+        if (!isMock && prevAcceptedLoc != null && rawIntervalMs < 60L && prevAcceptedLoc!!.distanceTo(loc) < 0.15f) {
+            return
         }
+
+        val fixIntervalMs = rawIntervalMs.coerceIn(80L, 3500L)
         val dtFixSec = (fixIntervalMs / 1000.0).coerceIn(0.08, 3.5)
         lastFixElapsedMs = nowElapsed
         lastFixIsMock = isMock
@@ -481,9 +480,9 @@ object LocationEngine {
             NavigationState.isGpsReady.value = true
         }
 
-        // ── 1. Velocidad calibrada (Doppler GNSS + respaldo geométrico por distancia) ──
+        // ── 1. Velocidad Física Real (m/s) para el Mapa y Velocidad Calibrada (km/h) para el Velocímetro ──
         val distFromPrevMeters = prevAcceptedLoc?.distanceTo(loc) ?: 0f
-        val fallbackSpeedMps = if (prevAcceptedLoc != null && dtFixSec >= 0.22 && distFromPrevMeters in 0.7f..110f) {
+        val fallbackSpeedMps = if (prevAcceptedLoc != null && dtFixSec >= 0.25 && distFromPrevMeters in 0.7f..110f) {
             (distFromPrevMeters / dtFixSec).toFloat()
         } else 0f
 
@@ -492,6 +491,7 @@ object LocationEngine {
             fallbackSpeedMps > 0f -> fallbackSpeedMps
             else -> 0f
         }
+        val groundMps = if (rawMps * 3.6f < 1.2f) 0.0 else rawMps.toDouble()
         val rawSpeedKmH = rawMps * 3.6f
 
         val calibratedSpeedKmH = when {
@@ -502,42 +502,42 @@ object LocationEngine {
             else               -> rawSpeedKmH * 1.10f
         }
 
-        // ── 2. Detección de caída de velocidad (Frenado / Entrada en Curva o Esquina) ──
-        recentPeakSpeedKmH = maxOf(recentPeakSpeedKmH, calibratedSpeedKmH)
-        val speedDropKmH = (recentPeakSpeedKmH - calibratedSpeedKmH).coerceAtLeast(0f)
-        val speedDropRatio = if (recentPeakSpeedKmH > 6f) {
-            (speedDropKmH / recentPeakSpeedKmH).coerceIn(0f, 1f)
+        // ── 2. Detección de Frenado / Caída de Velocidad ──
+        recentPeakSpeedMps = maxOf(recentPeakSpeedMps, groundMps)
+        val speedDropMps = (recentPeakSpeedMps - groundMps).coerceAtLeast(0.0)
+        val speedDropRatio = if (recentPeakSpeedMps > 1.8) {
+            (speedDropMps / recentPeakSpeedMps).toFloat().coerceIn(0f, 1f)
         } else 0f
 
         if (lastSpeedFixElapsedMs > 0L) {
-            val dtSpeedSec = ((nowElapsed - lastSpeedFixElapsedMs) / 1000f).coerceIn(0.08f, 3.0f)
-            val instantAccel = ((calibratedSpeedKmH - targetGpsSpeedKmH) / dtSpeedSec).coerceIn(-45f, 35f)
-            gpsAccelKmHPerSec = when {
-                calibratedSpeedKmH == 0f -> 0f
-                instantAccel < -2.2f -> gpsAccelKmHPerSec * 0.30f + instantAccel * 0.70f // Priorizar detección de frenado
-                else -> gpsAccelKmHPerSec * 0.48f + instantAccel * 0.52f
+            val dtSpeedSec = ((nowElapsed - lastSpeedFixElapsedMs) / 1000.0).coerceIn(0.08, 3.0)
+            val instantAccelMps2 = ((groundMps - targetGroundSpeedMps) / dtSpeedSec).coerceIn(-12.0, 9.0)
+            gpsAccelMps2 = when {
+                groundMps == 0.0 -> 0.0
+                instantAccelMps2 < -0.6 -> gpsAccelMps2 * 0.35 + instantAccelMps2 * 0.65
+                else -> gpsAccelMps2 * 0.55 + instantAccelMps2 * 0.45
             }
         } else {
-            smoothedSpeedKmH = calibratedSpeedKmH
+            smoothedDisplaySpeedKmH = calibratedSpeedKmH
+            currentSimSpeedMps = groundMps
             NavigationState.currentSpeedKmH.value = calibratedSpeedKmH
         }
-        targetGpsSpeedKmH = calibratedSpeedKmH
+        targetGroundSpeedMps = groundMps
+        targetDisplaySpeedKmH = calibratedSpeedKmH
         lastSpeedFixElapsedMs = nowElapsed
 
-        // ── 3. Análisis de Trayectoria con las Ubicaciones Registradas ──
-        val geoBearingDeg = if (prevAcceptedLoc != null && distFromPrevMeters >= 0.75f) {
+        // ── 3. Análisis de Trayectoria con el Historial de Ubicaciones Registradas ──
+        val geoBearingDeg = if (prevAcceptedLoc != null && distFromPrevMeters >= 0.85f) {
             normalizeDeg(prevAcceptedLoc!!.bearingTo(loc).toDouble())
         } else null
 
-        val dopplerBearingDeg = if (loc.hasBearing() && (isMock || loc.speed >= 0.70f)) {
+        val dopplerBearingDeg = if (loc.hasBearing() && (isMock || loc.speed >= 0.75f)) {
             normalizeDeg(loc.bearing.toDouble())
         } else null
 
         val measuredBearingDeg = when {
             dopplerBearingDeg != null && geoBearingDeg != null -> {
-                // Al desacelerar para doblar una esquina, el vector geométrico entre ubicaciones registradas
-                // capta el nuevo rumbo antes que el filtro interno del chip GPS
-                val geoWeight = if (speedDropRatio >= 0.14f || calibratedSpeedKmH < 28f) 0.50 else 0.25
+                val geoWeight = if (speedDropRatio >= 0.14f || calibratedSpeedKmH < 28f) 0.48 else 0.22
                 lerpAngleDeg(dopplerBearingDeg, geoBearingDeg, geoWeight)
             }
             dopplerBearingDeg != null -> dopplerBearingDeg
@@ -550,10 +550,10 @@ object LocationEngine {
         val prevCrumb = breadcrumbs.lastOrNull()
         val prevCrumb2 = if (breadcrumbs.size >= 2) breadcrumbs[breadcrumbs.size - 2] else prevCrumb
 
-        val deltaBearing1 = if (prevCrumb != null && calibratedSpeedKmH >= 1.5f) {
+        val deltaBearing1 = if (prevCrumb != null && groundMps >= 0.45) {
             shortestAngleDeltaDeg(prevCrumb.courseDeg, measuredBearingDeg)
         } else 0.0
-        val deltaBearing2 = if (prevCrumb2 != null && calibratedSpeedKmH >= 1.5f) {
+        val deltaBearing2 = if (prevCrumb2 != null && groundMps >= 0.45) {
             shortestAngleDeltaDeg(prevCrumb2.courseDeg, measuredBearingDeg)
         } else deltaBearing1
 
@@ -564,7 +564,7 @@ object LocationEngine {
             GpsBreadcrumb(
                 lat = loc.latitude,
                 lon = loc.longitude,
-                speedKmH = calibratedSpeedKmH,
+                speedMps = groundMps.toFloat(),
                 courseDeg = measuredBearingDeg,
                 elapsedMs = nowElapsed
             )
@@ -573,63 +573,47 @@ object LocationEngine {
             breadcrumbs.removeFirst()
         }
 
-        // ── 4. Clasificador Inteligente: Seguir Recto vs. Girar por Descenso de Velocidad + Cambio de Trayectoria ──
+        // ── 4. Clasificador: Seguir Recto vs. Girar cuando baja la velocidad y cambia la trayectoria ──
         isSpeedDescending = speedDropRatio >= 0.13f ||
-            speedDropKmH >= 5.0f ||
-            gpsAccelKmHPerSec <= -2.8f ||
-            (calibratedSpeedKmH in 3.5f..26f && gpsAccelKmHPerSec < -0.6f)
+            speedDropMps >= 1.4 ||
+            gpsAccelMps2 <= -0.75 ||
+            (calibratedSpeedKmH in 4f..26f && gpsAccelMps2 < -0.20)
 
-        val hasCornerTrajectoryChange = isSpeedDescending && (absDelta1 >= 3.6 || absDelta2 >= 5.2)
+        val hasCornerTrajectoryChange = isSpeedDescending && (absDelta1 >= 3.8 || absDelta2 >= 5.5)
         val hasSustainedCurveChange = absDelta1 >= 6.8 || (absDelta2 >= 9.5 && deltaBearing1 * deltaBearing2 > 0.0)
 
-        if (calibratedSpeedKmH < 1.5f) {
+        if (groundMps < 0.45) {
             isTurningManeuver = false
             turnIntensity = 0f
             predictedYawRateDegPerSec = 0.0
         } else if (hasCornerTrajectoryChange || hasSustainedCurveChange) {
             isTurningManeuver = true
-            val speedDropBoost = if (isSpeedDescending) (1.0f + speedDropRatio * 1.25f).coerceIn(1.0f, 2.1f) else 1.0f
+            val speedDropBoost = if (isSpeedDescending) (1.0f + speedDropRatio * 1.2f).coerceIn(1.0f, 2.0f) else 1.0f
             turnIntensity = (((maxOf(absDelta1, absDelta2 * 0.7) / 22.0).toFloat()) * speedDropBoost).coerceIn(0.30f, 1.0f)
             targetBearingDeg = measuredBearingDeg
 
-            // Velocidad angular (grados/seg) proyectada para que el auto gire de forma continua
-            val rawYawRate = (deltaBearing1 / dtFixSec).coerceIn(-75.0, 75.0)
-            predictedYawRateDegPerSec = rawYawRate * (0.60 + 0.38 * turnIntensity)
+            val rawYawRate = (deltaBearing1 / dtFixSec).coerceIn(-70.0, 70.0)
+            predictedYawRateDegPerSec = rawYawRate * (0.55 + 0.35 * turnIntensity)
         } else {
-            // Trayectoria recta: filtrar micro-variaciones del GPS para que el auto simule seguir derecho sin zigzagueo
+            // Modo recto: amortiguar variaciones del GPS para que el auto avance firme y constante
             isTurningManeuver = false
             turnIntensity = 0f
             predictedYawRateDegPerSec = 0.0
             targetBearingDeg = if (hasSimState) {
-                lerpAngleDeg(targetBearingDeg, measuredBearingDeg, 0.38)
+                lerpAngleDeg(targetBearingDeg, measuredBearingDeg, 0.32)
             } else {
                 measuredBearingDeg
             }
         }
 
-        // ── 5. Ancla Física Compensada y Cálculo de Error Elástico (Sin Saltos ni Frenazos) ──
-        val calibratedMps = calibratedSpeedKmH / 3.6
-        // En rectas compensamos ~0.34s de latencia NMEA; si la velocidad desciende o está girando,
-        // reducimos la proyección frontal para que el auto nunca se pase de largo en la esquina.
-        val cornerDamping = if (isTurningManeuver) (1.0 - 0.58 * turnIntensity) else 1.0
-        val brakingDamping = if (isSpeedDescending) 0.55 else 1.0
-        val lookaheadSec = 0.34 * cornerDamping * brakingDamping
-        val lookaheadMeters = if (!isMock && calibratedSpeedKmH >= 3.0f) {
-            (calibratedMps * lookaheadSec).coerceAtMost(7.0)
-        } else 0.0
-
-        val radMeasured = Math.toRadians(targetBearingDeg)
-        val cosLat = cos(Math.toRadians(loc.latitude)).coerceAtLeast(0.15)
-        val anchorLat = loc.latitude + (lookaheadMeters * cos(radMeasured)) / METERS_PER_DEG_LAT
-        val anchorLon = loc.longitude + (lookaheadMeters * sin(radMeasured)) / (METERS_PER_DEG_LAT * cosLat)
-
+        // ── 5. Evaluación suave de posición respecto al GPS ──
         if (!hasSimState) {
             hasSimState = true
-            simLat = anchorLat
-            simLon = anchorLon
+            simLat = loc.latitude
+            simLon = loc.longitude
             simBearingDeg = measuredBearingDeg
             targetBearingDeg = measuredBearingDeg
-            currentSimSpeedMps = calibratedMps
+            currentSimSpeedMps = groundMps
             lonErrorMeters = 0.0
             latErrorMeters = 0.0
             dispatchToListeners(
@@ -638,36 +622,33 @@ object LocationEngine {
                 lon = simLon,
                 bearing = simBearingDeg,
                 speedKmH = calibratedSpeedKmH,
-                animMs = MAPBOX_HORIZON_MS
+                animMs = 0L
             )
         } else {
-            val northDiffM = (anchorLat - simLat) * METERS_PER_DEG_LAT
-            val eastDiffM = (anchorLon - simLon) * METERS_PER_DEG_LAT * cosLat
+            val cosLat = cos(Math.toRadians(loc.latitude)).coerceAtLeast(0.15)
+            val northDiffM = (loc.latitude - simLat) * METERS_PER_DEG_LAT
+            val eastDiffM = (loc.longitude - simLon) * METERS_PER_DEG_LAT * cosLat
             val totalErrorM = hypot(northDiffM, eastDiffM)
 
-            if (totalErrorM > 45.0) {
-                // Re-anclaje limpio solo ante saltos grandes (ej. primer fix real tras abrir la app o salir de túnel largo)
-                simLat = anchorLat
-                simLon = anchorLon
+            if (totalErrorM > 50.0) {
+                simLat = loc.latitude
+                simLon = loc.longitude
                 simBearingDeg = measuredBearingDeg
                 targetBearingDeg = measuredBearingDeg
                 lonErrorMeters = 0.0
                 latErrorMeters = 0.0
             } else {
-                // Descomponer discrepancia en componente longitudinal (adelante/atrás) y lateral (izquierda/derecha)
                 val radSim = Math.toRadians(simBearingDeg)
                 val cosSim = cos(radSim)
                 val sinSim = sin(radSim)
                 val newLonErr = northDiffM * cosSim + eastDiffM * sinSim
                 val newLatErr = -northDiffM * sinSim + eastDiffM * cosSim
 
-                // Suavizar errores para que el bucle cinemático de 20 Hz los absorba progresivamente en movimiento
-                lonErrorMeters = (lonErrorMeters * 0.25 + newLonErr * 0.75).coerceIn(-20.0, 20.0)
-                latErrorMeters = (latErrorMeters * 0.25 + newLatErr * 0.75).coerceIn(-14.0, 14.0)
+                lonErrorMeters = (lonErrorMeters * 0.45 + newLonErr * 0.55).coerceIn(-25.0, 25.0)
+                latErrorMeters = (latErrorMeters * 0.40 + newLatErr * 0.60).coerceIn(-15.0, 15.0)
             }
         }
 
-        // Estado de luces de freno al detenerse
         if (calibratedSpeedKmH < 1f) {
             if (NavigationState.lastZeroSpeedTime == 0L) {
                 NavigationState.lastZeroSpeedTime = System.currentTimeMillis()
@@ -679,19 +660,14 @@ object LocationEngine {
             NavigationState.isBraking.value = false
         }
 
-        // Alimentar servicios en segundo plano con la ubicación GPS física real
         RouteTracker.onLocationUpdate(loc)
         DashcamRouteTracker.onLocationUpdate(loc)
         SpeedRecordTracker.onSpeedUpdate(calibratedSpeedKmH, loc)
         appContext?.let { WeatherService.onLocationAvailable(it, loc.latitude, loc.longitude) }
 
-        ensureKinematicLoopRunning()
+        ensureVsyncLoopRunning()
     }
 
-    /**
-     * Si existe una ruta activa cerca del vehículo, anticipa la curvatura de los próximos metros
-     * de la vía para que los giros en intersecciones sean aún más precisos.
-     */
     private fun computeActiveRouteCurveHint(
         carLat: Double,
         carLon: Double,
@@ -720,7 +696,6 @@ object LocationEngine {
 
         if (bestIdx < 0 || bestDistM > 22.0) return null
 
-        // Buscar un punto unos metros más adelante sobre la polilínea (según la velocidad actual)
         val lookaheadTargetM = (speedMps * 0.75).coerceIn(5.0, 18.0)
         var accumM = 0.0
         var targetIdx = bestIdx
@@ -741,7 +716,6 @@ object LocationEngine {
         if (hypot(dN, dE) < 2.0) return null
 
         val segBearing = normalizeDeg(Math.toDegrees(kotlin.math.atan2(dE, dN)))
-        // Solo sugerir si el ángulo es coherente con el sentido de marcha (< 105°)
         return if (abs(shortestAngleDeltaDeg(currentTargetBearing, segBearing)) <= 105.0) {
             segBearing
         } else null
@@ -791,8 +765,8 @@ object LocationEngine {
                     projectedLat = simLat,
                     projectedLon = simLon,
                     bearingDeg = simBearingDeg,
-                    calibratedSpeedKmH = smoothedSpeedKmH,
-                    animDurationMs = MAPBOX_HORIZON_MS,
+                    calibratedSpeedKmH = smoothedDisplaySpeedKmH,
+                    animDurationMs = 0L,
                     isMock = lastFixIsMock
                 )
             }

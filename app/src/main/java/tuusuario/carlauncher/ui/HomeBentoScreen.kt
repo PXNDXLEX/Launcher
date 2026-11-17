@@ -949,22 +949,19 @@ private fun LiveMapboxMiniMap(
         }
     }
 
-    // Escuchar actualizaciones de GPS / Simulación Inercial en tiempo real a través de LocationEngine
+    // Escuchar actualizaciones de GPS / Simulación Inercial VSYNC en tiempo real a través de LocationEngine
     DisposableEffect(Unit) {
         val listener = LocationEngine.Listener { loc, projectedLat, projectedLon, bearingDeg, _, animDurationMs, _ ->
             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@Listener
             val pt = Point.fromLngLat(projectedLon, projectedLat)
             miniLocationProvider.updateLocation(pt, bearingDeg, animDurationMs)
 
-            miniMapView.camera.easeTo(
+            miniMapView.mapboxMap.setCamera(
                 cameraOptions {
                     center(pt)
                     zoom(15.5)
                     pitch(22.0)
                     bearing(bearingDeg)
-                },
-                MapAnimationOptions.mapAnimationOptions {
-                    duration(animDurationMs.coerceIn(48L, 900L))
                 }
             )
         }

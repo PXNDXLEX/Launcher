@@ -183,6 +183,16 @@ private const val CAR_TAILLIGHTS_SOURCE_ID = "car-taillights-source"
 private const val CAR_TAILLIGHTS_LAYER_ID  = "car-taillights-layer"
 private const val BUILDING_FACADE_IMAGE_ID = "building-facade-windows"
 
+private class MapInternalMotionState {
+    var gpsBearing: Double = 0.0
+    var lastKnownBearing: Float = 0f
+    var lastIndicatorPos: com.mapbox.geojson.Point? = null
+    var lastIndicatorBearing: Double = 0.0
+    var lastGlowUpdateMs: Long = 0L
+    var cameraEaseEndElapsedMs: Long = 0L
+    var cachedHeadlightsSource: GeoJsonSource? = null
+}
+
 class MockLocationProvider : LocationProvider {
     val consumers = java.util.concurrent.CopyOnWriteArraySet<LocationConsumer>()
     private var lastLat = Double.NaN
@@ -205,14 +215,14 @@ class MockLocationProvider : LocationProvider {
     fun updateLocation(
         point: com.mapbox.geojson.Point,
         bearing: Double,
-        animDurationMs: Long = 88L
+        animDurationMs: Long = 0L
     ) {
-        val dur = animDurationMs.coerceIn(32L, 1250L)
+        val dur = animDurationMs.coerceIn(0L, 1250L)
         val posChanged = lastLat.isNaN() ||
             kotlin.math.abs(point.latitude() - lastLat) > 1e-8 ||
             kotlin.math.abs(point.longitude() - lastLon) > 1e-8
         val brgChanged = lastBearing.isNaN() ||
-            kotlin.math.abs(bearing - lastBearing) > 0.04
+            kotlin.math.abs(bearing - lastBearing) > 0.02
 
         if (!posChanged && !brgChanged) return
 
@@ -222,15 +232,23 @@ class MockLocationProvider : LocationProvider {
 
         consumers.forEach { consumer ->
             if (posChanged) {
-                consumer.onLocationUpdated(point) {
-                    duration = dur
-                    interpolator = LinearInterpolator()
+                if (dur == 0L) {
+                    consumer.onLocationUpdated(point) { duration = 0L }
+                } else {
+                    consumer.onLocationUpdated(point) {
+                        duration = dur
+                        interpolator = LinearInterpolator()
+                    }
                 }
             }
             if (brgChanged) {
-                consumer.onBearingUpdated(bearing) {
-                    duration = dur
-                    interpolator = LinearInterpolator()
+                if (dur == 0L) {
+                    consumer.onBearingUpdated(bearing) { duration = 0L }
+                } else {
+                    consumer.onBearingUpdated(bearing) {
+                        duration = dur
+                        interpolator = LinearInterpolator()
+                    }
                 }
             }
         }
@@ -375,11 +393,12 @@ fun NavigationMap(
         )
     }
 
+    // Estado interno de movimiento NO-reactivo (evita recomponer los 3500 renglones de Compose a 60/120 FPS)
+    val motionState = remember { MapInternalMotionState() }
+
     // Referencias al mapa — guardadas en remember para no recrear
     var mapReady          by remember { mutableStateOf(false) }
     var lastAppliedStyle  by remember { mutableStateOf("") }
-    var lastKnownBearing  by remember { mutableStateOf(0f) }
-    var currentMapRotation by remember { mutableStateOf(0f) }
     var animator: ValueAnimator? by remember { mutableStateOf(null) }
     var autoCenterJob     by remember { mutableStateOf<Job?>(null) }
     // Posición donde se desactivó el seguimiento (para reactivar cada 1m)
@@ -387,8 +406,6 @@ fun NavigationMap(
     // Bloquea el auto-recentrado mientras el usuario está interactuando
     var isSavingFavorite     by remember { mutableStateOf(false) }
     var isPlacingDestination by remember { mutableStateOf(false) }
-    // Bearing explícito de GPS — actualizado con cada fix válido
-    var gpsBearing by remember { mutableStateOf(0.0) }
 
     var searchQuery      by remember { mutableStateOf("") }
     var isSearchFocused  by remember { mutableStateOf(false) }
@@ -396,11 +413,51 @@ fun NavigationMap(
     var showFavorites    by remember { mutableStateOf(false) }
     var isSearching      by remember { mutableStateOf(false) }
     var isStyleTransitioning by remember { mutableStateOf(false) }
-    var prevIndicatorPosListener by remember { mutableStateOf<OnIndicatorPositionChangedListener?>(null) }
-    var prevIndicatorBearingListener by remember { mutableStateOf<OnIndicatorBearingChangedListener?>(null) }
-    var lastIndicatorPos by remember { mutableStateOf<com.mapbox.geojson.Point?>(null) }
-    var lastIndicatorBearing by remember { mutableStateOf(0.0) }
-    var lastGlowUpdateMs by remember { mutableStateOf(0L) }
+
+    // Helper directo de cámara 3D para sincronización VSYNC instantánea sin animadores en conflicto
+    fun buildChaseCameraOptions(
+        centerPt: Point? = motionState.lastIndicatorPos,
+        bearingDeg: Double = motionState.gpsBearing
+    ): CameraOptions {
+        val portrait = isPortraitRef.value
+        val topPad = if (portrait) {
+            (screenHeightPxRef.value * 0.35).coerceAtLeast(160.0)
+        } else {
+            (screenHeightPxRef.value * 0.46).coerceAtLeast(140.0)
+        }
+        val botPad = if (portrait) {
+            maxOf(screenHeightPxRef.value * 0.11, bottomInsetRef.value)
+        } else {
+            maxOf(screenHeightPxRef.value * 0.04, bottomInsetRef.value)
+        }
+        val targetPitch = if (portrait) 65.0 else 67.5
+        return cameraOptions {
+            if (centerPt != null) center(centerPt)
+            zoom(19.75)
+            pitch(targetPitch)
+            bearing(bearingDeg)
+            padding(com.mapbox.maps.EdgeInsets(topPad, leftInsetRef.value, botPad, rightInsetRef.value))
+        }
+    }
+
+    fun smoothReturnToChaseCam(durationMs: Long = 650L) {
+        mapView.viewport.idle()
+        val pt = motionState.lastIndicatorPos ?: NavigationState.currentLocation.value?.let {
+            if (it.latitude != 0.0) Point.fromLngLat(it.longitude, it.latitude) else null
+        }
+        if (pt != null) {
+            if (durationMs <= 0L) {
+                motionState.cameraEaseEndElapsedMs = 0L
+                mapView.mapboxMap.setCamera(buildChaseCameraOptions(pt, motionState.gpsBearing))
+            } else {
+                motionState.cameraEaseEndElapsedMs = android.os.SystemClock.elapsedRealtime() + durationMs
+                mapView.camera.easeTo(
+                    buildChaseCameraOptions(pt, motionState.gpsBearing),
+                    MapAnimationOptions.mapAnimationOptions { duration(durationMs) }
+                )
+            }
+        }
+    }
 
     // Escala efectiva de las luces sincronizada con el tamaño 3D del vehículo (0.300) y el modo Aéreo 2D / 3D
     fun computeEffectiveGlowIconSize(): Double {
@@ -409,34 +466,38 @@ fun NavigationMap(
         return (AppSettings.glowIconSize.value * modelScaleFactor * aerialFactor).toDouble()
     }
 
-    // Actualiza la posición, rotación y tamaño de los faros y luces traseras en tiempo real (incluso estacionado)
+    // Actualiza la posición, rotación y tamaño de los faros y luces traseras usando referencia en caché
     fun pushGlowFeatureToMap(force: Boolean = false) {
         val styleName = AppSettings.mapStyle.value
         val isNight = (styleName == "DARK" || styleName == "NEON")
         if (!isNight || !mapReady) return
-        val nowMs = System.currentTimeMillis()
-        if (!force && (nowMs - lastGlowUpdateMs < 36L)) return
-        lastGlowUpdateMs = nowMs
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        if (!force && (nowMs - motionState.lastGlowUpdateMs < 48L)) return
+        motionState.lastGlowUpdateMs = nowMs
 
-        val pos = lastIndicatorPos ?: NavigationState.currentLocation.value?.let { loc ->
+        val pos = motionState.lastIndicatorPos ?: NavigationState.currentLocation.value?.let { loc ->
             if (loc.latitude != 0.0) com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude) else null
         } ?: return
 
-        val bearingVal = if (lastIndicatorBearing != 0.0) lastIndicatorBearing else gpsBearing
+        val bearingVal = if (motionState.lastIndicatorBearing != 0.0) motionState.lastIndicatorBearing else motionState.gpsBearing
         val effectiveSize = computeEffectiveGlowIconSize()
 
-        mapView.mapboxMap.getStyle { style ->
-            val featureCollection = com.mapbox.geojson.FeatureCollection.fromFeature(
-                com.mapbox.geojson.Feature.fromGeometry(
-                    pos,
-                    com.google.gson.JsonObject().apply {
-                        addProperty("bearing", bearingVal)
-                        addProperty("iconSize", effectiveSize)
-                    }
-                )
-            )
-            style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)
-                ?.featureCollection(featureCollection)
+        val feature = com.mapbox.geojson.Feature.fromGeometry(
+            pos,
+            com.google.gson.JsonObject().apply {
+                addProperty("bearing", bearingVal)
+                addProperty("iconSize", effectiveSize)
+            }
+        )
+        val cachedSrc = motionState.cachedHeadlightsSource
+        if (cachedSrc != null) {
+            cachedSrc.feature(feature)
+        } else {
+            mapView.mapboxMap.getStyle { style ->
+                val src = style.getSourceAs<com.mapbox.maps.extension.style.sources.generated.GeoJsonSource>(CAR_HEADLIGHTS_SOURCE_ID)
+                motionState.cachedHeadlightsSource = src
+                src?.feature(feature)
+            }
         }
     }
 
@@ -553,9 +614,11 @@ fun NavigationMap(
             loadedStyle.addSource(geoJsonSource(DASHCAM_SOURCE_ID) {
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
-            loadedStyle.addSource(geoJsonSource(CAR_HEADLIGHTS_SOURCE_ID) {
+            val headlightsGeoSrc = geoJsonSource(CAR_HEADLIGHTS_SOURCE_ID) {
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
-            })
+            }
+            loadedStyle.addSource(headlightsGeoSrc)
+            motionState.cachedHeadlightsSource = headlightsGeoSrc
             loadedStyle.addSource(geoJsonSource(CAR_TAILLIGHTS_SOURCE_ID) {
                 featureCollection(FeatureCollection.fromFeatures(emptyList()))
             })
@@ -854,30 +917,12 @@ fun NavigationMap(
             // Forzar actualización de ubicación e iluminar las luces de inmediato (incluso a 0 km/h)
             NavigationState.currentLocation.value?.let { loc ->
                 val pt = com.mapbox.geojson.Point.fromLngLat(loc.longitude, loc.latitude)
-                val brg = if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
-                lastIndicatorPos = pt
-                lastIndicatorBearing = brg
-                mockLocationProvider.updateLocation(pt, brg, animDurationMs = 80L)
+                val brg = if (loc.hasBearing()) loc.bearing.toDouble() else motionState.gpsBearing
+                motionState.lastIndicatorPos = pt
+                motionState.lastIndicatorBearing = brg
+                mockLocationProvider.updateLocation(pt, brg, animDurationMs = 0L)
                 pushGlowFeatureToMap(force = true)
             }
-
-            prevIndicatorPosListener?.let { locPlugin.removeOnIndicatorPositionChangedListener(it) }
-            val posListener = OnIndicatorPositionChangedListener { point ->
-                lastIndicatorPos = point
-                pushGlowFeatureToMap(force = false)
-            }
-            prevIndicatorPosListener = posListener
-            locPlugin.addOnIndicatorPositionChangedListener(posListener)
-
-            prevIndicatorBearingListener?.let { locPlugin.removeOnIndicatorBearingChangedListener(it) }
-            val bearingListener = OnIndicatorBearingChangedListener { newBearing ->
-                lastIndicatorBearing = newBearing
-                pushGlowFeatureToMap(force = false)
-                gpsBearing = newBearing
-                lastKnownBearing = newBearing.toFloat()
-            }
-            prevIndicatorBearingListener = bearingListener
-            locPlugin.addOnIndicatorBearingChangedListener(bearingListener)
 
             // Recrear anotaciones si ya hay destino activo
             val activeDest = NavigationState.activeDestination.value
@@ -975,15 +1020,7 @@ fun NavigationMap(
                     locationWhenFollowDisabled = null
                     autoCenterJob?.cancel()
                     updateRouteOnMap()
-
-                    // Activar viewport 3D Chase Cam (78° de inclinación, auto centrado abajo)
-                    val vp = mapView.viewport
-                    vp.transitionTo(
-                        buildChaseFollowState(),
-                        vp.makeDefaultViewportTransition(
-                            DefaultViewportTransitionOptions.Builder().maxDurationMs(1200).build()
-                        )
-                    )
+                    smoothReturnToChaseCam(durationMs = 850L)
 
                 } catch (e: Exception) {
                     if (NavigationState.cachedRouteJson.value != null) {
@@ -1029,32 +1066,28 @@ fun NavigationMap(
             NavigationState.currentLocation.value?.let { loc ->
                 if (loc.latitude != 0.0) {
                     val carPos = Point.fromLngLat(loc.longitude, loc.latitude)
-                    val carBearing = if (loc.hasBearing()) loc.bearing.toDouble() else gpsBearing
-                    mockLocationProvider.updateLocation(carPos, carBearing, animDurationMs = 80L)
+                    val carBearing = if (loc.hasBearing()) loc.bearing.toDouble() else motionState.gpsBearing
+                    motionState.lastIndicatorPos = carPos
+                    motionState.lastIndicatorBearing = carBearing
+                    mockLocationProvider.updateLocation(carPos, carBearing, animDurationMs = 0L)
                     hasInitializedPosition = true
                 }
             }
-            if (isFollowingLocation && !isIntroAnimating) {
-                val vp = mapView.viewport
-                vp.transitionTo(
-                    buildChaseFollowState(),
-                    vp.makeDefaultViewportTransition(
-                        DefaultViewportTransitionOptions.Builder().maxDurationMs(650).build()
-                    )
-                )
+            if (isFollowingLocation && !isIntroAnimating && !isAerialExploreMode) {
+                smoothReturnToChaseCam(durationMs = 0L)
             }
         }
     }
 
-    // ── Suscripción al motor GPS e Inercial unificado en tiempo real (LocationEngine) ──
+    // ── Suscripción al motor GPS e Inercial VSYNC en tiempo real (LocationEngine) ──
     DisposableEffect(Unit) {
         var lastRouteCheckMs = 0L
         val distBuf = FloatArray(1)
 
         val listener = LocationEngine.Listener { loc, projectedLat, projectedLon, bearingDeg, _, animDurationMs, _ ->
             val nowMs = android.os.SystemClock.elapsedRealtime()
-            // Lógica de ruta activa (evaluada de forma eficiente ~3 veces por segundo usando la posición proyectada continua)
-            if (currentRoutePoints.isNotEmpty() && selectedDestination != null && (nowMs - lastRouteCheckMs >= 320L)) {
+            // Lógica de ruta activa (evaluada ~3 veces por segundo)
+            if (currentRoutePoints.isNotEmpty() && selectedDestination != null && (nowMs - lastRouteCheckMs >= 350L)) {
                 lastRouteCheckMs = nowMs
                 var minDistance = Float.MAX_VALUE
                 var closestIndex = 0
@@ -1102,18 +1135,19 @@ fun NavigationMap(
             // Si el mapa está oculto tras el menú Home, evitamos renderizado GPU innecesario
             if (!isVisibleState.value) return@Listener
 
-            gpsBearing = bearingDeg
+            val carPt = Point.fromLngLat(projectedLon, projectedLat)
+            motionState.gpsBearing = bearingDeg
+            motionState.lastKnownBearing = bearingDeg.toFloat()
+            motionState.lastIndicatorPos = carPt
+            motionState.lastIndicatorBearing = bearingDeg
+
+            // Actualización síncrona en el cuadro VSYNC actual (duration = 0L, sin ValueAnimator intermedio)
             mockLocationProvider.updateLocation(
-                Point.fromLngLat(projectedLon, projectedLat),
+                carPt,
                 bearingDeg,
                 animDurationMs = animDurationMs
             )
-
-            if (!hasInitializedPosition && loc.latitude != 0.0) {
-                hasInitializedPosition = true
-                val vp = mapView.viewport
-                vp.transitionTo(buildChaseFollowState(), vp.makeImmediateViewportTransition())
-            }
+            pushGlowFeatureToMap(force = false)
 
             val userInteracting = isSavingFavorite || isPlacingDestination || isAerialExploreMode
             if (!isFollowingLocation && hasInitializedPosition && !userInteracting) {
@@ -1122,26 +1156,18 @@ fun NavigationMap(
                     isFollowingLocation = true
                     locationWhenFollowDisabled = null
                     autoCenterJob?.cancel()
-                    val vp = mapView.viewport
-                    vp.transitionTo(
-                        buildChaseFollowState(),
-                        vp.makeDefaultViewportTransition(
-                            DefaultViewportTransitionOptions.Builder().maxDurationMs(650).build()
-                        )
-                    )
+                    smoothReturnToChaseCam(durationMs = 600L)
                 }
             }
 
-            if (!isIntroAnimating && isFollowingLocation && !isAerialExploreMode && hasInitializedPosition) {
-                val vp = mapView.viewport
-                if (vp.status is com.mapbox.maps.plugin.viewport.ViewportStatus.Idle) {
-                    vp.transitionTo(
-                        buildChaseFollowState(),
-                        vp.makeDefaultViewportTransition(
-                            DefaultViewportTransitionOptions.Builder().maxDurationMs(550).build()
-                        )
-                    )
-                }
+            if (!hasInitializedPosition && loc.latitude != 0.0) {
+                hasInitializedPosition = true
+                mapView.viewport.idle()
+                motionState.cameraEaseEndElapsedMs = 0L
+                mapView.mapboxMap.setCamera(buildChaseCameraOptions(carPt, bearingDeg))
+            } else if (!isIntroAnimating && isFollowingLocation && !isAerialExploreMode && nowMs >= motionState.cameraEaseEndElapsedMs) {
+                // Bloqueo directo de cámara 3D cuadro por cuadro junto al modelo 3D (cero desfase y cero tirones)
+                mapView.mapboxMap.setCamera(buildChaseCameraOptions(carPt, bearingDeg))
             }
         }
 
@@ -1186,13 +1212,7 @@ fun NavigationMap(
         isPlacingDestination = false
         locationWhenFollowDisabled = null
         autoCenterJob?.cancel()
-        val vp = mapView.viewport
-        vp.transitionTo(
-            buildChaseFollowState(),
-            vp.makeDefaultViewportTransition(
-                DefaultViewportTransitionOptions.Builder().maxDurationMs(1050).build()
-            )
-        )
+        smoothReturnToChaseCam(durationMs = 750L)
     }
 
     // ── Intro cinematográfica: espera a que el mapa esté listo ───────────────
@@ -1250,14 +1270,8 @@ fun NavigationMap(
             delay(3700)
 
             isFollowingLocation = true
-            val vp = mapView.viewport
-            vp.transitionTo(
-                buildChaseFollowState(),
-                vp.makeDefaultViewportTransition(
-                    DefaultViewportTransitionOptions.Builder().maxDurationMs(2500).build()
-                )
-            )
-            delay(2600)
+            smoothReturnToChaseCam(durationMs = 1500L)
+            delay(1600)
         } finally {
             isIntroAnimating = false
             isFollowingLocation = true
@@ -1268,8 +1282,7 @@ fun NavigationMap(
     // ── Re-centrar al cambiar orientación (portrait ↔ landscape) ────────────
     LaunchedEffect(configuration.orientation) {
         if (hasInitializedPosition && isFollowingLocation && !isAerialExploreMode) {
-            val vp = mapView.viewport
-            vp.transitionTo(buildChaseFollowState(), vp.makeImmediateViewportTransition())
+            smoothReturnToChaseCam(durationMs = 0L)
         }
     }
 
@@ -1474,8 +1487,7 @@ fun NavigationMap(
                                 if (!userInteracting) {
                                     isFollowingLocation = true
                                     locationWhenFollowDisabled = null
-                                    val vp = mapView.viewport
-                                    vp.transitionTo(buildChaseFollowState(), vp.makeDefaultViewportTransition())
+                                    smoothReturnToChaseCam(durationMs = 680L)
                                 }
                             }
                         }
@@ -1487,7 +1499,7 @@ fun NavigationMap(
                                 center(Point.fromLngLat(loc.longitude, loc.latitude))
                                 zoom(19.75)
                                 pitch(75.0)
-                                bearing(gpsBearing)
+                                bearing(motionState.gpsBearing)
                             })
                         }
                     }
