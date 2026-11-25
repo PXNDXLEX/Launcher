@@ -642,7 +642,7 @@ fun NavigationMap(
                     listOf(
                         "cockpit-ground-base", "3d-buildings", "3d-buildings-roof", "building-glow",
                         "custom-green-areas", "custom-water", "custom-landcover",
-                        "custom-roads-casing", "custom-roads",
+                        "custom-roads-casing", "custom-roads", "custom-roads-highway-casing", "custom-roads-highway",
                         "custom-roads-lane-dashes", "custom-roads-lane-dashes-left", "custom-roads-lane-dashes-right"
                     ).forEach { layerId ->
                         try {
@@ -651,7 +651,7 @@ fun NavigationMap(
                     }
 
                     // Eliminar capas base de edificios y carreteras por defecto en DARK y LIGHT
-                    // para que no salgan cajas grises debajo del auto ni líneas blancas superpuestas en Modo Día.
+                    // para que no salgan cajas grises debajo del auto ni líneas superpuestas en Modo Día.
                     if (style == "DARK" || style == "LIGHT") {
                         try {
                             val layersSnapshot = loadedStyle.styleLayers.toList()
@@ -672,21 +672,22 @@ fun NavigationMap(
                         } catch (_: Exception) {}
                     }
 
-                    // 1. Suelo base continuo (Plata suave de alto contraste en Día, Royal Indigo en Noche)
+                    // 1. Paleta exacta de referencia en Modo Día (bloques #EAECEF, parques #B8E096, ríos #A8D4FF)
+                    //    y Royal Indigo / Neon en Modo Noche:
                     val baseGroundHex = when (style) {
                         "NEON"  -> "#07061C"
                         "DARK"  -> "#232584"
-                        else    -> "#E6ECF5" // Modo Día limpio
+                        else    -> "#EAECEF" // Bloques urbanos gris plata suave idéntico a la imagen de referencia
                     }
                     val waterHex = when (style) {
                         "NEON"  -> "#040414"
                         "DARK"  -> "#161960"
-                        else    -> "#82C2F8" // Agua azul cielo en Modo Día
+                        else    -> "#A8D4FF" // Ríos y canales azul celeste pastel idéntico a la referencia
                     }
                     val greenColor = when (style) {
                         "NEON"  -> "#0A001E"
                         "DARK"  -> "#1D2074"
-                        else    -> "#C5E8D0" // Parques verde menta suave en Modo Día
+                        else    -> "#B8E096" // Parques y manzanas verdes salvia fresca idéntico a la referencia
                     }
 
                     // Buscar la primera etiqueta de texto/nombre de calle para dibujar suelo y calles justo debajo de los nombres
@@ -707,7 +708,7 @@ fun NavigationMap(
                         val greenLayer = fillLayer("custom-green-areas", "composite") {
                             sourceLayer("landuse")
                             fillColor(greenColor)
-                            fillOpacity(0.88)
+                            fillOpacity(0.95)
                         }
                         val waterLayer = fillLayer("custom-water", "composite") {
                             sourceLayer("water")
@@ -728,22 +729,28 @@ fun NavigationMap(
                         }
                     } catch (_: Exception) {}
 
-                    // 3. Calles y Avenidas de Gran Escala (Modo Día con asfalto pizarra y bordes definidos; Modo Noche Royal Indigo)
+                    // 3. Calles y Avenidas de Gran Escala:
+                    //    En Modo Día sigue la paleta de la imagen: calles locales blancas (#FFFFFF) con borde suave (#DDE1E7)
+                    //    y avenidas principales / autopistas en amarillo-ámbar cálido (#F6C364) con borde dorado (#E4AF4E).
+                    val isDayStyle = style == "LIGHT"
                     val roadColor = when (style) {
                         "NEON" -> "#0D1030"
                         "DARK" -> "#282C94"
-                        else   -> "#475569" // Asfalto gris pizarra de alto contraste en Modo Día
+                        else   -> "#FFFFFF" // Calles locales blancas puras como en la referencia
                     }
 
                     val casingColor = when (style) {
                         "NEON" -> "#00FFFF"
                         "DARK" -> "#F4F8FF"
-                        else   -> "#1E293B" // Bordillo oscuro nítido en Modo Día para resaltar sobre el suelo claro
+                        else   -> "#DCE0E6" // Borde sutil para que las calles blancas destaquen sobre los bloques #EAECEF
                     }
                     val casingOpacity = if (style == "NEON") 0.90 else 0.96
-                    val dashColor = if (isNightMode) "#E6F0FF" else "#FFFFFF"
+                    val dashColor = when (style) {
+                        "NEON", "DARK" -> "#E6F0FF"
+                        else           -> "#CBD5E1" // Guías de carril gris perla sobre calle blanca y blancas sobre avenida ámbar
+                    }
 
-                    // 3A. Líneas exteriores / bordillos de la carretera de 3 carriles (Casing ancho)
+                    // 3A. Líneas exteriores / bordillos de las calles de 3 carriles (Casing ancho)
                     try {
                         val casingLayer = lineLayer("custom-roads-casing", "composite") {
                             sourceLayer("road")
@@ -765,7 +772,7 @@ fun NavigationMap(
                         else loadedStyle.addLayer(casingLayer)
                     } catch (_: Exception) {}
 
-                    // 3B. Cuerpo de asfalto 3D para 3 carriles bien proporcionados
+                    // 3B. Cuerpo de calles 3D para 3 carriles bien proporcionados
                     try {
                         val roadSurfaceLayer = lineLayer("custom-roads", "composite") {
                             sourceLayer("road")
@@ -786,9 +793,65 @@ fun NavigationMap(
                         else loadedStyle.addLayer(roadSurfaceLayer)
                     } catch (_: Exception) {}
 
-                    // 3C. Dos líneas divisorias blancas discontinuas a ±1/6 del ancho de la calzada (delimitan 3 carriles:
+                    // 3B-2. Avenidas Principales y Autopistas en Amarillo-Ámbar Cálido (#F6C364) en Modo Día (idéntico a la imagen)
+                    if (isDayStyle) {
+                        val majorHighwayFilter = Expression.match(
+                            Expression.get("class"),
+                            Expression.literal("motorway"), Expression.literal(true),
+                            Expression.literal("trunk"), Expression.literal(true),
+                            Expression.literal("primary"), Expression.literal(true),
+                            Expression.literal("secondary"), Expression.literal(true),
+                            Expression.literal("motorway_link"), Expression.literal(true),
+                            Expression.literal("trunk_link"), Expression.literal(true),
+                            Expression.literal("primary_link"), Expression.literal(true),
+                            Expression.literal(false)
+                        )
+                        try {
+                            val hwCasingLayer = lineLayer("custom-roads-highway-casing", "composite") {
+                                sourceLayer("road")
+                                filter(majorHighwayFilter)
+                                lineColor("#E5B04D")
+                                lineWidth(
+                                    Expression.interpolate(
+                                        Expression.linear(), Expression.zoom(),
+                                        Expression.literal(11.0), Expression.literal(4.6),
+                                        Expression.literal(15.5), Expression.literal(21.5),
+                                        Expression.literal(18.0), Expression.literal(68.0),
+                                        Expression.literal(20.0), Expression.literal(164.0)
+                                    )
+                                )
+                                lineCap(LineCap.ROUND)
+                                lineJoin(LineJoin.ROUND)
+                            }
+                            val hwSurfaceLayer = lineLayer("custom-roads-highway", "composite") {
+                                sourceLayer("road")
+                                filter(majorHighwayFilter)
+                                lineColor("#F6C364") // Amarillo-naranja suave de la imagen de referencia
+                                lineWidth(
+                                    Expression.interpolate(
+                                        Expression.linear(), Expression.zoom(),
+                                        Expression.literal(11.0), Expression.literal(3.6),
+                                        Expression.literal(15.5), Expression.literal(17.5),
+                                        Expression.literal(18.0), Expression.literal(59.0),
+                                        Expression.literal(20.0), Expression.literal(150.0)
+                                    )
+                                )
+                                lineCap(LineCap.ROUND)
+                                lineJoin(LineJoin.ROUND)
+                            }
+                            if (topSymbolLayerId != null) {
+                                loadedStyle.addLayerBelow(hwCasingLayer, topSymbolLayerId)
+                                loadedStyle.addLayerBelow(hwSurfaceLayer, topSymbolLayerId)
+                            } else {
+                                loadedStyle.addLayer(hwCasingLayer)
+                                loadedStyle.addLayer(hwSurfaceLayer)
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // 3C. Dos líneas divisorias discontinuas a ±1/6 del ancho de la calzada (delimitan 3 carriles:
                     //     Carril Izquierdo [-3.5m], Carril Central [0.0m] y Carril Derecho [+3.5m]),
-                    //     de modo que el modelo 3D del auto siempre viaja EN EL MEDIO del carril entre las dos líneas blancas.
+                    //     de modo que el modelo 3D del auto siempre viaja EN EL MEDIO del carril entre las dos líneas.
                     try {
                         val dashWidthExpr = Expression.interpolate(
                             Expression.linear(), Expression.zoom(),
@@ -810,12 +873,24 @@ fun NavigationMap(
                             Expression.literal(18.0), Expression.literal(9.8),
                             Expression.literal(20.0), Expression.literal(24.5)
                         )
+                        val laneDashColorExpr = if (isDayStyle) {
+                            Expression.match(
+                                Expression.get("class"),
+                                Expression.literal("motorway"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
+                                Expression.literal("trunk"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
+                                Expression.literal("primary"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
+                                Expression.literal("secondary"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
+                                Expression.color(android.graphics.Color.parseColor("#CBD5E1"))
+                            )
+                        } else {
+                            Expression.color(android.graphics.Color.parseColor(dashColor))
+                        }
 
                         val leftLaneDashLayer = lineLayer("custom-roads-lane-dashes-left", "composite") {
                             sourceLayer("road")
                             minZoom(14.5)
-                            lineColor(dashColor)
-                            lineOpacity(0.90)
+                            lineColor(laneDashColorExpr)
+                            lineOpacity(if (isDayStyle) 0.85 else 0.90)
                             lineDasharray(listOf(2.4, 2.8))
                             lineWidth(dashWidthExpr)
                             lineOffset(leftLaneOffsetExpr)
@@ -825,8 +900,8 @@ fun NavigationMap(
                         val rightLaneDashLayer = lineLayer("custom-roads-lane-dashes-right", "composite") {
                             sourceLayer("road")
                             minZoom(14.5)
-                            lineColor(dashColor)
-                            lineOpacity(0.90)
+                            lineColor(laneDashColorExpr)
+                            lineOpacity(if (isDayStyle) 0.85 else 0.90)
                             lineDasharray(listOf(2.4, 2.8))
                             lineWidth(dashWidthExpr)
                             lineOffset(rightLaneOffsetExpr)
@@ -1425,7 +1500,7 @@ fun NavigationMap(
 
     val isPortrait = configuration.screenHeightDp > configuration.screenWidthDp
     val outerMapBgColor = when (currentStyle) {
-        "LIGHT" -> Color(0xFFE6ECF5)
+        "LIGHT" -> Color(0xFFEAECEF)
         "NEON"  -> Color(0xFF07061C)
         else    -> Color(0xFF1F237A)
     }
@@ -1621,7 +1696,16 @@ fun NavigationMap(
             )
         }
 
-        // ── Contenedor de controles HUD sobre el Mapa ──
+        // ── Contenedor de controles HUD sobre el Mapa (encuadrado en la zona izquierda del mapa) ──
+        val isDayHud = currentStyle == "LIGHT"
+        val hudSurfaceBg = if (isDayHud) Color.White.copy(alpha = 0.94f) else Color(0xFF0E1638).copy(alpha = 0.92f)
+        val hudPanelBg = if (isDayHud) Color(0xFFF8FAFC).copy(alpha = 0.97f) else Color(0xFF0B112E).copy(alpha = 0.96f)
+        val hudItemBg = if (isDayHud) Color(0xFFEEF2F8) else Color(0xFF151E4A).copy(alpha = 0.88f)
+        val hudTextPrimary = if (isDayHud) Color(0xFF0F172A) else Color.White
+        val hudTextSecondary = if (isDayHud) Color(0xFF475569) else Color.White.copy(alpha = 0.68f)
+        val hudAccent = if (isDayHud) Color(AppSettings.uiColor.value) else Color(0xFF38F2A6)
+        val hudBorderIdle = if (isDayHud) Color(0xFFCBD5E1) else Color.White.copy(alpha = 0.24f)
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1631,7 +1715,7 @@ fun NavigationMap(
                     bottom = bottomOverlayPadding
                 )
         ) {
-            // ── ZONA SUPERIOR ADAPTABLE (Horizontal: centro superior; Vertical: buscador a la derecha del reloj + tarjetas debajo) ──
+            // ── ZONA SUPERIOR ADAPTABLE (Horizontal: centro del mapa izquierdo; Vertical: a la derecha del reloj) ──
             val nextStep = activeRouteSteps.firstOrNull()
             Column(
                 modifier = if (isPortrait) {
@@ -1642,7 +1726,11 @@ fun NavigationMap(
                 } else {
                     Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 10.dp, start = 230.dp, end = 215.dp)
+                        .padding(
+                            top = 10.dp,
+                            start = if (endOverlayPadding > 0.dp) 202.dp else 230.dp,
+                            end = if (endOverlayPadding > 0.dp) 182.dp else 215.dp
+                        )
                 },
                 horizontalAlignment = if (isPortrait) Alignment.End else Alignment.CenterHorizontally
             ) {
@@ -1670,10 +1758,13 @@ fun NavigationMap(
 
                     Surface(
                         shape = RoundedCornerShape(22.dp),
-                        color = Color(0xFF1A256E).copy(alpha = 0.95f),
+                        color = if (isDayHud) Color.White.copy(alpha = 0.96f) else Color(0xFF1A256E).copy(alpha = 0.95f),
                         shadowElevation = 14.dp,
-                        border = BorderStroke(1.5.dp, Color(0xFF4A66FF).copy(alpha = 0.60f)),
-                        modifier = Modifier.widthIn(min = 215.dp, max = 315.dp)
+                        border = BorderStroke(
+                            1.5.dp,
+                            if (isDayHud) hudAccent.copy(alpha = 0.45f) else Color(0xFF4A66FF).copy(alpha = 0.60f)
+                        ),
+                        modifier = Modifier.widthIn(min = 200.dp, max = 310.dp)
                     ) {
                         Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                             Column(
@@ -1691,25 +1782,25 @@ fun NavigationMap(
                                             Icons.Default.TurnRight
                                         },
                                         contentDescription = null,
-                                        tint = Color(0xFF38F2A6),
-                                        modifier = Modifier.size(38.dp)
+                                        tint = hudAccent,
+                                        modifier = Modifier.size(36.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Row(verticalAlignment = Alignment.Bottom) {
                                         Text(
                                             text = distDisplay.first,
-                                            fontSize = 34.sp,
+                                            fontSize = 32.sp,
                                             fontWeight = FontWeight.Black,
-                                            color = Color.White,
-                                            lineHeight = 36.sp
+                                            color = hudTextPrimary,
+                                            lineHeight = 34.sp
                                         )
                                         if (distDisplay.second.isNotEmpty()) {
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = distDisplay.second,
-                                                fontSize = 18.sp,
+                                                fontSize = 17.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.White.copy(alpha = 0.90f),
+                                                color = hudTextSecondary,
                                                 modifier = Modifier.padding(bottom = 4.dp)
                                             )
                                         }
@@ -1718,9 +1809,9 @@ fun NavigationMap(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = streetDisplay,
-                                    fontSize = 15.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White.copy(alpha = 0.95f),
+                                    color = hudTextPrimary.copy(alpha = 0.92f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1742,7 +1833,7 @@ fun NavigationMap(
                                 Icon(
                                     Icons.Default.Close,
                                     contentDescription = "Cancelar ruta",
-                                    tint = Color.White.copy(alpha = 0.65f),
+                                    tint = hudTextSecondary,
                                     modifier = Modifier.size(15.dp)
                                 )
                             }
@@ -1750,7 +1841,7 @@ fun NavigationMap(
                     }
                 }
 
-                // 2. Barra de búsqueda y Favoritos (En vertical se ubica a la derecha del reloj digital sin solaparlo)
+                // 2. Barra de búsqueda y Favoritos (Adaptada a Modo Día y Modo Noche)
                 AnimatedVisibility(
                     visible = !NavigationState.isRouteActive.value,
                     enter = fadeIn() + expandVertically(),
@@ -1758,7 +1849,7 @@ fun NavigationMap(
                 ) {
                     Column(
                         horizontalAlignment = if (isPortrait) Alignment.End else Alignment.CenterHorizontally,
-                        modifier = if (isPortrait) Modifier.fillMaxWidth() else Modifier.widthIn(max = 350.dp)
+                        modifier = if (isPortrait) Modifier.fillMaxWidth() else Modifier.widthIn(max = 330.dp)
                     ) {
                         val favHeartScale by animateFloatAsState(
                             targetValue = if (showFavorites) 1.12f else 1f,
@@ -1774,14 +1865,14 @@ fun NavigationMap(
                             Surface(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(if (isPortrait) 40.dp else 44.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                color = Color(0xFF0E1638).copy(alpha = 0.90f),
+                                    .height(40.dp),
+                                shape = RoundedCornerShape(20.dp),
+                                color = hudSurfaceBg,
                                 border = BorderStroke(
                                     1.2.dp,
-                                    if (isSearchFocused) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.25f)
+                                    if (isSearchFocused) hudAccent else hudBorderIdle
                                 ),
-                                shadowElevation = 10.dp
+                                shadowElevation = if (isDayHud) 6.dp else 10.dp
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 12.dp),
@@ -1790,15 +1881,15 @@ fun NavigationMap(
                                     Icon(
                                         Icons.Default.Search,
                                         null,
-                                        tint = Color(0xFF38F2A6),
-                                        modifier = Modifier.size(18.dp)
+                                        tint = hudAccent,
+                                        modifier = Modifier.size(17.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Box(modifier = Modifier.weight(1f)) {
                                         if (searchQuery.isEmpty()) {
                                             Text(
                                                 if (isPortrait) "Buscar..." else "¿A dónde vamos?",
-                                                color = Color.White.copy(alpha = 0.65f),
+                                                color = hudTextSecondary,
                                                 fontSize = 12.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
@@ -1819,7 +1910,7 @@ fun NavigationMap(
                                             textStyle = androidx.compose.ui.text.TextStyle(
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = Color.White
+                                                color = hudTextPrimary
                                             ),
                                             singleLine = true,
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -1843,17 +1934,17 @@ fun NavigationMap(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(15.dp),
                                             strokeWidth = 2.dp,
-                                            color = Color(0xFF38F2A6)
+                                            color = hudAccent
                                         )
                                     } else if (searchQuery.isNotEmpty()) {
                                         IconButton(
                                             onClick = { searchQuery = ""; searchResults = emptyList() },
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(22.dp)
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
                                                 null,
-                                                tint = Color.White,
+                                                tint = hudTextPrimary,
                                                 modifier = Modifier.size(14.dp)
                                             )
                                         }
@@ -1868,22 +1959,22 @@ fun NavigationMap(
                                     searchResults = emptyList()
                                 },
                                 shape = CircleShape,
-                                color = if (showFavorites) Color(0xFF183652) else Color(0xFF0E1638).copy(alpha = 0.90f),
+                                color = if (showFavorites) hudAccent.copy(alpha = 0.18f) else hudSurfaceBg,
                                 border = BorderStroke(
                                     1.3.dp,
-                                    if (showFavorites) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.25f)
+                                    if (showFavorites) hudAccent else hudBorderIdle
                                 ),
-                                shadowElevation = 8.dp,
+                                shadowElevation = if (isDayHud) 6.dp else 8.dp,
                                 modifier = Modifier
-                                    .size(if (isPortrait) 40.dp else 44.dp)
+                                    .size(40.dp)
                                     .scale(favHeartScale)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                         contentDescription = "Favoritos",
-                                        tint = if (showFavorites) Color(0xFF38F2A6) else Color.White,
-                                        modifier = Modifier.size(19.dp)
+                                        tint = if (showFavorites) hudAccent else hudTextPrimary,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -1907,12 +1998,12 @@ fun NavigationMap(
                                     .padding(top = if (isPortrait) 14.dp else 8.dp)
                                     .heightIn(max = 260.dp),
                                 shape = RoundedCornerShape(22.dp),
-                                color = Color(0xFF0B112E).copy(alpha = 0.96f),
+                                color = hudPanelBg,
                                 border = BorderStroke(
                                     1.2.dp,
                                     Brush.linearGradient(
                                         listOf(
-                                            Color(0xFF38F2A6).copy(alpha = 0.55f),
+                                            hudAccent.copy(alpha = 0.55f),
                                             Color(0xFF4A78FF).copy(alpha = 0.45f)
                                         )
                                     )
@@ -1933,7 +2024,7 @@ fun NavigationMap(
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Black,
                                             letterSpacing = 0.8.sp,
-                                            color = Color(0xFF38F2A6)
+                                            color = hudAccent
                                         )
                                         // Botón rápido para guardar ubicación actual como favorito
                                         if (showFavorites) {
@@ -1952,16 +2043,16 @@ fun NavigationMap(
                                                     }
                                                 },
                                                 shape = RoundedCornerShape(50),
-                                                color = Color(0xFF1A2A66),
-                                                border = BorderStroke(1.dp, Color(0xFF38F2A6).copy(alpha = 0.45f))
+                                                color = hudAccent.copy(alpha = 0.14f),
+                                                border = BorderStroke(1.dp, hudAccent.copy(alpha = 0.45f))
                                             ) {
                                                 Row(
                                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Icon(Icons.Default.AddLocationAlt, null, tint = Color(0xFF38F2A6), modifier = Modifier.size(13.dp))
+                                                    Icon(Icons.Default.AddLocationAlt, null, tint = hudAccent, modifier = Modifier.size(13.dp))
                                                     Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Guardar Aquí", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                                    Text("Guardar Aquí", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = hudTextPrimary)
                                                 }
                                             }
                                         }
@@ -1978,14 +2069,14 @@ fun NavigationMap(
                                                 Icon(
                                                     Icons.Default.FavoriteBorder,
                                                     null,
-                                                    tint = Color.White.copy(alpha = 0.35f),
+                                                    tint = hudTextSecondary.copy(alpha = 0.5f),
                                                     modifier = Modifier.size(28.dp)
                                                 )
                                                 Spacer(modifier = Modifier.height(6.dp))
                                                 Text(
                                                     "Mantén presionado el mapa para marcar o guardar favoritos",
                                                     fontSize = 11.sp,
-                                                    color = Color.White.copy(alpha = 0.65f)
+                                                    color = hudTextSecondary
                                                 )
                                             }
                                         }
@@ -1994,8 +2085,8 @@ fun NavigationMap(
                                             items(list) { place ->
                                                 Surface(
                                                     shape = RoundedCornerShape(14.dp),
-                                                    color = Color(0xFF151E4A).copy(alpha = 0.85f),
-                                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                                    color = hudItemBg,
+                                                    border = BorderStroke(1.dp, hudBorderIdle.copy(alpha = 0.35f)),
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .clip(RoundedCornerShape(14.dp))
@@ -2043,7 +2134,7 @@ fun NavigationMap(
                                                             modifier = Modifier
                                                                 .size(34.dp)
                                                                 .background(
-                                                                    Color(0xFF38F2A6).copy(alpha = 0.16f),
+                                                                    hudAccent.copy(alpha = 0.16f),
                                                                     CircleShape
                                                                 ),
                                                             contentAlignment = Alignment.Center
@@ -2055,7 +2146,7 @@ fun NavigationMap(
                                                                     else -> Icons.Default.Star
                                                                 },
                                                                 null,
-                                                                tint = Color(0xFF38F2A6),
+                                                                tint = hudAccent,
                                                                 modifier = Modifier.size(18.dp)
                                                             )
                                                         }
@@ -2064,14 +2155,14 @@ fun NavigationMap(
                                                             Text(
                                                                 place.name,
                                                                 fontWeight = FontWeight.ExtraBold,
-                                                                color = Color.White,
+                                                                color = hudTextPrimary,
                                                                 maxLines = 1,
                                                                 overflow = TextOverflow.Ellipsis,
                                                                 fontSize = 13.sp
                                                             )
                                                             Text(
                                                                 place.address.ifEmpty { "Ubicación guardada" },
-                                                                color = Color.White.copy(alpha = 0.65f),
+                                                                color = hudTextSecondary,
                                                                 maxLines = 1,
                                                                 overflow = TextOverflow.Ellipsis,
                                                                 fontSize = 11.sp
@@ -2084,7 +2175,7 @@ fun NavigationMap(
                                                                 else
                                                                     String.format("%.1f km", place.distanceKm),
                                                                 fontSize = 11.sp,
-                                                                color = Color(0xFF38F2A6),
+                                                                color = hudAccent,
                                                                 fontWeight = FontWeight.Bold,
                                                                 modifier = Modifier.padding(end = 6.dp)
                                                             )
@@ -2117,15 +2208,15 @@ fun NavigationMap(
                                                                 }
                                                             },
                                                             shape = RoundedCornerShape(10.dp),
-                                                            color = Color(0xFF00E676)
+                                                            color = Color(0xFF10B981)
                                                         ) {
                                                             Row(
                                                                 modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                                                                 verticalAlignment = Alignment.CenterVertically
                                                             ) {
-                                                                Icon(Icons.Default.Navigation, null, tint = Color(0xFF052216), modifier = Modifier.size(13.dp))
+                                                                Icon(Icons.Default.Navigation, null, tint = Color.White, modifier = Modifier.size(13.dp))
                                                                 Spacer(modifier = Modifier.width(3.dp))
-                                                                Text("IR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color(0xFF052216))
+                                                                Text("IR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
                                                             }
                                                         }
                                                         if (showFavorites) {
@@ -2139,7 +2230,7 @@ fun NavigationMap(
                                                                 Icon(
                                                                     Icons.Default.DeleteOutline,
                                                                     contentDescription = "Eliminar favorito",
-                                                                    tint = Color.White.copy(alpha = 0.55f),
+                                                                    tint = hudTextSecondary,
                                                                     modifier = Modifier.size(16.dp)
                                                                 )
                                                             }
@@ -2198,14 +2289,14 @@ fun NavigationMap(
                         } else {
                             Modifier
                                 .padding(top = 8.dp)
-                                .widthIn(min = 340.dp, max = 440.dp)
+                                .widthIn(min = 310.dp, max = 420.dp)
                         },
                         shape = RoundedCornerShape(22.dp),
-                        color = Color(0xFF0D1438).copy(alpha = 0.95f),
+                        color = hudPanelBg,
                         border = BorderStroke(
                             1.4.dp,
                             Brush.linearGradient(
-                                listOf(Color(0xFF38F2A6), Color(0xFF4B7BFF))
+                                listOf(hudAccent, Color(0xFF4B7BFF))
                             )
                         ),
                         shadowElevation = 16.dp
@@ -2219,14 +2310,14 @@ fun NavigationMap(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .scale(pulseScale)
-                                    .background(Color(0xFF38F2A6).copy(alpha = 0.18f), CircleShape)
-                                    .border(1.dp, Color(0xFF38F2A6).copy(alpha = 0.65f), CircleShape),
+                                    .background(hudAccent.copy(alpha = 0.16f), CircleShape)
+                                    .border(1.dp, hudAccent.copy(alpha = 0.65f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.Place,
                                     contentDescription = null,
-                                    tint = Color(0xFF38F2A6),
+                                    tint = hudAccent,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -2237,7 +2328,7 @@ fun NavigationMap(
                                 Text(
                                     text = selectedDestinationTitle.ifBlank { "Punto seleccionado" },
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
+                                    color = hudTextPrimary,
                                     fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -2246,7 +2337,7 @@ fun NavigationMap(
                                     text = routeDistanceText.ifEmpty { liveDistanceStr },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF38F2A6),
+                                    color = hudAccent,
                                     maxLines = 1
                                 )
                             }
@@ -2267,12 +2358,12 @@ fun NavigationMap(
                                 },
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFF1A265C), CircleShape)
+                                    .background(if (isDayHud) Color(0xFFFFF8E1) else Color(0xFF1A265C), CircleShape)
                             ) {
                                 Icon(
                                     Icons.Default.StarBorder,
                                     contentDescription = "Guardar en Favoritos",
-                                    tint = Color(0xFFFFD54F),
+                                    tint = Color(0xFFF59E0B),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -2294,14 +2385,14 @@ fun NavigationMap(
                                 },
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFF2A1832), CircleShape)
+                                    .background(if (isDayHud) Color(0xFFFFEBEE) else Color(0xFF2A1832), CircleShape)
                             ) {
-                                Icon(Icons.Default.Close, "Cancelar", tint = Color(0xFFFF6E7F), modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, "Cancelar", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
                             }
 
                             Spacer(modifier = Modifier.width(6.dp))
 
-                            // Botón Iniciar Ruta 3D
+                            // Botón Iniciar Ruta
                             Button(
                                 onClick = {
                                     NavigationState.currentLocation.value?.let { loc ->
@@ -2314,28 +2405,28 @@ fun NavigationMap(
                                     }
                                 },
                                 shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                                 modifier = Modifier.height(36.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp)
                             ) {
-                                Icon(Icons.Default.Navigation, null, tint = Color(0xFF052015), modifier = Modifier.size(15.dp))
+                                Icon(Icons.Default.Navigation, null, tint = Color.White, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("IR 3D", fontWeight = FontWeight.Black, color = Color(0xFF052015), fontSize = 12.sp)
+                                Text("IR", fontWeight = FontWeight.Black, color = Color.White, fontSize = 12.sp)
                             }
                         }
                     }
                 }
             }
 
-            // ── CONTROLES RÁPIDOS DE MAPA (Esquina Superior Derecha: Vista Aérea 2D / 3D, Centrar, Luces, Estilo) ──
+            // ── CONTROLES RÁPIDOS DE MAPA (Esquina Superior Derecha del área del mapa) ──
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 12.dp, end = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(top = 10.dp, end = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Botón Principal: Alternar Vista Aérea Temporal (2D Explorar) <-> Conducción 3D (Chase Cam)
+                // Botón Principal: Alternar Vista Aérea Temporal (2D Explorar) <-> Seguimiento Activo
                 Surface(
                     onClick = {
                         if (isAerialExploreMode) {
@@ -2345,56 +2436,64 @@ fun NavigationMap(
                         }
                     },
                     shape = RoundedCornerShape(50),
-                    color = if (isAerialExploreMode) Color(0xFF00E5FF) else Color(0xFF10173A).copy(alpha = 0.90f),
+                    color = if (isAerialExploreMode) hudAccent else hudSurfaceBg,
                     border = BorderStroke(
                         1.2.dp,
-                        if (isAerialExploreMode) Color.White else Color(0xFF38F2A6).copy(alpha = 0.55f)
+                        if (isAerialExploreMode) Color.White else hudBorderIdle
                     ),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.height(40.dp)
+                    shadowElevation = if (isDayHud) 5.dp else 8.dp,
+                    modifier = Modifier.height(38.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                        modifier = Modifier.padding(horizontal = 11.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Icon(
                             imageVector = if (isAerialExploreMode) Icons.Default.DirectionsCar else Icons.Default.Explore,
-                            contentDescription = "Alternar Vista Aérea / 3D",
-                            tint = if (isAerialExploreMode) Color(0xFF051824) else Color(0xFF38F2A6),
-                            modifier = Modifier.size(18.dp)
+                            contentDescription = "Alternar Vista Aérea / Seguimiento",
+                            tint = if (isAerialExploreMode) Color.White else hudAccent,
+                            modifier = Modifier.size(17.dp)
                         )
                         Text(
-                            text = if (isAerialExploreMode) "3D AUTO" else "2D AÉREA",
+                            text = if (isAerialExploreMode) "SEGUIR" else "EXPLORAR",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black,
-                            color = if (isAerialExploreMode) Color(0xFF051824) else Color.White
+                            color = if (isAerialExploreMode) Color.White else hudTextPrimary
                         )
                     }
                 }
 
-                // Botón recentrar — vuelve inmediatamente al ángulo 3D Chase Cam (76°)
+                // Botón recentrar — vuelve inmediatamente al seguimiento activo
                 AnimatedVisibility(visible = !isFollowingLocation && !isAerialExploreMode) {
                     SmallFloatingActionButton(
                         onClick = returnTo3DChaseView,
-                        containerColor = Color(0xFF00E676),
-                        contentColor = Color(0xFF071E16),
+                        containerColor = Color(0xFF10B981),
+                        contentColor = Color.White,
                         shape = CircleShape,
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(38.dp)
                     ) {
-                        Icon(Icons.Default.MyLocation, "Centrar 3D", modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.MyLocation, "Centrar", modifier = Modifier.size(19.dp))
                     }
                 }
 
                 // Botón ajuste de luces del vehículo 3D
-                SmallFloatingActionButton(
+                Surface(
                     onClick = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
-                    containerColor = if (showGlowTuning) Color(0xFF00E5FF) else Color(0xFF10173A).copy(alpha = 0.88f),
-                    contentColor = Color.White,
                     shape = CircleShape,
-                    modifier = Modifier.size(40.dp)
+                    color = if (showGlowTuning) hudAccent else hudSurfaceBg,
+                    border = BorderStroke(1.dp, hudBorderIdle),
+                    shadowElevation = if (isDayHud) 5.dp else 8.dp,
+                    modifier = Modifier.size(38.dp)
                 ) {
-                    Text(if (showGlowTuning) "✕" else "🔦", fontSize = 14.sp)
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (showGlowTuning) Icons.Default.Close else Icons.Default.Highlight,
+                            contentDescription = "Ajuste de luces y escala",
+                            tint = if (showGlowTuning) Color.White else hudTextPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 // Selector de Animación Climática en el Mapa (Clima GPS en vivo o manual)
@@ -2411,32 +2510,32 @@ fun NavigationMap(
                     Surface(
                         onClick = { showWeatherSelector = !showWeatherSelector },
                         shape = RoundedCornerShape(50),
-                        color = Color(0xFF10173A).copy(alpha = 0.88f),
+                        color = hudSurfaceBg,
                         border = BorderStroke(
                             1.dp,
-                            if (selectedWeatherMode != "AUTO") Color(0xFF38F2A6) else Color.White.copy(alpha = 0.28f)
+                            if (selectedWeatherMode != "AUTO") hudAccent else hudBorderIdle
                         ),
-                        shadowElevation = 6.dp,
-                        modifier = Modifier.height(40.dp)
+                        shadowElevation = if (isDayHud) 5.dp else 6.dp,
+                        modifier = Modifier.height(38.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(text = weatherEmoji, fontSize = 14.sp)
+                            Text(text = weatherEmoji, fontSize = 13.sp)
                             Text(
                                 text = "${weatherSnapshot.currentTempC}°",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black,
-                                color = Color.White
+                                color = hudTextPrimary
                             )
                         }
                     }
                     DropdownMenu(
                         expanded = showWeatherSelector,
                         onDismissRequest = { showWeatherSelector = false },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                     ) {
                         DropdownMenuItem(
                             text = { Text("🛰️ Automático (GPS: ${weatherSnapshot.currentLabel})") },
@@ -2475,33 +2574,37 @@ fun NavigationMap(
 
                 // Selector de estilo de mapa
                 Box {
-                    SmallFloatingActionButton(
+                    Surface(
                         onClick = { showStyleSelector = !showStyleSelector },
-                        containerColor = Color(0xFF10173A).copy(alpha = 0.88f),
-                        contentColor = Color.White,
                         shape = CircleShape,
-                        modifier = Modifier.size(40.dp)
+                        color = hudSurfaceBg,
+                        border = BorderStroke(1.dp, hudBorderIdle),
+                        shadowElevation = if (isDayHud) 5.dp else 8.dp,
+                        modifier = Modifier.size(38.dp)
                     ) {
-                        Icon(
-                            imageVector = when (currentStyle) {
-                                "SATELLITE" -> Icons.Default.Public
-                                "NEON"      -> Icons.Default.Bolt
-                                "DARK"      -> Icons.Default.DarkMode
-                                else        -> Icons.Default.LightMode
-                            },
-                            contentDescription = "Estilo Mapa",
-                            modifier = Modifier.size(19.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = when (currentStyle) {
+                                    "SATELLITE" -> Icons.Default.Public
+                                    "NEON"      -> Icons.Default.Bolt
+                                    "DARK"      -> Icons.Default.DarkMode
+                                    else        -> Icons.Default.LightMode
+                                },
+                                contentDescription = "Estilo Mapa",
+                                tint = hudTextPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     DropdownMenu(
                         expanded = showStyleSelector,
                         onDismissRequest = { showStyleSelector = false },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                     ) {
-                        DropdownMenuItem(text = { Text("Día") },           leadingIcon = { Icon(Icons.Default.LightMode, null) },                                     onClick = { AppSettings.setMapStyle("LIGHT");     showStyleSelector = false })
-                        DropdownMenuItem(text = { Text("Noche Cockpit") }, leadingIcon = { Icon(Icons.Default.DarkMode, null) },                                      onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
-                        DropdownMenuItem(text = { Text("Neon Electric") }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00B0FF)) },                 onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
-                        DropdownMenuItem(text = { Text("Satélite") },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF4CAF50)) },               onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Modo Día") },      leadingIcon = { Icon(Icons.Default.LightMode, null, tint = Color(0xFFF59E0B)) }, onClick = { AppSettings.setMapStyle("LIGHT");     showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Noche Cockpit") }, leadingIcon = { Icon(Icons.Default.DarkMode, null, tint = Color(0xFF60A5FA)) },  onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Neon Electric") }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00E5FF)) },      onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
+                        DropdownMenuItem(text = { Text("Satélite") },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF10B981)) },    onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
                     }
                 }
             }
@@ -2546,7 +2649,7 @@ fun NavigationMap(
                 }
             }
 
-            // ── Modal Glassmorphic Moderno para Guardar Favorito (reemplaza el AlertDialog simple) ──
+            // ── Modal Glassmorphic Moderno para Guardar Favorito (Adaptado a Modo Día y Modo Noche) ──
             AnimatedVisibility(
                 visible = showSaveFavoriteDialog,
                 enter = fadeIn(tween(180)) + scaleIn(
@@ -2561,11 +2664,11 @@ fun NavigationMap(
                         .widthIn(min = 320.dp, max = 420.dp)
                         .padding(16.dp),
                     shape = RoundedCornerShape(28.dp),
-                    color = Color(0xFF0B1130).copy(alpha = 0.97f),
+                    color = hudPanelBg,
                     border = BorderStroke(
                         1.6.dp,
                         Brush.linearGradient(
-                            listOf(Color(0xFF38F2A6), Color(0xFF00E5FF), Color(0xFF5C6BC0))
+                            listOf(hudAccent, Color(0xFF00E5FF), Color(0xFF5C6BC0))
                         )
                     ),
                     shadowElevation = 24.dp
@@ -2585,12 +2688,12 @@ fun NavigationMap(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .background(
-                                            Brush.linearGradient(listOf(Color(0xFF38F2A6), Color(0xFF00B0FF))),
+                                            Brush.linearGradient(listOf(hudAccent, Color(0xFF00B0FF))),
                                             CircleShape
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Star, null, tint = Color(0xFF051B14), modifier = Modifier.size(22.dp))
+                                    Icon(Icons.Default.Star, null, tint = Color.White, modifier = Modifier.size(22.dp))
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
@@ -2598,14 +2701,14 @@ fun NavigationMap(
                                         "Nuevo Lugar Favorito",
                                         fontSize = 17.sp,
                                         fontWeight = FontWeight.Black,
-                                        color = Color.White
+                                        color = hudTextPrimary
                                     )
                                     favoriteLocationToSave?.let { pt ->
                                         Text(
                                             "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = Color(0xFF38F2A6)
+                                            color = hudAccent
                                         )
                                     }
                                 }
@@ -2617,7 +2720,7 @@ fun NavigationMap(
                                 },
                                 modifier = Modifier.size(30.dp)
                             ) {
-                                Icon(Icons.Default.Close, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Close, null, tint = hudTextSecondary, modifier = Modifier.size(18.dp))
                             }
                         }
 
@@ -2646,10 +2749,10 @@ fun NavigationMap(
                                         }
                                     },
                                     shape = RoundedCornerShape(16.dp),
-                                    color = if (isSel) Color(0xFF193664) else Color(0xFF131B42),
+                                    color = if (isSel) hudAccent.copy(alpha = 0.16f) else hudItemBg,
                                     border = BorderStroke(
                                         if (isSel) 1.5.dp else 1.dp,
-                                        if (isSel) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.14f)
+                                        if (isSel) hudAccent else hudBorderIdle
                                     ),
                                     modifier = Modifier
                                         .weight(1f)
@@ -2662,7 +2765,7 @@ fun NavigationMap(
                                         Icon(
                                             iconVec,
                                             contentDescription = label,
-                                            tint = if (isSel) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.7f),
+                                            tint = if (isSel) hudAccent else hudTextSecondary,
                                             modifier = Modifier.size(20.dp)
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
@@ -2670,7 +2773,7 @@ fun NavigationMap(
                                             label,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isSel) Color.White else Color.White.copy(alpha = 0.7f)
+                                            color = if (isSel) hudTextPrimary else hudTextSecondary
                                         )
                                     }
                                 }
@@ -2686,17 +2789,17 @@ fun NavigationMap(
                                 Surface(
                                     onClick = { favoriteNameToSave = quickTag },
                                     shape = RoundedCornerShape(50),
-                                    color = if (favoriteNameToSave == quickTag) Color(0xFF38F2A6).copy(alpha = 0.22f) else Color(0xFF151E48),
+                                    color = if (favoriteNameToSave == quickTag) hudAccent.copy(alpha = 0.20f) else hudItemBg,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (favoriteNameToSave == quickTag) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.15f)
+                                        if (favoriteNameToSave == quickTag) hudAccent else hudBorderIdle
                                     )
                                 ) {
                                     Text(
                                         text = quickTag,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color.White,
+                                        color = hudTextPrimary,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                     )
                                 }
@@ -2711,18 +2814,18 @@ fun NavigationMap(
                                 NavigationState.notifyUserInteraction()
                             },
                             placeholder = {
-                                Text("Escribe un nombre (ej. Casa, Oficina...)", color = Color.White.copy(alpha = 0.45f), fontSize = 13.sp)
+                                Text("Escribe un nombre (ej. Casa, Oficina...)", color = hudTextSecondary, fontSize = 13.sp)
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF38F2A6),
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
-                                cursorColor = Color(0xFF38F2A6),
-                                focusedContainerColor = Color(0xFF121A40),
-                                unfocusedContainerColor = Color(0xFF121A40)
+                                focusedTextColor = hudTextPrimary,
+                                unfocusedTextColor = hudTextPrimary,
+                                focusedBorderColor = hudAccent,
+                                unfocusedBorderColor = hudBorderIdle,
+                                cursorColor = hudAccent,
+                                focusedContainerColor = hudItemBg,
+                                unfocusedContainerColor = hudItemBg
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -2739,7 +2842,7 @@ fun NavigationMap(
                                     isSavingFavorite = false
                                 }
                             ) {
-                                Text("Cancelar", color = Color.White.copy(alpha = 0.75f), fontWeight = FontWeight.Bold)
+                                Text("Cancelar", color = hudTextSecondary, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
@@ -2766,13 +2869,13 @@ fun NavigationMap(
                                 },
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF00E676),
-                                    disabledContainerColor = Color(0xFF233258)
+                                    containerColor = Color(0xFF10B981),
+                                    disabledContainerColor = hudItemBg
                                 )
                             ) {
-                                Icon(Icons.Default.Check, null, tint = Color(0xFF042014), modifier = Modifier.size(17.dp))
+                                Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(17.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Guardar Favorito", color = Color(0xFF042014), fontWeight = FontWeight.Black)
+                                Text("Guardar Favorito", color = Color.White, fontWeight = FontWeight.Black)
                             }
                         }
                     }
@@ -2802,22 +2905,22 @@ private fun CockpitHorizonSkyBackdrop(
 
         val skyTop = when (currentStyle) {
             "NEON"  -> Color(0xFF06081E)
-            "LIGHT" -> Color(0xFF2276DC)
+            "LIGHT" -> Color(0xFF6BB5F8)
             else    -> Color(0xFF0C3B75)
         }
         val skyMid = when (currentStyle) {
             "NEON"  -> Color(0xFF141D5E)
-            "LIGHT" -> Color(0xFF62B2F8)
+            "LIGHT" -> Color(0xFF9DD1FF)
             else    -> Color(0xFF2672BE)
         }
         val skyHorizon = when (currentStyle) {
             "NEON"  -> Color(0xFF263494)
-            "LIGHT" -> Color(0xFFB5E0FF)
+            "LIGHT" -> Color(0xFFD9ECFF)
             else    -> Color(0xFF4D98E8)
         }
         val groundColor = when (currentStyle) {
             "NEON"  -> Color(0xFF07061C)
-            "LIGHT" -> Color(0xFFE6ECF5)
+            "LIGHT" -> Color(0xFFEAECEF)
             else    -> Color(0xFF232584)
         }
 

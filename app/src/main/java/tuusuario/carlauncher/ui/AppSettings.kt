@@ -81,8 +81,8 @@ object AppSettings {
         mapIconColor.value = p.getInt("mapIconColor", Color.parseColor("#FFD600"))
         autoThemeByTime.value = p.getBoolean("autoThemeByTime", false)
         navSplitMode.value = p.getBoolean("navSplitMode", true)
-        navPanelPercent.value = p.getFloat("navPanelPercent", 38f).coerceIn(25f, 50f)
-        digitalClockStyle.value = p.getInt("digitalClockStyle", 0).coerceIn(0, 5)
+        navPanelPercent.value = p.getFloat("navPanelPercent", 35f).coerceIn(25f, 48f)
+        digitalClockStyle.value = p.getInt("digitalClockStyle", 0).coerceIn(0, 7)
         mapWeatherMode.value = p.getString("mapWeatherMode", "AUTO") ?: "AUTO"
         mapTrackingMode.value = p.getString("mapTrackingMode", "3D_COCKPIT") ?: "3D_COCKPIT"
 
@@ -138,7 +138,7 @@ object AppSettings {
     }
 
     fun setDigitalClockStyle(styleIndex: Int) {
-        val clamped = ((styleIndex % 6) + 6) % 6
+        val clamped = ((styleIndex % 8) + 8) % 8
         digitalClockStyle.value = clamped
         prefs?.edit()?.putInt("digitalClockStyle", clamped)?.apply()
     }

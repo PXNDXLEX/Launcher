@@ -366,10 +366,16 @@ fun DashboardScreen(onToggleTheme: () -> Unit, isDarkMode: Boolean) {
     }
     val isMapRendered = isNavigationVisible || keepMapAliveDuringExit
 
-    // En modo Cockpit HUD el mapa ocupa el 100% del ancho con simetría total (auto 3D centrado entre los relojes)
+    // En modo seguimiento con vista dividida (Split Mode), el mapa grande queda a la izquierda
+    // y la columna de los 2 widgets (Velocímetro + Música) se ubica a la derecha sin tapar el centro óptico del auto 3D.
+    val rightWidgetsPanelWidth = if (isNavSplit && isLandscape) {
+        (configuration.screenWidthDp.dp * (navPanelPct / 100f)).coerceIn(248.dp, 360.dp)
+    } else 0.dp
+    val bottomWidgetsPanelHeight = if (isNavSplit && !isLandscape) 232.dp else 0.dp
+
     val mapStartPadding = 0.dp
-    val mapEndPadding = 0.dp
-    val mapBottomPadding = 0.dp
+    val mapEndPadding = rightWidgetsPanelWidth
+    val mapBottomPadding = bottomWidgetsPanelHeight
 
     Box(
         modifier = Modifier
@@ -743,12 +749,57 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
                 SettingsGroupCard("Apariencia e Inicio") {
                     SettingsRow(
                         Icons.Default.Palette,
-                        "Color de Acento Principal",
-                        "Personaliza botones e indicadores",
+                        "Color de Acento Principal (12 Tonos Automotrices)",
+                        "Personaliza botones, relojes, rutas e indicadores",
                         isExpanded = expandedSection == "color_ui",
                         onClick = { expandedSection = if (expandedSection == "color_ui") "" else "color_ui" }
                     ) {
                         ColorPicker(AppSettings.uiColor.value) { AppSettings.setUiColor(it) }
+                    }
+
+                    SettingsDivider()
+
+                    val clockModelNames = remember {
+                        listOf(
+                            "CYBER NEON", "FLIP RETRO", "GLASS ULTRA", "RACING GT",
+                            "MATRIX LED", "AURA HOLO", "CHRONO SWISS", "BENTO DAY"
+                        )
+                    }
+                    val currentClockIdx = AppSettings.digitalClockStyle.value.coerceIn(0, 7)
+
+                    SettingsRow(
+                        Icons.Default.AccessTime,
+                        "Estilo de Reloj Digital en Navegación (8 Modelos)",
+                        "Modelo activo: ${clockModelNames[currentClockIdx]}",
+                        isExpanded = expandedSection == "digital_clock_style",
+                        onClick = { expandedSection = if (expandedSection == "digital_clock_style") "" else "digital_clock_style" }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            clockModelNames.chunked(2).forEachIndexed { rowIdx, pair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    pair.forEachIndexed { colIdx, modelTitle ->
+                                        val idx = rowIdx * 2 + colIdx
+                                        val selected = currentClockIdx == idx
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { AppSettings.setDigitalClockStyle(idx) },
+                                            label = {
+                                                Text(
+                                                    text = modelTitle,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
+                                                    maxLines = 1
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     SettingsDivider()
@@ -1908,31 +1959,51 @@ fun SettingsDivider() {
 @Composable
 fun ColorPicker(selectedColor: Int, onColorSelected: (Int) -> Unit) {
     val colors = listOf(
-        Color(0xFF1A6BFF),
-        Color(0xFF007AFF),
-        Color(0xFFE91E63),
-        Color(0xFF9C27B0),
-        Color(0xFF10B981),
-        Color(0xFFFF5722),
-        Color(0xFF00BCD4),
-        Color(0xFFFFC107),
-        Color(0xFFFFA500),
-        Color(0xFF334155)
+        Color(0xFF1A6BFF), // Electric Sapphire
+        Color(0xFF007AFF), // iOS Cobalt
+        Color(0xFF00BCD4), // Cyber Cyan
+        Color(0xFF10B981), // Emerald GT
+        Color(0xFF22C55E), // Racing Green
+        Color(0xFFF59E0B), // Lamborghini Amber
+        Color(0xFFFF5722), // McLaren Papaya
+        Color(0xFFEF4444), // Porsche Guards Red
+        Color(0xFFE91E63), // Hyper Magenta
+        Color(0xFF8B5CF6), // Ultraviolet
+        Color(0xFF6366F1), // Royal Indigo
+        Color(0xFF334155)  // Titanium Slate
     )
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        colors.forEach { color ->
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(color)
-                    .border(
-                        if (selectedColor == color.toArgb()) 3.dp else 1.dp,
-                        if (selectedColor == color.toArgb()) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                        CircleShape
-                    )
-                    .clickable { onColorSelected(color.toArgb()) }
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        colors.chunked(6).forEach { rowColors ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                rowColors.forEach { color ->
+                    val isSelected = selectedColor == color.toArgb()
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(
+                                if (isSelected) 2.5.dp else 1.dp,
+                                if (isSelected) MaterialTheme.colorScheme.onSurface else Color.White.copy(alpha = 0.25f),
+                                CircleShape
+                            )
+                            .clickable { onColorSelected(color.toArgb()) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

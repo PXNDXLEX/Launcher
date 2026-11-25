@@ -989,6 +989,66 @@ private fun LiveMapboxMiniMap(
         val casingColorHex = if (isDark) "#3B69B8" else "#183CA3"
 
         miniMapView.mapboxMap.loadStyle(targetStyle) { loadedStyle ->
+            if (!isDark) {
+                // Aplicar exactamente la paleta Modo Día de referencia al Minimapa de Inicio:
+                // Bloques #EAECEF, Parques #B8E096, Ríos #A8D4FF, Calles blancas #FFFFFF y Avenidas #F6C364
+                try {
+                    val topSymId = loadedStyle.styleLayers.firstOrNull { it.type == "symbol" }?.id
+                    val bgLayer = com.mapbox.maps.extension.style.layers.generated.backgroundLayer("mini-day-bg") {
+                        backgroundColor("#EAECEF")
+                    }
+                    val landLayer = com.mapbox.maps.extension.style.layers.generated.fillLayer("mini-day-land", "composite") {
+                        sourceLayer("landcover")
+                        fillColor("#EAECEF")
+                    }
+                    val greenLayer = com.mapbox.maps.extension.style.layers.generated.fillLayer("mini-day-green", "composite") {
+                        sourceLayer("landuse")
+                        fillColor("#B8E096")
+                        fillOpacity(0.95)
+                    }
+                    val waterLayer = com.mapbox.maps.extension.style.layers.generated.fillLayer("mini-day-water", "composite") {
+                        sourceLayer("water")
+                        fillColor("#A8D4FF")
+                    }
+                    val roadCasing = com.mapbox.maps.extension.style.layers.generated.lineLayer("mini-day-road-casing", "composite") {
+                        sourceLayer("road")
+                        lineColor("#DCE0E6")
+                        lineWidth(4.5)
+                        lineCap(LineCap.ROUND)
+                        lineJoin(LineJoin.ROUND)
+                    }
+                    val roadSurface = com.mapbox.maps.extension.style.layers.generated.lineLayer("mini-day-road", "composite") {
+                        sourceLayer("road")
+                        lineColor("#FFFFFF")
+                        lineWidth(3.2)
+                        lineCap(LineCap.ROUND)
+                        lineJoin(LineJoin.ROUND)
+                    }
+                    val hwFilter = com.mapbox.maps.extension.style.expressions.generated.Expression.match(
+                        com.mapbox.maps.extension.style.expressions.generated.Expression.get("class"),
+                        com.mapbox.maps.extension.style.expressions.generated.Expression.literal("motorway"), com.mapbox.maps.extension.style.expressions.generated.Expression.literal(true),
+                        com.mapbox.maps.extension.style.expressions.generated.Expression.literal("trunk"), com.mapbox.maps.extension.style.expressions.generated.Expression.literal(true),
+                        com.mapbox.maps.extension.style.expressions.generated.Expression.literal("primary"), com.mapbox.maps.extension.style.expressions.generated.Expression.literal(true),
+                        com.mapbox.maps.extension.style.expressions.generated.Expression.literal("secondary"), com.mapbox.maps.extension.style.expressions.generated.Expression.literal(true),
+                        com.mapbox.maps.extension.style.expressions.generated.Expression.literal(false)
+                    )
+                    val hwSurface = com.mapbox.maps.extension.style.layers.generated.lineLayer("mini-day-hw", "composite") {
+                        sourceLayer("road")
+                        filter(hwFilter)
+                        lineColor("#F6C364")
+                        lineWidth(4.6)
+                        lineCap(LineCap.ROUND)
+                        lineJoin(LineJoin.ROUND)
+                    }
+                    listOf(bgLayer, landLayer, greenLayer, waterLayer, roadCasing, roadSurface, hwSurface).forEach { lyr ->
+                        try {
+                            if (topSymId != null) loadedStyle.addLayerBelow(lyr, topSymId)
+                            else loadedStyle.addLayer(lyr)
+                        } catch (_: Exception) {}
+                    }
+                } catch (_: Exception) {}
+            }
+
             try {
                 val pts = NavigationState.activeRoutePoints.toList()
                 loadedStyle.addSource(geoJsonSource(MINI_ROUTE_SOURCE_ID) {

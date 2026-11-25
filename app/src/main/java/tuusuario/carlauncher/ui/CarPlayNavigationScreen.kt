@@ -68,11 +68,14 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Interfaz Cockpit HUD 3D para Modo Navegación / Seguimiento GPS:
- *  - Arriba Izquierda: Reloj Digital Interactivo con 6 modelos y estilos intercambiables (toque o deslizar).
- *  - Abajo Izquierda: Pod circular de Velocímetro con los 18 velocímetros creados (deslizar para cambiar estilo).
- *  - Abajo Derecha: Widget de Música HUD moderno con carátula, barra de progreso y controles circulares luminosos.
- *  - Abajo Centro: Barra Dock redondeada estilo cabina (Home, Velocímetro, Ajustes, Apps, Voz Sara / Dashcam).
+ * Interfaz Premium de Seguimiento CarPlay / Cockpit HUD:
+ *  - Izquierda (Mapa Grande):
+ *      • Arriba Izquierda: Reloj Digital Interactivo con 8 modelos configurables (adaptados a Día y Noche).
+ *      • Centro-Arriba Izquierda: Botón dedicado de Grabación (`GRABAR` / `REC MM:SS`).
+ *      • Abajo Centro del Mapa: Barra Dock flotante estilo cabina (Home, Panel Dividido, Velocímetro, Ajustes, Apps, Voz Sara).
+ *  - Derecha (Columna de 2 Widgets Premium cuando `isSplitMode` está activo):
+ *      • Widget Superior Derecho: Tarjeta de Velocímetro y Telemetría (18 velocímetros con selector táctil y gestual + Máx Hoy).
+ *      • Widget Inferior Derecho: Tarjeta Multimedia HUD con carátula, tiempos MM:SS, barra interactiva, Bluetooth y YouTube PiP.
  */
 @Composable
 fun CarPlayNavigationOverlay(
@@ -85,100 +88,137 @@ fun CarPlayNavigationOverlay(
     onOpenYoutube: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
-    val navPanelPct = AppSettings.navPanelPercent.value.coerceIn(25f, 50f)
-    val scaleFactor = 0.90f + ((navPanelPct - 25f) / 25f) * 0.24f
+    val navPanelPct = AppSettings.navPanelPercent.value.coerceIn(25f, 48f)
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        val gaugeSizeRaw = if (isLandscape) {
-            (minOf(maxWidth * 0.27f, maxHeight * 0.56f) * scaleFactor).coerceIn(172.dp, 255.dp)
-        } else {
-            (minOf(maxWidth * 0.44f, maxHeight * 0.28f) * scaleFactor).coerceIn(150.dp, 210.dp)
-        }
-        val animatedGaugeSize by animateDpAsState(
-            targetValue = gaugeSizeRaw,
+        val rightColumnWidth = if (isSplitMode && isLandscape) {
+            (maxWidth * (navPanelPct / 100f)).coerceIn(244.dp, 352.dp)
+        } else 0.dp
+
+        val animatedMapEndInset by animateDpAsState(
+            targetValue = if (isSplitMode && isLandscape) rightColumnWidth + 10.dp else 0.dp,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioNoBouncy,
                 stiffness = Spring.StiffnessMediumLow
             ),
-            label = "cockpitGaugeSize"
+            label = "mapLeftAreaEndInset"
         )
 
-        // ── 1. ARRIBA IZQUIERDA: RELOJ DIGITAL INTERACTIVO (6 MODELOS Y ESTILOS) ──
-        CockpitTopLeftDigitalClock(
+        // ══════════════════════════════════════════════════════════════════════
+        // ZONA IZQUIERDA: CONTROLES DEL MAPA GRANDE (Reloj Digital, Grabación y Dock)
+        // ══════════════════════════════════════════════════════════════════════
+        Box(
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .widthIn(max = if (isLandscape) 235.dp else 210.dp)
-        )
-
-        // ── 1B. IZQUIERDA: BOTÓN DEDICADO DE GRABACIÓN (ENTRE RELOJ DIGITAL Y VELOCÍMETRO) ──
-        CockpitLeftRecordingButton(
-            isLandscape = isLandscape,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(
-                    top = if (isLandscape) 94.dp else 108.dp,
-                    start = 2.dp
-                )
-        )
-
-        // ── 2. ABAJO IZQUIERDA: POD DE VELOCÍMETRO (CON LOS 18 VELOCÍMETROS CREADOS) ──
-        AnimatedVisibility(
-            visible = isSplitMode,
-            enter = slideInHorizontally(
-                initialOffsetX = { -it },
-                animationSpec = spring(dampingRatio = 0.78f, stiffness = 360f)
-            ) + fadeIn(tween(220)) + scaleIn(initialScale = 0.88f),
-            exit = slideOutHorizontally(
-                targetOffsetX = { -it },
-                animationSpec = tween(200, easing = FastOutSlowInEasing)
-            ) + fadeOut(tween(180)) + scaleOut(targetScale = 0.88f),
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(bottom = if (isLandscape) 4.dp else 68.dp)
+                .fillMaxSize()
+                .padding(end = animatedMapEndInset)
         ) {
-            CockpitSpeedometerPod(
-                size = animatedGaugeSize,
-                onClick = onOpenFullSpeedometer
+            // 1. Arriba Izquierda: Reloj Digital Interactivo (8 Modelos Configurables)
+            CockpitTopLeftDigitalClock(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .widthIn(max = if (isLandscape) 228.dp else 205.dp)
+            )
+
+            // 2. Izquierda (debajo del reloj): Botón dedicado de Grabación
+            CockpitLeftRecordingButton(
+                isLandscape = isLandscape,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(
+                        top = if (isLandscape) 94.dp else 104.dp,
+                        start = 2.dp
+                    )
+            )
+
+            // 3. Abajo Centro del Mapa Grande: Barra Dock Flotante
+            CockpitBottomCenterDock(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 2.dp),
+                isSplitMode = isSplitMode,
+                onBackToHome = onBackToHome,
+                onOpenFullSpeedometer = onOpenFullSpeedometer,
+                onOpenSettings = onOpenSettings,
+                onOpenAllApps = onOpenAllApps,
+                onToggleSplitMode = onToggleSplitMode
             )
         }
 
-        // ── 3. ABAJO DERECHA: WIDGET DE MÚSICA HUD COCKPIT ──
-        AnimatedVisibility(
-            visible = isSplitMode,
-            enter = slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.78f, stiffness = 360f)
-            ) + fadeIn(tween(220)) + scaleIn(initialScale = 0.88f),
-            exit = slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = tween(200, easing = FastOutSlowInEasing)
-            ) + fadeOut(tween(180)) + scaleOut(targetScale = 0.88f),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = if (isLandscape) 8.dp else 68.dp)
-        ) {
-            CockpitBottomRightMusicWidget(
-                modifier = Modifier.width(if (isLandscape) 252.dp else 210.dp),
-                onOpenYoutube = onOpenYoutube
-            )
-        }
+        // ══════════════════════════════════════════════════════════════════════
+        // ZONA DERECHA: LOS 2 WIDGETS PREMIUM (1. Velocímetro 18 Estilos + 2. Música)
+        // ══════════════════════════════════════════════════════════════════════
+        if (isLandscape) {
+            AnimatedVisibility(
+                visible = isSplitMode,
+                enter = slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = spring(dampingRatio = 0.80f, stiffness = 380f)
+                ) + fadeIn(tween(220)) + scaleIn(initialScale = 0.94f),
+                exit = slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(200, easing = FastOutSlowInEasing)
+                ) + fadeOut(tween(180)) + scaleOut(targetScale = 0.94f),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(rightColumnWidth)
+                    .fillMaxHeight()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Widget 1 (Arriba Derecha): Tarjeta Premium de Velocímetro (18 Estilos)
+                    CockpitRightSpeedometerCard(
+                        onOpenFullSpeedometer = onOpenFullSpeedometer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(0.54f)
+                    )
 
-        // ── 4. ABAJO CENTRO: BARRA DOCK REDONDEADA COCKPIT ──
-        CockpitBottomCenterDock(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 2.dp),
-            isSplitMode = isSplitMode,
-            onBackToHome = onBackToHome,
-            onOpenFullSpeedometer = onOpenFullSpeedometer,
-            onOpenSettings = onOpenSettings,
-            onOpenAllApps = onOpenAllApps,
-            onToggleSplitMode = onToggleSplitMode
-        )
+                    // Widget 2 (Abajo Derecha): Tarjeta Premium de Música y Multimedia
+                    CockpitBottomRightMusicWidget(
+                        onOpenYoutube = onOpenYoutube,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(0.46f)
+                    )
+                }
+            }
+        } else {
+            // En Modo Vertical: Los 2 widgets se ubican lado a lado sobre el Dock inferior
+            AnimatedVisibility(
+                visible = isSplitMode,
+                enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.92f),
+                exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.92f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 64.dp)
+                    .fillMaxWidth()
+                    .height(166.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CockpitRightSpeedometerCard(
+                        onOpenFullSpeedometer = onOpenFullSpeedometer,
+                        modifier = Modifier
+                            .weight(0.46f)
+                            .fillMaxHeight()
+                    )
+                    CockpitBottomRightMusicWidget(
+                        onOpenYoutube = onOpenYoutube,
+                        modifier = Modifier
+                            .weight(0.54f)
+                            .fillMaxHeight()
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -197,9 +237,14 @@ fun CarPlayNavigationOverlay(
 private fun CockpitTopLeftDigitalClock(
     modifier: Modifier = Modifier
 ) {
-    val activeClockStyle = AppSettings.digitalClockStyle.value.coerceIn(0, 5)
+    val activeClockStyle = AppSettings.digitalClockStyle.value.coerceIn(0, 7)
+    val isDayMap = AppSettings.mapStyle.value == "LIGHT"
+    val accentColor = Color(AppSettings.uiColor.value)
     val styleNames = remember {
-        listOf("CYBER NEON", "FLIP RETRO", "GLASS ULTRA", "RACING GT", "MATRIX LED", "AURA HOLO")
+        listOf(
+            "CYBER NEON", "FLIP RETRO", "GLASS ULTRA", "RACING GT",
+            "MATRIX LED", "AURA HOLO", "CHRONO SWISS", "BENTO DAY"
+        )
     }
 
     var now by remember { mutableStateOf(LocalDateTime.now()) }
@@ -586,7 +631,7 @@ private fun CockpitTopLeftDigitalClock(
                 }
 
                 // ── MODELO 6: AURA HOLOGRAM (ANILLO DE SEGUNDOS + DEGRADADO) ─────
-                else -> {
+                5 -> {
                     Surface(
                         shape = RoundedCornerShape(22.dp),
                         color = Color(0xFF0F133A).copy(alpha = 0.90f),
@@ -603,7 +648,6 @@ private fun CockpitTopLeftDigitalClock(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Anillo holográfico de segundos en vivo
                             Box(
                                 modifier = Modifier.size(42.dp),
                                 contentAlignment = Alignment.Center
@@ -655,25 +699,154 @@ private fun CockpitTopLeftDigitalClock(
                         }
                     }
                 }
+
+                // ── MODELO 7: CHRONO SWISS (CRONÓGRAFO EJECUTIVO CON ANILLO DE SEGUNDOS) ──
+                6 -> {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isDayMap) Color(0xFF141B2D).copy(alpha = 0.94f) else Color(0xFF0D111A).copy(alpha = 0.94f),
+                        border = BorderStroke(
+                            1.3.dp,
+                            Brush.linearGradient(listOf(Color(0xFFF59E0B), Color(0xFFFDE68A)))
+                        ),
+                        shadowElevation = 10.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.size(38.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val r = size.minDimension / 2f
+                                    drawCircle(
+                                        color = Color(0xFFF59E0B).copy(alpha = 0.20f),
+                                        style = Stroke(width = 2.dp.toPx())
+                                    )
+                                    val angleRad = Math.toRadians((secondFraction * 360f - 90f).toDouble())
+                                    val hx = center.x + (r * 0.72f * kotlin.math.cos(angleRad)).toFloat()
+                                    val hy = center.y + (r * 0.72f * kotlin.math.sin(angleRad)).toFloat()
+                                    drawLine(
+                                        color = Color(0xFFFBBF24),
+                                        start = center,
+                                        end = Offset(hx, hy),
+                                        strokeWidth = 2.2.dp.toPx(),
+                                        cap = StrokeCap.Round
+                                    )
+                                    drawCircle(color = Color.White, radius = 2.5.dp.toPx())
+                                }
+                            }
+                            Column {
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text(
+                                        text = "$hour12:$minuteStr",
+                                        fontSize = 27.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color(0xFFFEF3C7),
+                                        lineHeight = 28.sp,
+                                        style = TextStyle(fontFeatureSettings = "tnum")
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = "$secondStr $amPmStr",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color(0xFFFBBF24),
+                                        modifier = Modifier.padding(bottom = 3.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "SWISS CHRONO · $dateStr",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFD97706)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ── MODELO 8: BENTO DAYLIGHT (PORCELANA / OBSIDIANA ADAPTABLE DÍA Y NOCHE) ──
+                else -> {
+                    val bg = if (isDayMap) Color.White.copy(alpha = 0.95f) else Color(0xFF101829).copy(alpha = 0.94f)
+                    val fg = if (isDayMap) Color(0xFF0F172A) else Color.White
+                    val sub = if (isDayMap) Color(0xFF475569) else Color(0xFF94A3B8)
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = bg,
+                        border = BorderStroke(1.3.dp, accentColor.copy(alpha = 0.55f)),
+                        shadowElevation = 9.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(4.dp)
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(accentColor)
+                            )
+                            Column {
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text(
+                                        text = "$hour12:$minuteStr",
+                                        fontSize = 29.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = fg,
+                                        lineHeight = 30.sp,
+                                        style = TextStyle(fontFeatureSettings = "tnum")
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = accentColor.copy(alpha = 0.14f),
+                                        modifier = Modifier.padding(bottom = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "$amPmStr · $secondStr",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = accentColor,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = dateStr,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = sub
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // Indicador discreto de los 6 modelos de reloj + nombre del estilo activo
+        // Indicador discreto de los 8 modelos de reloj + nombre del estilo activo
+        val pillLabelColor = if (isDayMap) Color(0xFF1E293B) else Color.White.copy(alpha = 0.78f)
+        val dotIdleColor = if (isDayMap) Color(0xFF64748B).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.35f)
+        val dotActiveColor = if (isDayMap) accentColor else Color(0xFF38F2A6)
         Row(
             modifier = Modifier.padding(start = 8.dp, top = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            for (i in 0..5) {
+            for (i in 0..7) {
                 val isSelected = i == activeClockStyle
                 Box(
                     modifier = Modifier
-                        .width(if (isSelected) 12.dp else 5.dp)
+                        .width(if (isSelected) 11.dp else 4.dp)
                         .height(4.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(
-                            if (isSelected) Color(0xFF38F2A6) else Color.White.copy(alpha = 0.35f)
-                        )
+                        .background(if (isSelected) dotActiveColor else dotIdleColor)
                 )
             }
             Spacer(modifier = Modifier.width(4.dp))
@@ -682,7 +855,7 @@ private fun CockpitTopLeftDigitalClock(
                 fontSize = 8.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = 0.6.sp,
-                color = Color.White.copy(alpha = 0.70f)
+                color = pillLabelColor
             )
         }
     }
@@ -726,8 +899,8 @@ private fun FlipDigitCard(text: String) {
 }
 
 /**
- * Widget de Música HUD ubicado en la parte inferior derecha (frente al velocímetro izquierdo),
- * integrando carátula, título, artista, barra de progreso interactiva y botones circulares luminosos.
+ * Widget 2 (Abajo Derecha): Tarjeta Multimedia HUD Premium adaptada a Modo Día y Modo Noche,
+ * con carátula, título, artista, tiempos MM:SS en vivo, barra de progreso interactiva y controles táctiles.
  */
 @Composable
 private fun CockpitBottomRightMusicWidget(
@@ -741,6 +914,9 @@ private fun CockpitBottomRightMusicWidget(
     val isPlaying = GlobalState.isPlaying.value
     val duration = GlobalState.songDuration.value
     val position = GlobalState.songPosition.value
+
+    val isDayMap = AppSettings.mapStyle.value == "LIGHT"
+    val accentColor = Color(AppSettings.uiColor.value)
 
     val artImageBitmap = remember(albumArt) { albumArt?.asImageBitmap() }
     var showExpandedModal by remember { mutableStateOf(false) }
@@ -760,24 +936,34 @@ private fun CockpitBottomRightMusicWidget(
         (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
 
-    val titleShadow = remember {
-        Shadow(color = Color.Black.copy(alpha = 0.85f), offset = Offset(0f, 2f), blurRadius = 8f)
+    fun formatDurationMs(ms: Long): String {
+        if (ms <= 0L) return "0:00"
+        val totalSec = (ms / 1000L).coerceAtLeast(0L)
+        val m = totalSec / 60L
+        val s = totalSec % 60L
+        return String.format(Locale.US, "%d:%02d", m, s)
     }
+
+    val cardBg = if (isDayMap) Color.White.copy(alpha = 0.96f) else Color(0xFF0A102E).copy(alpha = 0.93f)
+    val cardBorder = if (isDayMap) {
+        Brush.linearGradient(listOf(accentColor.copy(alpha = 0.40f), Color(0xFFCBD5E1)))
+    } else {
+        Brush.linearGradient(listOf(Color(0xFF4C6FFF).copy(alpha = 0.65f), Color(0xFF38F2A6).copy(alpha = 0.45f)))
+    }
+    val titleColor = if (isDayMap) Color(0xFF0F172A) else Color.White
+    val subColor = if (isDayMap) Color(0xFF475569) else Color(0xFFB8CEFF)
+    val barFillColor = if (isDayMap) accentColor else Color(0xFF38F2A6)
+    val barTrackColor = if (isDayMap) Color(0xFFE2E8F0) else Color.White.copy(alpha = 0.20f)
 
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
-        color = Color(0xFF0A102E).copy(alpha = 0.90f),
-        border = BorderStroke(
-            1.3.dp,
-            Brush.linearGradient(
-                listOf(Color(0xFF4C6FFF).copy(alpha = 0.65f), Color(0xFF38F2A6).copy(alpha = 0.45f))
-            )
-        ),
-        shadowElevation = 14.dp
+        color = cardBg,
+        border = BorderStroke(1.3.dp, cardBorder),
+        shadowElevation = if (isDayMap) 8.dp else 14.dp
     ) {
-        Box {
-            // Fondo sutil con la carátula difuminada/oscurecida si existe
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Fondo sutil con la carátula difuminada si existe
             if (artImageBitmap != null) {
                 Image(
                     bitmap = artImageBitmap,
@@ -786,15 +972,17 @@ private fun CockpitBottomRightMusicWidget(
                         .matchParentSize()
                         .clip(RoundedCornerShape(24.dp)),
                     contentScale = ContentScale.Crop,
-                    alpha = 0.22f
+                    alpha = if (isDayMap) 0.10f else 0.22f
                 )
             }
 
             Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Fila 1: Mini carátula + Título + Artista (toque abre reproductor expandido)
+                // Fila 1: Mini carátula + Título + Artista + Badge de app
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -807,82 +995,115 @@ private fun CockpitBottomRightMusicWidget(
                             bitmap = artImageBitmap,
                             contentDescription = "Carátula",
                             modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .border(1.dp, Color.White.copy(alpha = 0.40f), RoundedCornerShape(10.dp)),
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, barFillColor.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
                             contentScale = ContentScale.Crop
                         )
-                        Spacer(modifier = Modifier.width(9.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                     } else {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
-                                .background(Color(0xFF1A265A), RoundedCornerShape(10.dp)),
+                                .size(42.dp)
+                                .background(barFillColor.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                                .border(1.dp, barFillColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.MusicNote, null, tint = Color(0xFF38F2A6), modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.MusicNote, null, tint = barFillColor, modifier = Modifier.size(22.dp))
                         }
-                        Spacer(modifier = Modifier.width(9.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = songTitle.ifBlank { "Sin reproducción" },
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
+                            color = titleColor,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = TextStyle(shadow = titleShadow)
+                            overflow = TextOverflow.Ellipsis
                         )
                         val subtitleText = if (songArtist.isNotBlank()) songArtist else playerApp
                         Text(
-                            text = subtitleText.ifBlank { "Reproductor Multimedia" },
+                            text = subtitleText.ifBlank { "Audio Bluetooth / Multimedia" },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFFB8CEFF),
+                            color = subColor,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = TextStyle(shadow = titleShadow)
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showExpandedModal = true },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInFull,
+                            contentDescription = "Expandir reproductor",
+                            tint = subColor,
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
 
-                // Barra de progreso interactiva
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .pointerInput(duration) {
-                            detectTapGestures { offset ->
-                                if (duration > 0L && size.width > 0) {
-                                    val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                                    val targetMs = (frac * duration).toLong()
-                                    GlobalState.seekTo(targetMs)
-                                    GlobalState.songPosition.value = targetMs
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.CenterStart
-                ) {
+                // Fila 2: Barra de progreso interactiva + Tiempos MM:SS
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(3.5.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.White.copy(alpha = 0.22f))
+                            .height(12.dp)
+                            .pointerInput(duration) {
+                                detectTapGestures { offset ->
+                                    if (duration > 0L && size.width > 0) {
+                                        val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        val targetMs = (frac * duration).toLong()
+                                        GlobalState.seekTo(targetMs)
+                                        GlobalState.songPosition.value = targetMs
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.CenterStart
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth(progress.coerceIn(0.03f, 1f))
+                                .fillMaxWidth()
+                                .height(4.dp)
                                 .clip(RoundedCornerShape(50))
-                                .background(Color(0xFF38F2A6))
+                                .background(barTrackColor)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(progress.coerceIn(0.03f, 1f))
+                                    .clip(RoundedCornerShape(50))
+                                    .background(barFillColor)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = formatDurationMs(position),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = subColor,
+                            style = TextStyle(fontFeatureSettings = "tnum")
+                        )
+                        Text(
+                            text = if (duration > 0L) formatDurationMs(duration) else "EN VIVO",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = barFillColor,
+                            style = TextStyle(fontFeatureSettings = "tnum")
                         )
                     }
                 }
 
-                // Fila 2: Botones circulares con aro luminoso (|<, Play/Pause, >|, BT, YouTube)
+                // Fila 3: Botones circulares táctiles (|<, Play/Pause, >|, BT, YouTube)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -892,6 +1113,8 @@ private fun CockpitBottomRightMusicWidget(
                         icon = Icons.Default.SkipPrevious,
                         contentDescription = "Anterior",
                         isPrimary = false,
+                        isDayMap = isDayMap,
+                        accentColor = barFillColor,
                         onClick = { GlobalState.skipToPrevious() }
                     )
 
@@ -899,6 +1122,8 @@ private fun CockpitBottomRightMusicWidget(
                         icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = "Reproducir / Pausar",
                         isPrimary = true,
+                        isDayMap = isDayMap,
+                        accentColor = barFillColor,
                         onClick = { GlobalState.togglePlayPause() }
                     )
 
@@ -906,6 +1131,8 @@ private fun CockpitBottomRightMusicWidget(
                         icon = Icons.Default.SkipNext,
                         contentDescription = "Siguiente",
                         isPrimary = false,
+                        isDayMap = isDayMap,
+                        accentColor = barFillColor,
                         onClick = { GlobalState.skipToNext() }
                     )
 
@@ -913,6 +1140,8 @@ private fun CockpitBottomRightMusicWidget(
                         icon = Icons.Default.BluetoothAudio,
                         contentDescription = "Reproductor / Audio",
                         isPrimary = false,
+                        isDayMap = isDayMap,
+                        accentColor = barFillColor,
                         onClick = { showExpandedModal = true },
                         onLongClick = onOpenYoutube
                     )
@@ -920,15 +1149,15 @@ private fun CockpitBottomRightMusicWidget(
                     Surface(
                         onClick = onOpenYoutube,
                         shape = CircleShape,
-                        color = Color(0xFF1A2A5E).copy(alpha = 0.78f),
-                        border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.70f)),
+                        color = if (isDayMap) Color(0xFFFFEBEE) else Color(0xFF1A2A5E).copy(alpha = 0.82f),
+                        border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.75f)),
                         modifier = Modifier.size(36.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.PlayCircleOutline,
                                 contentDescription = "YouTube Mini",
-                                tint = Color(0xFFFF6E6E),
+                                tint = Color(0xFFEF4444),
                                 modifier = Modifier.size(19.dp)
                             )
                         }
@@ -948,27 +1177,36 @@ private fun HudCircleMediaButton(
     icon: ImageVector,
     contentDescription: String,
     isPrimary: Boolean,
+    isDayMap: Boolean = false,
+    accentColor: Color = Color(0xFF38F2A6),
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
-    val bgColor = if (isPrimary) {
-        Color(0xFF162458).copy(alpha = 0.92f)
-    } else {
-        Color(0xFF1D3570).copy(alpha = 0.70f)
+    val bgColor = when {
+        isPrimary && isDayMap -> accentColor
+        isPrimary -> Color(0xFF162458).copy(alpha = 0.94f)
+        isDayMap -> Color(0xFFEEF2F8)
+        else -> Color(0xFF1D3570).copy(alpha = 0.72f)
     }
-    val borderColor = if (isPrimary) {
-        Color(0xFF38F2A6).copy(alpha = 0.90f)
-    } else {
-        Color.White.copy(alpha = 0.55f)
+    val borderColor = when {
+        isPrimary && isDayMap -> accentColor
+        isPrimary -> accentColor.copy(alpha = 0.92f)
+        isDayMap -> Color(0xFFCBD5E1)
+        else -> Color.White.copy(alpha = 0.45f)
+    }
+    val iconTint = when {
+        isPrimary -> Color.White
+        isDayMap -> Color(0xFF0F172A)
+        else -> Color.White
     }
 
     Surface(
         shape = CircleShape,
         color = bgColor,
-        border = BorderStroke(if (isPrimary) 1.6.dp else 1.2.dp, borderColor),
-        shadowElevation = if (isPrimary) 8.dp else 4.dp,
+        border = BorderStroke(if (isPrimary) 1.6.dp else 1.dp, borderColor),
+        shadowElevation = if (isPrimary) 6.dp else 2.dp,
         modifier = Modifier
-            .size(if (isPrimary) 42.dp else 38.dp)
+            .size(if (isPrimary) 42.dp else 36.dp)
             .pointerInput(onLongClick) {
                 detectTapGestures(
                     onTap = { onClick() },
@@ -980,23 +1218,29 @@ private fun HudCircleMediaButton(
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = Color.White,
-                modifier = Modifier.size(if (isPrimary) 22.dp else 19.dp)
+                tint = iconTint,
+                modifier = Modifier.size(if (isPrimary) 21.dp else 18.dp)
             )
         }
     }
 }
 
 /**
- * Pod Circular Izquierdo: Integra nuestros 18 Velocímetros programados dentro del bisel circular Cockpit.
- * Permite deslizar horizontalmente para alternar entre los 18 estilos en vivo o tocar para pantalla completa.
+ * Widget 1 (Arriba Derecha): Tarjeta Premium de Velocímetro y Telemetría:
+ *  - Integra los 18 Velocímetros creados dentro de un dial de alto contraste.
+ *  - Incluye cabecera con botones `<` `>` para cambiar de velocímetro con 1 toque (además del gesto de deslizar),
+ *    nombre del estilo activo y telemetría de velocidad máxima del día.
  */
 @Composable
-private fun CockpitSpeedometerPod(
-    size: Dp,
-    onClick: () -> Unit
+private fun CockpitRightSpeedometerCard(
+    onOpenFullSpeedometer: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val activeStyle = AppSettings.speedoStyle.value
+    val isDayMap = AppSettings.mapStyle.value == "LIGHT"
+    val accentColor = Color(AppSettings.uiColor.value)
+    val todayMax = com.tuusuario.carlauncher.services.SpeedRecordTracker.todayMaxLive.value
+
     val styles = remember {
         listOf(
             "PREMIUM", "NEON", "RACING", "CYBER", "AURA", "VORTEX",
@@ -1006,17 +1250,25 @@ private fun CockpitSpeedometerPod(
     }
     var dragAccum by remember { mutableStateOf(0f) }
 
-    Box(
-        modifier = Modifier
-            .size(size)
+    val cardBg = if (isDayMap) Color.White.copy(alpha = 0.96f) else Color(0xFF0A102E).copy(alpha = 0.93f)
+    val cardBorder = if (isDayMap) {
+        Brush.linearGradient(listOf(accentColor.copy(alpha = 0.45f), Color(0xFFCBD5E1)))
+    } else {
+        Brush.linearGradient(listOf(Color(0xFF38F2A6).copy(alpha = 0.55f), Color(0xFF4C6FFF).copy(alpha = 0.50f)))
+    }
+    val headerTextColor = if (isDayMap) Color(0xFF0F172A) else Color.White
+    val badgeAccent = if (isDayMap) accentColor else Color(0xFF38F2A6)
+
+    Surface(
+        modifier = modifier
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        if (dragAccum > 55f) {
+                        if (dragAccum > 48f) {
                             val idx = styles.indexOf(AppSettings.speedoStyle.value)
                             val prev = if (idx <= 0) styles.lastIndex else idx - 1
                             AppSettings.setSpeedoStyle(styles[prev])
-                        } else if (dragAccum < -55f) {
+                        } else if (dragAccum < -48f) {
                             val idx = styles.indexOf(AppSettings.speedoStyle.value)
                             val next = (idx + 1) % styles.size
                             AppSettings.setSpeedoStyle(styles[next])
@@ -1027,62 +1279,152 @@ private fun CockpitSpeedometerPod(
                     change.consume()
                     dragAccum += amount
                 }
-            }
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
+            },
+        shape = RoundedCornerShape(24.dp),
+        color = cardBg,
+        border = BorderStroke(1.3.dp, cardBorder),
+        shadowElevation = if (isDayMap) 8.dp else 14.dp
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val radius = this.size.minDimension / 2f
-            val center = Offset(this.size.width / 2f, this.size.height / 2f)
-
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF141842).copy(alpha = 0.94f),
-                        Color(0xFF090B24).copy(alpha = 0.97f),
-                        Color(0xFF050614).copy(alpha = 0.92f)
-                    ),
-                    center = center,
-                    radius = radius
-                ),
-                radius = radius * 0.96f,
-                center = center
-            )
-
-            val arcInset = radius * 0.05f
-            drawArc(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF8A94B8).copy(alpha = 0.68f),
-                        Color(0xFF3E4668).copy(alpha = 0.35f)
-                    )
-                ),
-                startAngle = 150f,
-                sweepAngle = 240f,
-                useCenter = false,
-                topLeft = Offset(arcInset, arcInset),
-                size = Size(this.size.width - arcInset * 2f, this.size.height - arcInset * 2f),
-                style = Stroke(width = radius * 0.055f, cap = StrokeCap.Round)
-            )
-        }
-
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(size * 0.06f)
-                .clip(CircleShape),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Crossfade(
-                targetState = activeStyle,
-                animationSpec = tween(220),
-                label = "cockpitLiveSpeedo"
-            ) { _ ->
-                SpeedometerWidget(
-                    scaleMultiplier = 1.05f,
-                    forceDarkBackground = true
-                )
+            // Cabecera de la tarjeta: Selector rápido < Estilo > + Máx Hoy
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Surface(
+                        onClick = {
+                            val idx = styles.indexOf(AppSettings.speedoStyle.value)
+                            val prev = if (idx <= 0) styles.lastIndex else idx - 1
+                            AppSettings.setSpeedoStyle(styles[prev])
+                        },
+                        shape = CircleShape,
+                        color = badgeAccent.copy(alpha = 0.14f),
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ChevronLeft, "Anterior estilo", tint = badgeAccent, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    Text(
+                        text = activeStyle,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.7.sp,
+                        color = headerTextColor
+                    )
+
+                    Surface(
+                        onClick = {
+                            val idx = styles.indexOf(AppSettings.speedoStyle.value)
+                            val next = (idx + 1) % styles.size
+                            AppSettings.setSpeedoStyle(styles[next])
+                        },
+                        shape = CircleShape,
+                        color = badgeAccent.copy(alpha = 0.14f),
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ChevronRight, "Siguiente estilo", tint = badgeAccent, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                Surface(
+                    onClick = onOpenFullSpeedometer,
+                    shape = RoundedCornerShape(50),
+                    color = badgeAccent.copy(alpha = 0.14f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.EmojiEvents, null, tint = badgeAccent, modifier = Modifier.size(11.dp))
+                        Text(
+                            text = "MÁX ${todayMax.toInt()} KM/H",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = badgeAccent
+                        )
+                    }
+                }
+            }
+
+            // Dial Circular del Velocímetro (con pozo oscuro profundo para que los 18 velocímetros brillen con máximo contraste)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .aspectRatio(1f)
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenFullSpeedometer),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val radius = this.size.minDimension / 2f
+                    val center = Offset(this.size.width / 2f, this.size.height / 2f)
+
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF141842),
+                                Color(0xFF090B24),
+                                Color(0xFF050614)
+                            ),
+                            center = center,
+                            radius = radius
+                        ),
+                        radius = radius * 0.98f,
+                        center = center
+                    )
+
+                    val arcInset = radius * 0.045f
+                    drawArc(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                badgeAccent.copy(alpha = 0.72f),
+                                Color(0xFF3E4668).copy(alpha = 0.35f)
+                            )
+                        ),
+                        startAngle = 145f,
+                        sweepAngle = 250f,
+                        useCenter = false,
+                        topLeft = Offset(arcInset, arcInset),
+                        size = Size(this.size.width - arcInset * 2f, this.size.height - arcInset * 2f),
+                        style = Stroke(width = radius * 0.045f, cap = StrokeCap.Round)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Crossfade(
+                        targetState = activeStyle,
+                        animationSpec = tween(220),
+                        label = "cockpitLiveSpeedo"
+                    ) { _ ->
+                        SpeedometerWidget(
+                            scaleMultiplier = 1.04f,
+                            forceDarkBackground = true
+                        )
+                    }
+                }
             }
         }
     }
@@ -1113,26 +1455,33 @@ private fun CockpitBottomCenterDock(
     val isListening = ArletAssistant.isListening.value || ArletAssistant.isWakeWordActiveWindow.value
     val isSpeaking = ArletAssistant.isSpeaking.value
 
+    val isDayMap = AppSettings.mapStyle.value == "LIGHT"
+    val accentColor = Color(AppSettings.uiColor.value)
+    val dockBg = if (isDayMap) Color.White.copy(alpha = 0.95f) else Color(0xFF080A16).copy(alpha = 0.93f)
+    val dockBorder = if (isDayMap) Color(0xFFCBD5E1) else Color(0xFF3B4675).copy(alpha = 0.65f)
+    val dockIconIdle = if (isDayMap) Color(0xFF334155) else Color.White.copy(alpha = 0.85f)
+    val dockHighlight = if (isDayMap) accentColor else Color(0xFF00E5FF)
+
     val voiceTint by animateColorAsState(
         targetValue = when {
             isListening -> Color(0xFFFF4081)
-            isSpeaking -> Color(0xFF00E5FF)
-            else -> Color.White.copy(alpha = 0.85f)
+            isSpeaking -> dockHighlight
+            else -> dockIconIdle
         },
         animationSpec = tween(200),
         label = "dockVoiceTint"
     )
 
     Surface(
-        modifier = modifier.height(56.dp),
+        modifier = modifier.height(54.dp),
         shape = RoundedCornerShape(50),
-        color = Color(0xFF080A16).copy(alpha = 0.92f),
-        shadowElevation = 12.dp,
-        border = BorderStroke(1.2.dp, Color(0xFF3B4675).copy(alpha = 0.65f))
+        color = dockBg,
+        shadowElevation = if (isDayMap) 8.dp else 12.dp,
+        border = BorderStroke(1.2.dp, dockBorder)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(22.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
@@ -1146,8 +1495,8 @@ private fun CockpitBottomCenterDock(
                 Icon(
                     imageVector = Icons.Default.Home,
                     contentDescription = "Inicio",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    tint = if (isDayMap) Color(0xFF0F172A) else Color.White,
+                    modifier = Modifier.size(23.dp)
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Box(
@@ -1155,58 +1504,70 @@ private fun CockpitBottomCenterDock(
                         .width(18.dp)
                         .height(3.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(Color(0xFF00E5FF))
+                        .background(dockHighlight)
+                )
+            }
+
+            // Botón directo para mostrar/ocultar los 2 widgets derechos
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (isSplitMode) dockHighlight.copy(alpha = 0.16f) else Color.Transparent)
+                    .clickable(onClick = onToggleSplitMode)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.VerticalSplit,
+                    contentDescription = "Alternar Widgets Derechos",
+                    tint = if (isSplitMode) dockHighlight else dockIconIdle.copy(alpha = 0.55f),
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { onOpenFullSpeedometer() },
-                            onLongPress = { onToggleSplitMode() }
-                        )
-                    }
+                    .clickable(onClick = onOpenFullSpeedometer)
             ) {
                 Icon(
                     imageVector = Icons.Default.Speed,
-                    contentDescription = "Velocímetro",
-                    tint = if (isSplitMode) Color.White.copy(alpha = 0.88f) else Color.White.copy(alpha = 0.5f),
-                    modifier = Modifier.size(23.dp)
+                    contentDescription = "Velocímetro Pantalla Completa",
+                    tint = dockIconIdle,
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             IconButton(
                 onClick = onOpenSettings,
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Build,
+                    imageVector = Icons.Default.Tune,
                     contentDescription = "Ajustes",
-                    tint = Color.White.copy(alpha = 0.85f),
+                    tint = dockIconIdle,
                     modifier = Modifier.size(21.dp)
                 )
             }
 
             IconButton(
                 onClick = onOpenAllApps,
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Apps,
                     contentDescription = "Aplicaciones",
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(23.dp)
+                    tint = dockIconIdle,
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .pointerInput(isRec, isListening, isSpeaking) {
                         detectTapGestures(
@@ -1222,7 +1583,7 @@ private fun CockpitBottomCenterDock(
                     }
             ) {
                 Icon(
-                    imageVector = Icons.Default.PermPhoneMsg,
+                    imageVector = Icons.Default.GraphicEq,
                     contentDescription = "Asistente Sara / Dashcam",
                     tint = if (isRec) Color(0xFFFF5252) else voiceTint,
                     modifier = Modifier.size(22.dp)
