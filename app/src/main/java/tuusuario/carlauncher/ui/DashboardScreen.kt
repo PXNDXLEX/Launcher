@@ -912,6 +912,146 @@ fun PremiumSettingsDialog(onDismiss: () -> Unit, onNavigateToMap: () -> Unit) {
 
                 // ── NAVEGACIÓN Y MAPA ──
                 SettingsGroupCard("Navegación y CarPlay") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val isDarkUi = AppSettings.isDarkMode.value
+                        val currentTrackMode = AppSettings.mapTrackingMode.value
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Modo Definitivo de Seguimiento en Mapa",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (currentTrackMode == "2D_AERIAL_ARROW")
+                                        "Activo: Vista Aérea con Flecha de Navegación Moderna (Sin icono de auto)"
+                                    else
+                                        "Activo: Seguimiento 3D Cockpit con Auto centrado en su Carril",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            val trackingModes = listOf(
+                                Triple(
+                                    "3D_COCKPIT",
+                                    "Seguimiento 3D Auto",
+                                    "Perspectiva 3D en medio del carril actual"
+                                ),
+                                Triple(
+                                    "2D_AERIAL_ARROW",
+                                    "Aéreo con Flecha",
+                                    "Vista superior moderna con flecha de navegación"
+                                )
+                            )
+
+                            trackingModes.forEach { (modeKey, modeTitle, modeDesc) ->
+                                val selected = currentTrackMode == modeKey
+                                val cardBg = when {
+                                    selected && isDarkUi -> Color(0xFF17265C)
+                                    selected && !isDarkUi -> Color(0xFFDCE7FF)
+                                    isDarkUi -> Color(0xFF101730)
+                                    else -> Color(0xFFF1F5FB)
+                                }
+                                val borderColor = when {
+                                    selected && isDarkUi -> Color(0xFF38F2A6)
+                                    selected && !isDarkUi -> MaterialTheme.colorScheme.primary
+                                    isDarkUi -> Color.White.copy(alpha = 0.14f)
+                                    else -> Color(0xFFCBD5E1)
+                                }
+                                val titleColor = if (isDarkUi) Color.White else Color(0xFF0F172A)
+                                val descColor = if (isDarkUi) Color(0xFFAAB8D8) else Color(0xFF475569)
+
+                                Surface(
+                                    onClick = { AppSettings.setMapTrackingMode(modeKey) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = cardBg,
+                                    border = BorderStroke(if (selected) 1.8.dp else 1.dp, borderColor),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (modeKey == "3D_COCKPIT") Icons.Default.DirectionsCar else Icons.Default.Navigation,
+                                                    contentDescription = null,
+                                                    tint = if (selected) {
+                                                        if (isDarkUi) Color(0xFF38F2A6) else MaterialTheme.colorScheme.primary
+                                                    } else descColor,
+                                                    modifier = Modifier.size(19.dp)
+                                                )
+                                            }
+                                            if (selected) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(50),
+                                                    color = if (isDarkUi) Color(0xFF38F2A6).copy(alpha = 0.20f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                                ) {
+                                                    Text(
+                                                        text = "ACTIVO",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Black,
+                                                        color = if (isDarkUi) Color(0xFF38F2A6) else MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = modeTitle,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 13.sp,
+                                            color = titleColor
+                                        )
+                                        Text(
+                                            text = modeDesc,
+                                            fontSize = 11.sp,
+                                            lineHeight = 14.sp,
+                                            color = descColor
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsDivider()
+
                     SettingsRowSwitch(
                         icon = Icons.Default.VerticalSplit,
                         title = "Vista Dividida CarPlay al Abrir Mapa",

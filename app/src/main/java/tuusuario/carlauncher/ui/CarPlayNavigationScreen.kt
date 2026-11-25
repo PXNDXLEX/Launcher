@@ -114,6 +114,17 @@ fun CarPlayNavigationOverlay(
                 .widthIn(max = if (isLandscape) 235.dp else 210.dp)
         )
 
+        // ── 1B. IZQUIERDA: BOTÓN DEDICADO DE GRABACIÓN (ENTRE RELOJ DIGITAL Y VELOCÍMETRO) ──
+        CockpitLeftRecordingButton(
+            isLandscape = isLandscape,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(
+                    top = if (isLandscape) 94.dp else 108.dp,
+                    start = 2.dp
+                )
+        )
+
         // ── 2. ABAJO IZQUIERDA: POD DE VELOCÍMETRO (CON LOS 18 VELOCÍMETROS CREADOS) ──
         AnimatedVisibility(
             visible = isSplitMode,
@@ -1217,6 +1228,145 @@ private fun CockpitBottomCenterDock(
                     modifier = Modifier.size(22.dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * Botón dedicado de Grabación en la parte izquierda del HUD (debajo del reloj digital):
+ *  - Toque corto: Inicia o detiene la grabación de inmediato con cronómetro en vivo (`MM:SS`) y punto `REC` pulsante.
+ *  - Pulsación larga: Alterna entre las cámaras disponibles (`DashcamManager.cycleCamera`).
+ *  - Se adapta automáticamente al Modo Día y Modo Noche del mapa.
+ */
+@Composable
+private fun CockpitLeftRecordingButton(
+    isLandscape: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val isRecording = DashcamManager.isRecording.value
+    val isDayMap = AppSettings.mapStyle.value == "LIGHT"
+
+    var elapsedSec by remember { mutableStateOf(0) }
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            elapsedSec = 0
+            while (DashcamManager.isRecording.value) {
+                delay(1000L)
+                elapsedSec++
+            }
+        } else {
+            elapsedSec = 0
+        }
+    }
+
+    val pulseTransition = rememberInfiniteTransition(label = "leftRecPulse")
+    val recDotScale by pulseTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(650, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "recDotScale"
+    )
+    val recGlowAlpha by pulseTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.90f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(650, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "recGlowAlpha"
+    )
+
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            isRecording -> Color(0xFF3A0D18).copy(alpha = 0.94f)
+            isDayMap -> Color(0xFFF8FAFC).copy(alpha = 0.92f)
+            else -> Color(0xFF0E1538).copy(alpha = 0.90f)
+        },
+        animationSpec = tween(220),
+        label = "recBtnBg"
+    )
+
+    val borderColor = when {
+        isRecording -> Color(0xFFFF405C).copy(alpha = recGlowAlpha)
+        isDayMap -> Color(0xFF2563EB).copy(alpha = 0.45f)
+        else -> Color(0xFF38F2A6).copy(alpha = 0.50f)
+    }
+
+    val textColor = when {
+        isRecording -> Color.White
+        isDayMap -> Color(0xFF0F172A)
+        else -> Color.White
+    }
+
+    val timerText = remember(elapsedSec) {
+        val mins = elapsedSec / 60
+        val secs = elapsedSec % 60
+        String.format(Locale.US, "%02d:%02d", mins, secs)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = containerColor,
+        border = BorderStroke(if (isRecording) 1.6.dp else 1.2.dp, borderColor),
+        shadowElevation = 10.dp,
+        modifier = modifier
+            .height(if (isLandscape) 38.dp else 36.dp)
+            .clip(RoundedCornerShape(50))
+            .pointerInput(isRecording) {
+                detectTapGestures(
+                    onTap = {
+                        if (DashcamManager.isRecording.value) {
+                            DashcamManager.stopRecording()
+                        } else {
+                            DashcamManager.startRecording(context, lifecycleOwner)
+                        }
+                    },
+                    onLongPress = {
+                        DashcamManager.cycleCamera(context, lifecycleOwner)
+                    }
+                )
+            }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            // Indicador circular rojo de grabación con pulso en vivo
+            Box(
+                modifier = Modifier.size(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(if (isRecording) (11.dp * recDotScale) else 10.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isRecording) Color(0xFFFF1744)
+                            else Color(0xFFFF3355)
+                        )
+                )
+            }
+
+            Icon(
+                imageVector = if (isRecording) Icons.Default.StopCircle else Icons.Default.Videocam,
+                contentDescription = "Activar Grabación",
+                tint = if (isRecording) Color(0xFFFF8A9B) else textColor,
+                modifier = Modifier.size(17.dp)
+            )
+
+            Text(
+                text = if (isRecording) "REC $timerText" else "GRABAR",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.6.sp,
+                color = textColor
+            )
         }
     }
 }

@@ -72,6 +72,8 @@ object LocationEngine {
     )
 
     private const val METERS_PER_DEG_LAT = 111320.0
+    // Ancho estándar internacional de carril (3.50m) y distancia exacta entre centros de carril contiguos
+    private const val LANE_WIDTH_METERS = 3.50
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val listeners = CopyOnWriteArrayList<Listener>()
@@ -115,6 +117,15 @@ object LocationEngine {
     // Discrepancia suavizada respecto al GPS (absorbida con deriva suave sin tirones)
     private var lonErrorMeters: Double = 0.0
     private var latErrorMeters: Double = 0.0
+
+    // ── Sistema Inteligente de Centrado en Carril 3D (Multi-Lane Quantizer & Critically Damped Spring) ──
+    // Calcula el centro exacto del carril más cercano (ej. 3 carriles: -3.50m izq, 0.00m central, +3.50m der)
+    // y mantiene el modelo 3D siempre en el medio de su carril con transiciones fluidas al cambiar de carril.
+    private var activeLaneIndex: Int = 0 // -1 = Carril Izquierdo, 0 = Carril Central, +1 = Carril Derecho
+    private var targetLaneOffsetMeters: Double = 0.0
+    private var currentLaneOffsetMeters: Double = 0.0
+    private var laneLateralVelocityMps: Double = 0.0
+    private var filteredRoadAxisLatOffsetM: Double = 0.0
 
     // Estado de maniobra (recta vs. frenado y giro)
     private var isTurningManeuver: Boolean = false
@@ -311,10 +322,11 @@ object LocationEngine {
             predictedYawRateDegPerSec = 0.0
             if (!stationaryNotified) {
                 stationaryNotified = true
+                val (laneLat, laneLon) = applyLateralLaneCenterOffset(simLat, simLon, simBearingDeg)
                 dispatchToListeners(
                     baseLoc = baseLoc,
-                    lat = simLat,
-                    lon = simLon,
+                    lat = laneLat,
+                    lon = laneLon,
                     bearing = simBearingDeg,
                     speedKmH = 0f,
                     animMs = 0L
@@ -371,10 +383,10 @@ object LocationEngine {
         }
         simBearingDeg = normalizeDeg(simBearingDeg + stepAngle)
 
-        // ── 4. Integrar avance en coordenadas geográficas ──
+        // ── 4. Integrar avance en coordenadas geográficas + Centrado fluido en el medio del carril actual ──
         val forwardStepM = currentSimSpeedMps * dtSec
-        val maxLatDriftM = forwardStepM * (if (isTurningManeuver) 0.28 else 0.10)
-        val latStepM = (latErrorMeters * (if (isTurningManeuver) 1.4 else 0.5) * dtSec)
+        val maxLatDriftM = forwardStepM * (if (isTurningManeuver) 0.26 else 0.08)
+        val latStepM = (latErrorMeters * (if (isTurningManeuver) 1.35 else 0.42) * dtSec)
             .coerceIn(-maxLatDriftM, maxLatDriftM)
         latErrorMeters -= latStepM
 
@@ -388,14 +400,59 @@ object LocationEngine {
         simLat += northStepM / METERS_PER_DEG_LAT
         simLon += eastStepM / (METERS_PER_DEG_LAT * cosLat)
 
+        // Amortiguador crítico (Critically Damped Spring, omega = 3.2 rad/s) entre centros de carril (-3.5m, 0.0m, +3.5m)
+        // para que los cambios de carril sean 100% fluidos y el auto viaje clavado en la mitad exacta de su carril.
+        val laneOmega = 3.2
+        val laneErr = targetLaneOffsetMeters - currentLaneOffsetMeters
+        val laneAccel = (laneOmega * laneOmega * laneErr) - (2.0 * laneOmega * laneLateralVelocityMps)
+        laneLateralVelocityMps = (laneLateralVelocityMps + laneAccel * dtSec).coerceIn(-2.8, 2.8)
+        currentLaneOffsetMeters = (currentLaneOffsetMeters + laneLateralVelocityMps * dtSec)
+            .coerceIn(-LANE_WIDTH_METERS, LANE_WIDTH_METERS)
+        if (abs(laneErr) < 0.01 && abs(laneLateralVelocityMps) < 0.01) {
+            currentLaneOffsetMeters = targetLaneOffsetMeters
+            laneLateralVelocityMps = 0.0
+        }
+
+        val (laneCenteredLat, laneCenteredLon) = applyLateralLaneCenterOffset(simLat, simLon, simBearingDeg)
+
         // Enviar actualización síncrona de cuadro VSYNC (animDurationMs = 0L)
         dispatchToListeners(
             baseLoc = baseLoc,
-            lat = simLat,
-            lon = simLon,
+            lat = laneCenteredLat,
+            lon = laneCenteredLon,
             bearing = simBearingDeg,
             speedKmH = smoothedDisplaySpeedKmH,
             animMs = 0L
+        )
+    }
+
+    /**
+     * Proyecta el desplazamiento lateral exacto del carril actual (`currentLaneOffsetMeters`)
+     * perpendicular a la dirección de marcha del vehículo cuando está activo el modo `3D_COCKPIT`.
+     * En una vía de 3 carriles:
+     *  - Carril Izquierdo: -3.50 m
+     *  - Carril Central:    0.00 m (encerrado entre las dos líneas blancas discontinuas a ±1.75 m)
+     *  - Carril Derecho:   +3.50 m
+     */
+    private fun applyLateralLaneCenterOffset(
+        baseLat: Double,
+        baseLon: Double,
+        bearingDeg: Double
+    ): Pair<Double, Double> {
+        if (AppSettings.mapTrackingMode.value != "3D_COCKPIT") {
+            return Pair(baseLat, baseLon)
+        }
+        val offsetM = currentLaneOffsetMeters
+        if (abs(offsetM) < 0.005) return Pair(baseLat, baseLon)
+
+        // Vector unitario perpendicular derecho a `bearingDeg`: (North = -sin(H), East = +cos(H))
+        val rad = Math.toRadians(bearingDeg)
+        val northOffsetM = -offsetM * sin(rad)
+        val eastOffsetM = offsetM * cos(rad)
+        val cosLat = cos(Math.toRadians(baseLat)).coerceAtLeast(0.15)
+        return Pair(
+            baseLat + (northOffsetM / METERS_PER_DEG_LAT),
+            baseLon + (eastOffsetM / (METERS_PER_DEG_LAT * cosLat))
         )
     }
 
@@ -606,7 +663,7 @@ object LocationEngine {
             }
         }
 
-        // ── 5. Evaluación suave de posición respecto al GPS ──
+        // ── 5. Evaluación suave de posición respecto al GPS y Cuantización Inteligente de Carril ──
         if (!hasSimState) {
             hasSimState = true
             simLat = loc.latitude
@@ -616,10 +673,16 @@ object LocationEngine {
             currentSimSpeedMps = groundMps
             lonErrorMeters = 0.0
             latErrorMeters = 0.0
+            activeLaneIndex = 0
+            targetLaneOffsetMeters = 0.0
+            currentLaneOffsetMeters = 0.0
+            laneLateralVelocityMps = 0.0
+            filteredRoadAxisLatOffsetM = 0.0
+            val (laneLat, laneLon) = applyLateralLaneCenterOffset(simLat, simLon, simBearingDeg)
             dispatchToListeners(
                 baseLoc = loc,
-                lat = simLat,
-                lon = simLon,
+                lat = laneLat,
+                lon = laneLon,
                 bearing = simBearingDeg,
                 speedKmH = calibratedSpeedKmH,
                 animMs = 0L
@@ -637,6 +700,11 @@ object LocationEngine {
                 targetBearingDeg = measuredBearingDeg
                 lonErrorMeters = 0.0
                 latErrorMeters = 0.0
+                activeLaneIndex = 0
+                targetLaneOffsetMeters = 0.0
+                currentLaneOffsetMeters = 0.0
+                laneLateralVelocityMps = 0.0
+                filteredRoadAxisLatOffsetM = 0.0
             } else {
                 val radSim = Math.toRadians(simBearingDeg)
                 val cosSim = cos(radSim)
@@ -644,8 +712,44 @@ object LocationEngine {
                 val newLonErr = northDiffM * cosSim + eastDiffM * sinSim
                 val newLatErr = -northDiffM * sinSim + eastDiffM * cosSim
 
+                // Medir desplazamiento lateral respecto a la línea central de la vía / ruta para detectar en cuál de los 3 carriles va el auto:
+                // Centros de carril a distancia exacta LANE_WIDTH_METERS (3.50 m):
+                //   Carril Izquierdo (-1) = -3.50 m
+                //   Carril Central   ( 0) =  0.00 m
+                //   Carril Derecho   (+1) = +3.50 m
+                val routeCrossTrackM = computeActiveRouteCrossTrackMeters(loc.latitude, loc.longitude, simBearingDeg)
+                val rawLateralSignalM = routeCrossTrackM ?: newLatErr
+                filteredRoadAxisLatOffsetM = (filteredRoadAxisLatOffsetM * 0.62 + rawLateralSignalM * 0.38)
+                    .coerceIn(-LANE_WIDTH_METERS * 1.45, LANE_WIDTH_METERS * 1.45)
+
+                // Histéresis de cambio de carril (evita oscilar sobre la línea divisoria blanca a ±1.75 m)
+                val halfLane = LANE_WIDTH_METERS * 0.5 // 1.75 m (posición exacta de la línea divisoria)
+                val switchOutThreshold = halfLane + 0.45 // 2.20 m para saltar a carril lateral
+                val switchBackThreshold = halfLane - 0.35 // 1.40 m para regresar al carril central
+                activeLaneIndex = when (activeLaneIndex) {
+                    0 -> when {
+                        filteredRoadAxisLatOffsetM > switchOutThreshold -> 1
+                        filteredRoadAxisLatOffsetM < -switchOutThreshold -> -1
+                        else -> 0
+                    }
+                    1 -> when {
+                        filteredRoadAxisLatOffsetM < -switchOutThreshold -> -1
+                        filteredRoadAxisLatOffsetM < switchBackThreshold -> 0
+                        else -> 1
+                    }
+                    -1 -> when {
+                        filteredRoadAxisLatOffsetM > switchOutThreshold -> 1
+                        filteredRoadAxisLatOffsetM > -switchBackThreshold -> 0
+                        else -> -1
+                    }
+                    else -> 0
+                }
+                targetLaneOffsetMeters = activeLaneIndex * LANE_WIDTH_METERS
+
+                // El error lateral residual se calcula respecto al centro del carril activo para que el auto nunca pise las líneas divisorias
+                val residualLatErr = (newLatErr - currentLaneOffsetMeters).coerceIn(-12.0, 12.0)
                 lonErrorMeters = (lonErrorMeters * 0.45 + newLonErr * 0.55).coerceIn(-25.0, 25.0)
-                latErrorMeters = (latErrorMeters * 0.40 + newLatErr * 0.60).coerceIn(-15.0, 15.0)
+                latErrorMeters = (latErrorMeters * 0.48 + residualLatErr * 0.52).coerceIn(-12.0, 12.0)
             }
         }
 
@@ -719,6 +823,44 @@ object LocationEngine {
         return if (abs(shortestAngleDeltaDeg(currentTargetBearing, segBearing)) <= 105.0) {
             segBearing
         } else null
+    }
+
+    /**
+     * Calcula la distancia lateral firmada (en metros) desde la ubicación GPS real hasta el eje central
+     * del segmento de carretera activo, permitiendo identificar con precisión milimétrica si el vehículo
+     * circula por el carril izquierdo (-3.50m), central (0.00m) o derecho (+3.50m).
+     */
+    private fun computeActiveRouteCrossTrackMeters(
+        gpsLat: Double,
+        gpsLon: Double,
+        headingDeg: Double
+    ): Double? {
+        if (!NavigationState.isRouteActive.value) return null
+        val pts = NavigationState.activeRoutePoints
+        if (pts.size < 2) return null
+
+        val cosLat = cos(Math.toRadians(gpsLat)).coerceAtLeast(0.15)
+        var bestIdx = -1
+        var bestDistM = Double.MAX_VALUE
+        val limit = minOf(pts.size - 1, 25)
+        for (i in 0 until limit) {
+            val p = pts[i]
+            val dN = (p.latitude() - gpsLat) * METERS_PER_DEG_LAT
+            val dE = (p.longitude() - gpsLon) * METERS_PER_DEG_LAT * cosLat
+            val d = hypot(dN, dE)
+            if (d < bestDistM) {
+                bestDistM = d
+                bestIdx = i
+            }
+        }
+        if (bestIdx < 0 || bestDistM > 14.0) return null
+
+        val a = pts[bestIdx]
+        val rad = Math.toRadians(headingDeg)
+        val dN = (gpsLat - a.latitude()) * METERS_PER_DEG_LAT
+        val dE = (gpsLon - a.longitude()) * METERS_PER_DEG_LAT * cosLat
+        // Componente perpendicular derecha respecto al rumbo de la vía
+        return (-dN * sin(rad) + dE * cos(rad)).coerceIn(-LANE_WIDTH_METERS * 1.5, LANE_WIDTH_METERS * 1.5)
     }
 
     private fun dispatchToListeners(

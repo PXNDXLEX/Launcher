@@ -369,24 +369,31 @@ fun NavigationMap(
     val isPortraitMode = configuration.screenHeightDp > configuration.screenWidthDp
     val isPortraitRef = rememberUpdatedState(isPortraitMode)
 
-    // Helper unificado para cámara de persecución 3D (posiciona el auto y sus luces en el tercio inferior sobre el dock)
+    val mapTrackingMode = AppSettings.mapTrackingMode.value
+    val mapTrackingModeRef = rememberUpdatedState(mapTrackingMode)
+    val isAerialArrowTracking = mapTrackingMode == "2D_AERIAL_ARROW"
+
+    // Helper unificado para cámara de seguimiento (3D Cockpit en medio del carril vs Aéreo 2D con Flecha Moderna)
     fun buildChaseFollowState() = run {
         val portrait = isPortraitRef.value
-        val topPad = if (portrait) {
-            (screenHeightPxRef.value * 0.35).coerceAtLeast(160.0)
-        } else {
-            (screenHeightPxRef.value * 0.46).coerceAtLeast(140.0)
+        val isAerialFollow = mapTrackingModeRef.value == "2D_AERIAL_ARROW"
+        val topPad = when {
+            isAerialFollow && portrait -> (screenHeightPxRef.value * 0.24).coerceAtLeast(110.0)
+            isAerialFollow && !portrait -> (screenHeightPxRef.value * 0.28).coerceAtLeast(100.0)
+            portrait -> (screenHeightPxRef.value * 0.35).coerceAtLeast(160.0)
+            else -> (screenHeightPxRef.value * 0.46).coerceAtLeast(140.0)
         }
-        val botPad = if (portrait) {
-            maxOf(screenHeightPxRef.value * 0.11, bottomInsetRef.value)
-        } else {
-            maxOf(screenHeightPxRef.value * 0.04, bottomInsetRef.value)
+        val botPad = when {
+            isAerialFollow -> maxOf(screenHeightPxRef.value * 0.08, bottomInsetRef.value)
+            portrait -> maxOf(screenHeightPxRef.value * 0.11, bottomInsetRef.value)
+            else -> maxOf(screenHeightPxRef.value * 0.04, bottomInsetRef.value)
         }
-        val targetPitch = if (portrait) 65.0 else 67.5
+        val targetPitch = if (isAerialFollow) 0.0 else if (portrait) 65.0 else 67.5
+        val targetZoom = if (isAerialFollow) 17.35 else 19.75
         mapView.viewport.makeFollowPuckViewportState(
             FollowPuckViewportStateOptions.Builder()
                 .pitch(targetPitch)
-                .zoom(19.75)
+                .zoom(targetZoom)
                 .bearing(com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateBearing.SyncWithLocationPuck)
                 .padding(com.mapbox.maps.EdgeInsets(topPad, leftInsetRef.value, botPad, rightInsetRef.value))
                 .build()
@@ -414,26 +421,29 @@ fun NavigationMap(
     var isSearching      by remember { mutableStateOf(false) }
     var isStyleTransitioning by remember { mutableStateOf(false) }
 
-    // Helper directo de cámara 3D para sincronización VSYNC instantánea sin animadores en conflicto
+    // Helper directo de cámara de seguimiento (3D Cockpit o Aéreo 2D con Flecha) para sincronización VSYNC instantánea
     fun buildChaseCameraOptions(
         centerPt: Point? = motionState.lastIndicatorPos,
         bearingDeg: Double = motionState.gpsBearing
     ): CameraOptions {
         val portrait = isPortraitRef.value
-        val topPad = if (portrait) {
-            (screenHeightPxRef.value * 0.35).coerceAtLeast(160.0)
-        } else {
-            (screenHeightPxRef.value * 0.46).coerceAtLeast(140.0)
+        val isAerialFollow = mapTrackingModeRef.value == "2D_AERIAL_ARROW"
+        val topPad = when {
+            isAerialFollow && portrait -> (screenHeightPxRef.value * 0.24).coerceAtLeast(110.0)
+            isAerialFollow && !portrait -> (screenHeightPxRef.value * 0.28).coerceAtLeast(100.0)
+            portrait -> (screenHeightPxRef.value * 0.35).coerceAtLeast(160.0)
+            else -> (screenHeightPxRef.value * 0.46).coerceAtLeast(140.0)
         }
-        val botPad = if (portrait) {
-            maxOf(screenHeightPxRef.value * 0.11, bottomInsetRef.value)
-        } else {
-            maxOf(screenHeightPxRef.value * 0.04, bottomInsetRef.value)
+        val botPad = when {
+            isAerialFollow -> maxOf(screenHeightPxRef.value * 0.08, bottomInsetRef.value)
+            portrait -> maxOf(screenHeightPxRef.value * 0.11, bottomInsetRef.value)
+            else -> maxOf(screenHeightPxRef.value * 0.04, bottomInsetRef.value)
         }
-        val targetPitch = if (portrait) 65.0 else 67.5
+        val targetPitch = if (isAerialFollow) 0.0 else if (portrait) 65.0 else 67.5
+        val targetZoom = if (isAerialFollow) 17.35 else 19.75
         return cameraOptions {
             if (centerPt != null) center(centerPt)
-            zoom(19.75)
+            zoom(targetZoom)
             pitch(targetPitch)
             bearing(bearingDeg)
             padding(com.mapbox.maps.EdgeInsets(topPad, leftInsetRef.value, botPad, rightInsetRef.value))
@@ -461,6 +471,7 @@ fun NavigationMap(
 
     // Escala efectiva de las luces sincronizada con el tamaño 3D del vehículo (0.300) y el modo Aéreo 2D / 3D
     fun computeEffectiveGlowIconSize(): Double {
+        if (mapTrackingModeRef.value == "2D_AERIAL_ARROW") return 0.0
         val modelScaleFactor = (AppSettings.vehicle3DScale.value / 0.042f).coerceIn(1.0f, 8.5f)
         val aerialFactor = if (isAerialExploreMode) 0.14f else 1.0f
         return (AppSettings.glowIconSize.value * modelScaleFactor * aerialFactor).toDouble()
@@ -631,7 +642,8 @@ fun NavigationMap(
                     listOf(
                         "cockpit-ground-base", "3d-buildings", "3d-buildings-roof", "building-glow",
                         "custom-green-areas", "custom-water", "custom-landcover",
-                        "custom-roads-casing", "custom-roads", "custom-roads-lane-dashes"
+                        "custom-roads-casing", "custom-roads",
+                        "custom-roads-lane-dashes", "custom-roads-lane-dashes-left", "custom-roads-lane-dashes-right"
                     ).forEach { layerId ->
                         try {
                             if (loadedStyle.styleLayerExists(layerId)) loadedStyle.removeStyleLayer(layerId)
@@ -731,7 +743,7 @@ fun NavigationMap(
                     val casingOpacity = if (style == "NEON") 0.90 else 0.96
                     val dashColor = if (isNightMode) "#E6F0FF" else "#FFFFFF"
 
-                    // 3A. Líneas exteriores / bordillos de la carretera (Casing ancho)
+                    // 3A. Líneas exteriores / bordillos de la carretera de 3 carriles (Casing ancho)
                     try {
                         val casingLayer = lineLayer("custom-roads-casing", "composite") {
                             sourceLayer("road")
@@ -739,10 +751,10 @@ fun NavigationMap(
                             lineWidth(
                                 Expression.interpolate(
                                     Expression.linear(), Expression.zoom(),
-                                    Expression.literal(12.0), Expression.literal(5.2),
-                                    Expression.literal(15.5), Expression.literal(18.0),
-                                    Expression.literal(18.0), Expression.literal(56.0),
-                                    Expression.literal(20.0), Expression.literal(138.0)
+                                    Expression.literal(12.0), Expression.literal(5.4),
+                                    Expression.literal(15.5), Expression.literal(20.0),
+                                    Expression.literal(18.0), Expression.literal(66.0),
+                                    Expression.literal(20.0), Expression.literal(162.0)
                                 )
                             )
                             lineOpacity(casingOpacity)
@@ -753,7 +765,7 @@ fun NavigationMap(
                         else loadedStyle.addLayer(casingLayer)
                     } catch (_: Exception) {}
 
-                    // 3B. Cuerpo de asfalto 3D
+                    // 3B. Cuerpo de asfalto 3D para 3 carriles bien proporcionados
                     try {
                         val roadSurfaceLayer = lineLayer("custom-roads", "composite") {
                             sourceLayer("road")
@@ -761,10 +773,10 @@ fun NavigationMap(
                             lineWidth(
                                 Expression.interpolate(
                                     Expression.linear(), Expression.zoom(),
-                                    Expression.literal(12.0), Expression.literal(3.8),
-                                    Expression.literal(15.5), Expression.literal(14.5),
-                                    Expression.literal(18.0), Expression.literal(48.0),
-                                    Expression.literal(20.0), Expression.literal(124.0)
+                                    Expression.literal(12.0), Expression.literal(4.0),
+                                    Expression.literal(15.5), Expression.literal(16.5),
+                                    Expression.literal(18.0), Expression.literal(58.0),
+                                    Expression.literal(20.0), Expression.literal(148.0)
                                 )
                             )
                             lineCap(LineCap.ROUND)
@@ -774,26 +786,60 @@ fun NavigationMap(
                         else loadedStyle.addLayer(roadSurfaceLayer)
                     } catch (_: Exception) {}
 
-                    // 3C. Líneas divisorias blancas discontinuas en el centro de los carriles
+                    // 3C. Dos líneas divisorias blancas discontinuas a ±1/6 del ancho de la calzada (delimitan 3 carriles:
+                    //     Carril Izquierdo [-3.5m], Carril Central [0.0m] y Carril Derecho [+3.5m]),
+                    //     de modo que el modelo 3D del auto siempre viaja EN EL MEDIO del carril entre las dos líneas blancas.
                     try {
-                        val laneDashLayer = lineLayer("custom-roads-lane-dashes", "composite") {
+                        val dashWidthExpr = Expression.interpolate(
+                            Expression.linear(), Expression.zoom(),
+                            Expression.literal(14.5), Expression.literal(0.9),
+                            Expression.literal(17.5), Expression.literal(2.2),
+                            Expression.literal(20.0), Expression.literal(4.0)
+                        )
+                        val leftLaneOffsetExpr = Expression.interpolate(
+                            Expression.linear(), Expression.zoom(),
+                            Expression.literal(14.5), Expression.literal(-1.8),
+                            Expression.literal(16.5), Expression.literal(-4.8),
+                            Expression.literal(18.0), Expression.literal(-9.8),
+                            Expression.literal(20.0), Expression.literal(-24.5)
+                        )
+                        val rightLaneOffsetExpr = Expression.interpolate(
+                            Expression.linear(), Expression.zoom(),
+                            Expression.literal(14.5), Expression.literal(1.8),
+                            Expression.literal(16.5), Expression.literal(4.8),
+                            Expression.literal(18.0), Expression.literal(9.8),
+                            Expression.literal(20.0), Expression.literal(24.5)
+                        )
+
+                        val leftLaneDashLayer = lineLayer("custom-roads-lane-dashes-left", "composite") {
                             sourceLayer("road")
+                            minZoom(14.5)
                             lineColor(dashColor)
-                            lineOpacity(0.92)
-                            lineDasharray(listOf(2.2, 2.6))
-                            lineWidth(
-                                Expression.interpolate(
-                                    Expression.linear(), Expression.zoom(),
-                                    Expression.literal(14.0), Expression.literal(1.0),
-                                    Expression.literal(17.5), Expression.literal(2.6),
-                                    Expression.literal(20.0), Expression.literal(4.6)
-                                )
-                            )
+                            lineOpacity(0.90)
+                            lineDasharray(listOf(2.4, 2.8))
+                            lineWidth(dashWidthExpr)
+                            lineOffset(leftLaneOffsetExpr)
                             lineCap(LineCap.BUTT)
                             lineJoin(LineJoin.ROUND)
                         }
-                        if (topSymbolLayerId != null) loadedStyle.addLayerBelow(laneDashLayer, topSymbolLayerId)
-                        else loadedStyle.addLayer(laneDashLayer)
+                        val rightLaneDashLayer = lineLayer("custom-roads-lane-dashes-right", "composite") {
+                            sourceLayer("road")
+                            minZoom(14.5)
+                            lineColor(dashColor)
+                            lineOpacity(0.90)
+                            lineDasharray(listOf(2.4, 2.8))
+                            lineWidth(dashWidthExpr)
+                            lineOffset(rightLaneOffsetExpr)
+                            lineCap(LineCap.BUTT)
+                            lineJoin(LineJoin.ROUND)
+                        }
+                        if (topSymbolLayerId != null) {
+                            loadedStyle.addLayerBelow(leftLaneDashLayer, topSymbolLayerId)
+                            loadedStyle.addLayerBelow(rightLaneDashLayer, topSymbolLayerId)
+                        } else {
+                            loadedStyle.addLayer(leftLaneDashLayer)
+                            loadedStyle.addLayer(rightLaneDashLayer)
+                        }
                     } catch (_: Exception) {}
 
                     // Edificios 3D únicamente en modo NEON (debajo de las calles)
@@ -910,7 +956,9 @@ fun NavigationMap(
                     AppSettings.customVehicleIconPath.value,
                     mapIconColor,
                     AppSettings.vehicle3DScale.value,
-                    isAerialMode = isAerialExploreMode
+                    isAerialMode = isAerialExploreMode,
+                    trackingMode = AppSettings.mapTrackingMode.value,
+                    isNightStyle = isNightMode
                 )
             }
 
@@ -1314,16 +1362,19 @@ fun NavigationMap(
         }
     }
 
-    // ── Reaccionar a cambios de tipo de vehículo, escala 3D, tamaño de luz o modo Aéreo 2D / 3D ──
+    // ── Reaccionar a cambios de tipo de vehículo, escala 3D, modo de seguimiento (3D vs Aéreo con Flecha) o tema Día/Noche ──
     LaunchedEffect(
         vehicleType,
         AppSettings.customVehicleIconPath.value,
         mapIconColor,
         AppSettings.vehicle3DScale.value,
         AppSettings.glowIconSize.value,
-        isAerialExploreMode
+        isAerialExploreMode,
+        mapTrackingMode,
+        currentStyle
     ) {
         if (!mapReady) return@LaunchedEffect
+        val isNightNow = currentStyle == "DARK" || currentStyle == "NEON"
         mapView.location.updateSettings {
             locationPuck = getVehiclePuck(
                 context,
@@ -1331,10 +1382,15 @@ fun NavigationMap(
                 AppSettings.customVehicleIconPath.value,
                 mapIconColor,
                 AppSettings.vehicle3DScale.value,
-                isAerialMode = isAerialExploreMode
+                isAerialMode = isAerialExploreMode,
+                trackingMode = mapTrackingMode,
+                isNightStyle = isNightNow
             )
         }
         pushGlowFeatureToMap(force = true)
+        if (isFollowingLocation && !isAerialExploreMode && !isIntroAnimating) {
+            smoothReturnToChaseCam(durationMs = 550L)
+        }
     }
 
     // ── UI ───────────────────────────────────────────────────────────────────
@@ -1357,7 +1413,9 @@ fun NavigationMap(
                         AppSettings.customVehicleIconPath.value,
                         AppSettings.mapIconColor.value,
                         AppSettings.vehicle3DScale.value,
-                        isAerialMode = isAerialExploreMode
+                        isAerialMode = isAerialExploreMode,
+                        trackingMode = AppSettings.mapTrackingMode.value,
+                        isNightStyle = (currentStyle == "DARK" || currentStyle == "NEON")
                     )
                 }
                 pushGlowFeatureToMap(force = true)
@@ -1524,9 +1582,9 @@ fun NavigationMap(
             }
         )
 
-        // ── Horizonte Cielo + Silueta de Ciudad 3D (Acotado a la franja superior del cielo, sin neblina sobre las calles) ──
+        // ── Horizonte Cielo + Silueta de Ciudad 3D (Acotado a la franja superior del cielo en modo 3D Cockpit) ──
         val horizonAlpha by animateFloatAsState(
-            targetValue = if (isFollowingLocation && !isAerialExploreMode && !isIntroAnimating && currentStyle != "SATELLITE") 1f else 0f,
+            targetValue = if (isFollowingLocation && !isAerialExploreMode && !isAerialArrowTracking && !isIntroAnimating && currentStyle != "SATELLITE") 1f else 0f,
             animationSpec = tween(durationMillis = 380),
             label = "horizonSkyAlpha"
         )
@@ -3213,15 +3271,35 @@ suspend fun searchPlaces(query: String, currentLoc: android.location.Location?):
     } catch (e: Exception) { emptyList() }
 }
 
-// ── Helper para LocationPuck (3D protagonista en Chase Cam y compacto en Vista Aérea 2D) ─────────
+// ── Helper para LocationPuck (3D protagonista en Chase Cam, compacto en Exploración Aérea y Flecha Moderna en Seguimiento Aéreo) ──
 fun getVehiclePuck(
     context: Context,
     vehicleType: String,
     customPath: String,
     mapIconColor: Int,
     scale: Float = 0.300f,
-    isAerialMode: Boolean = false
+    isAerialMode: Boolean = false,
+    trackingMode: String = AppSettings.mapTrackingMode.value,
+    isNightStyle: Boolean = (AppSettings.mapStyle.value == "DARK" || AppSettings.mapStyle.value == "NEON")
 ): com.mapbox.maps.plugin.LocationPuck {
+    // Si el modo definitivo seleccionado en Ajustes es "2D_AERIAL_ARROW", usamos siempre la Flecha de Navegación Moderna
+    // sin cargar el modelo 3D ni el icono personalizado de auto, adaptada a Modo Día y Modo Noche.
+    if (trackingMode == "2D_AERIAL_ARROW" || vehicleType == "FLECHA") {
+        val arrowBmp = drawModernNavigationArrowBitmap(
+            isNightStyle = isNightStyle,
+            isExploreZoom = isAerialMode
+        )
+        return com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck(withBearing = true).apply {
+            bearingImage = com.mapbox.maps.ImageHolder.from(arrowBmp)
+            topImage = com.mapbox.maps.ImageHolder.from(
+                Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+            )
+            shadowImage = com.mapbox.maps.ImageHolder.from(
+                Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+            )
+        }
+    }
+
     val modelAsset = when (vehicleType) {
         "SEDAN"     -> "asset://models/Sedan.glb"
         "HATCHBACK" -> "asset://models/Hatchback.glb"
@@ -3261,6 +3339,117 @@ fun getVehiclePuck(
     return com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck(withBearing = true).apply {
         bearingImage = com.mapbox.maps.ImageHolder.from(bmp)
     }
+}
+
+/**
+ * Dibuja la Flecha de Navegación Moderna para el modo de Seguimiento Aéreo (`2D_AERIAL_ARROW`):
+ *  - Combina con Modo Día (azul cobalto / cian zafiro con disco cristalino blanco y sombra suave)
+ *    y Modo Noche (turquesa esmeralda / cian neón con núcleo oscuro y halo luminoso).
+ *  - Geometría tipo chevron aerodinámico de doble faceta (izquierda iluminada, derecha sombreada)
+ *    sin utilizar ningún icono de auto personalizado.
+ */
+fun drawModernNavigationArrowBitmap(
+    isNightStyle: Boolean,
+    isExploreZoom: Boolean = false
+): Bitmap {
+    val size = if (isExploreZoom) 118 else 148
+    val cx = size / 2f
+    val cy = size / 2f
+    val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(b)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // 1. Halo exterior difuminado
+    val haloRadius = size * 0.45f
+    val haloCore = if (isNightStyle) {
+        android.graphics.Color.argb(115, 0, 238, 190)
+    } else {
+        android.graphics.Color.argb(95, 26, 107, 255)
+    }
+    p.style = Paint.Style.FILL
+    p.shader = RadialGradient(
+        cx, cy, haloRadius,
+        intArrayOf(haloCore, android.graphics.Color.TRANSPARENT),
+        floatArrayOf(0.25f, 1f),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(cx, cy, haloRadius, p)
+    p.shader = null
+
+    // 2. Disco base estilo cápsula radar con borde luminoso
+    val discRadius = size * 0.31f
+    p.setShadowLayer(size * 0.06f, 0f, size * 0.025f, 0x88000000.toInt())
+    p.color = if (isNightStyle) {
+        android.graphics.Color.parseColor("#0D1536")
+    } else {
+        android.graphics.Color.parseColor("#FFFFFF")
+    }
+    canvas.drawCircle(cx, cy, discRadius, p)
+    p.clearShadowLayer()
+
+    // Anillo perimetral del disco
+    p.style = Paint.Style.STROKE
+    p.strokeWidth = size * 0.028f
+    p.color = if (isNightStyle) {
+        android.graphics.Color.parseColor("#38F2A6")
+    } else {
+        android.graphics.Color.parseColor("#2563EB")
+    }
+    canvas.drawCircle(cx, cy, discRadius, p)
+    p.style = Paint.Style.FILL
+
+    // 3. Flecha chevron de doble faceta 3D apuntando al frente (Norte del bitmap)
+    val tipY = cy - size * 0.23f
+    val wingY = cy + size * 0.16f
+    val notchY = cy + size * 0.06f
+    val wingSpread = size * 0.175f
+
+    // Faceta izquierda (más brillante)
+    val leftFacet = Path().apply {
+        moveTo(cx, tipY)
+        lineTo(cx - wingSpread, wingY)
+        lineTo(cx, notchY)
+        close()
+    }
+    p.shader = LinearGradient(
+        cx, tipY, cx - wingSpread, wingY,
+        if (isNightStyle) android.graphics.Color.parseColor("#5CFFD0") else android.graphics.Color.parseColor("#3B82F6"),
+        if (isNightStyle) android.graphics.Color.parseColor("#00D4FF") else android.graphics.Color.parseColor("#1D4ED8"),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawPath(leftFacet, p)
+
+    // Faceta derecha (contraste de profundidad)
+    val rightFacet = Path().apply {
+        moveTo(cx, tipY)
+        lineTo(cx + wingSpread, wingY)
+        lineTo(cx, notchY)
+        close()
+    }
+    p.shader = LinearGradient(
+        cx, tipY, cx + wingSpread, wingY,
+        if (isNightStyle) android.graphics.Color.parseColor("#1EE3A8") else android.graphics.Color.parseColor("#1D4ED8"),
+        if (isNightStyle) android.graphics.Color.parseColor("#008CFF") else android.graphics.Color.parseColor("#1E3A8A"),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawPath(rightFacet, p)
+    p.shader = null
+
+    // Contorno nítido de la flecha
+    val fullArrow = Path().apply {
+        moveTo(cx, tipY)
+        lineTo(cx + wingSpread, wingY)
+        lineTo(cx, notchY)
+        lineTo(cx - wingSpread, wingY)
+        close()
+    }
+    p.style = Paint.Style.STROKE
+    p.strokeWidth = size * 0.018f
+    p.strokeJoin = Paint.Join.ROUND
+    p.color = if (isNightStyle) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#EFF6FF")
+    canvas.drawPath(fullArrow, p)
+
+    return b
 }
 
 // ── Helpers de dibujo (fallback 2D) ───────────────────────────────────────

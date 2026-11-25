@@ -31,6 +31,8 @@ object AppSettings {
     val digitalClockStyle = mutableStateOf(0)
     // Modo de animación climática en el mapa ("AUTO", "RAIN", "WIND", "STORM", "CLEAR", "CLOUDS", "SNOW", "OFF")
     val mapWeatherMode = mutableStateOf("AUTO")
+    // Modo definitivo de seguimiento en el mapa: "3D_COCKPIT" (Auto 3D en carril) vs "2D_AERIAL_ARROW" (Aérea con Flecha de Navegación)
+    val mapTrackingMode = mutableStateOf("3D_COCKPIT")
 
     // Personalización de la tarjeta principal del vehículo (Home Bento)
     val userName = mutableStateOf("Lorena")
@@ -82,6 +84,7 @@ object AppSettings {
         navPanelPercent.value = p.getFloat("navPanelPercent", 38f).coerceIn(25f, 50f)
         digitalClockStyle.value = p.getInt("digitalClockStyle", 0).coerceIn(0, 5)
         mapWeatherMode.value = p.getString("mapWeatherMode", "AUTO") ?: "AUTO"
+        mapTrackingMode.value = p.getString("mapTrackingMode", "3D_COCKPIT") ?: "3D_COCKPIT"
 
         userName.value = p.getString("userName", "Lorena") ?: "Lorena"
         carBrandName.value = p.getString("carBrandName", "KIA") ?: "KIA"
@@ -143,6 +146,11 @@ object AppSettings {
     fun setMapWeatherMode(mode: String) {
         mapWeatherMode.value = mode
         prefs?.edit()?.putString("mapWeatherMode", mode)?.apply()
+    }
+
+    fun setMapTrackingMode(mode: String) {
+        mapTrackingMode.value = mode
+        prefs?.edit()?.putString("mapTrackingMode", mode)?.apply()
     }
 
     fun setSpeedoColor(color: Int) {
