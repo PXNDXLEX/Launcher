@@ -95,6 +95,8 @@ import com.mapbox.maps.plugin.gestures.gestures
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin
 import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.compass.compass
+import com.mapbox.maps.plugin.scalebar.scalebar
 import com.mapbox.maps.plugin.viewport.data.FollowPuckViewportStateOptions
 import com.mapbox.maps.plugin.viewport.data.OverviewViewportStateOptions
 import com.mapbox.maps.plugin.viewport.viewport
@@ -181,6 +183,7 @@ private const val CAR_HEADLIGHTS_SOURCE_ID = "car-headlights-source"
 private const val CAR_HEADLIGHTS_LAYER_ID  = "car-headlights-layer"
 private const val CAR_TAILLIGHTS_SOURCE_ID = "car-taillights-source"
 private const val CAR_TAILLIGHTS_LAYER_ID  = "car-taillights-layer"
+private const val CAR_SHADOW_LAYER_ID      = "car-contact-shadow-layer"
 private const val BUILDING_FACADE_IMAGE_ID = "building-facade-windows"
 
 private class MapInternalMotionState {
@@ -357,10 +360,14 @@ fun NavigationMap(
     )
 
     val currentStyle = AppSettings.mapStyle.value
-    // Ruta tipo alfombra de carril luminosa verde esmeralda (idéntica a la guía de carril 3D)
+    // Trazado de ruta en azul vibrante de alto contraste (o verde neón en modo NEON)
     val routeColorHex = when (currentStyle) {
         "NEON" -> "#00FFA6"
-        else   -> "#38F8A8"
+        else   -> "#007AFF"
+    }
+    val routeCasingHex = when (currentStyle) {
+        "NEON" -> "#00E676"
+        else   -> "#3898FF"
     }
 
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx().toDouble() }
@@ -477,11 +484,9 @@ fun NavigationMap(
         return (AppSettings.glowIconSize.value * modelScaleFactor * aerialFactor).toDouble()
     }
 
-    // Actualiza la posición, rotación y tamaño de los faros y luces traseras usando referencia en caché
+    // Actualiza la posición, rotación y tamaño de la sombra de contacto 3D (Día/Noche) y faros/luces (Noche)
     fun pushGlowFeatureToMap(force: Boolean = false) {
-        val styleName = AppSettings.mapStyle.value
-        val isNight = (styleName == "DARK" || styleName == "NEON")
-        if (!isNight || !mapReady) return
+        if (!mapReady) return
         val nowMs = android.os.SystemClock.elapsedRealtime()
         if (!force && (nowMs - motionState.lastGlowUpdateMs < 48L)) return
         motionState.lastGlowUpdateMs = nowMs
@@ -672,22 +677,22 @@ fun NavigationMap(
                         } catch (_: Exception) {}
                     }
 
-                    // 1. Paleta exacta de referencia en Modo Día (bloques #EAECEF, parques #B8E096, ríos #A8D4FF)
+                    // 1. Mayor profundidad y contraste en Modo Día (suelo con relieve #E1E7F0, parques verdes vivos #82DA68, agua #82C4FF)
                     //    y Royal Indigo / Neon en Modo Noche:
                     val baseGroundHex = when (style) {
                         "NEON"  -> "#07061C"
-                        "DARK"  -> "#232584"
-                        else    -> "#EAECEF" // Bloques urbanos gris plata suave idéntico a la imagen de referencia
+                        "DARK"  -> "#1A1E52"
+                        else    -> "#E1E7F0" // Suelo urbano con mayor contraste y profundidad
                     }
                     val waterHex = when (style) {
                         "NEON"  -> "#040414"
-                        "DARK"  -> "#161960"
-                        else    -> "#A8D4FF" // Ríos y canales azul celeste pastel idéntico a la referencia
+                        "DARK"  -> "#121642"
+                        else    -> "#7EC0F8" // Ríos y canales azul vibrante
                     }
                     val greenColor = when (style) {
                         "NEON"  -> "#0A001E"
-                        "DARK"  -> "#1D2074"
-                        else    -> "#B8E096" // Parques y manzanas verdes salvia fresca idéntico a la referencia
+                        "DARK"  -> "#162A3E"
+                        else    -> "#84DC6C" // Áreas verdes más vivas y naturales como en la propuesta comercial
                     }
 
                     // Buscar la primera etiqueta de texto/nombre de calle para dibujar suelo y calles justo debajo de los nombres
@@ -729,25 +734,23 @@ fun NavigationMap(
                         }
                     } catch (_: Exception) {}
 
-                    // 3. Calles y Avenidas de Gran Escala:
-                    //    En Modo Día sigue la paleta de la imagen: calles locales blancas (#FFFFFF) con borde suave (#DDE1E7)
-                    //    y avenidas principales / autopistas en amarillo-ámbar cálido (#F6C364) con borde dorado (#E4AF4E).
+                    // 3. Calles y Avenidas de Gran Escala con relieve y guías definidas:
                     val isDayStyle = style == "LIGHT"
                     val roadColor = when (style) {
                         "NEON" -> "#0D1030"
-                        "DARK" -> "#282C94"
-                        else   -> "#FFFFFF" // Calles locales blancas puras como en la referencia
+                        "DARK" -> "#242968"
+                        else   -> "#F8FAFC" // Calzada clara con contraste limpio frente al suelo y edificios 3D
                     }
 
                     val casingColor = when (style) {
                         "NEON" -> "#00FFFF"
-                        "DARK" -> "#F4F8FF"
-                        else   -> "#DCE0E6" // Borde sutil para que las calles blancas destaquen sobre los bloques #EAECEF
+                        "DARK" -> "#4D68B8"
+                        else   -> "#B0BDD0" // Bordillo con relieve definido en Modo Día
                     }
                     val casingOpacity = if (style == "NEON") 0.90 else 0.96
                     val dashColor = when (style) {
                         "NEON", "DARK" -> "#E6F0FF"
-                        else           -> "#CBD5E1" // Guías de carril gris perla sobre calle blanca y blancas sobre avenida ámbar
+                        else           -> "#94A3B8" // Líneas divisorias de carril nítidas en Modo Día
                     }
 
                     // 3A. Líneas exteriores / bordillos de las calles de 3 carriles (Casing ancho)
@@ -793,7 +796,7 @@ fun NavigationMap(
                         else loadedStyle.addLayer(roadSurfaceLayer)
                     } catch (_: Exception) {}
 
-                    // 3B-2. Avenidas Principales y Autopistas en Amarillo-Ámbar Cálido (#F6C364) en Modo Día (idéntico a la imagen)
+                    // 3B-2. Avenidas Principales y Autopistas con realce azul/ámbar en Modo Día
                     if (isDayStyle) {
                         val majorHighwayFilter = Expression.match(
                             Expression.get("class"),
@@ -810,23 +813,24 @@ fun NavigationMap(
                             val hwCasingLayer = lineLayer("custom-roads-highway-casing", "composite") {
                                 sourceLayer("road")
                                 filter(majorHighwayFilter)
-                                lineColor("#E5B04D")
+                                lineColor("#2574E8")
                                 lineWidth(
                                     Expression.interpolate(
                                         Expression.linear(), Expression.zoom(),
-                                        Expression.literal(11.0), Expression.literal(4.6),
-                                        Expression.literal(15.5), Expression.literal(21.5),
-                                        Expression.literal(18.0), Expression.literal(68.0),
-                                        Expression.literal(20.0), Expression.literal(164.0)
+                                        Expression.literal(11.0), Expression.literal(4.8),
+                                        Expression.literal(15.5), Expression.literal(22.0),
+                                        Expression.literal(18.0), Expression.literal(69.0),
+                                        Expression.literal(20.0), Expression.literal(165.0)
                                     )
                                 )
+                                lineOpacity(0.85)
                                 lineCap(LineCap.ROUND)
                                 lineJoin(LineJoin.ROUND)
                             }
                             val hwSurfaceLayer = lineLayer("custom-roads-highway", "composite") {
                                 sourceLayer("road")
                                 filter(majorHighwayFilter)
-                                lineColor("#F6C364") // Amarillo-naranja suave de la imagen de referencia
+                                lineColor("#FFFFFF")
                                 lineWidth(
                                     Expression.interpolate(
                                         Expression.linear(), Expression.zoom(),
@@ -849,9 +853,7 @@ fun NavigationMap(
                         } catch (_: Exception) {}
                     }
 
-                    // 3C. Dos líneas divisorias discontinuas a ±1/6 del ancho de la calzada (delimitan 3 carriles:
-                    //     Carril Izquierdo [-3.5m], Carril Central [0.0m] y Carril Derecho [+3.5m]),
-                    //     de modo que el modelo 3D del auto siempre viaja EN EL MEDIO del carril entre las dos líneas.
+                    // 3C. Dos líneas divisorias discontinuas a ±1/6 del ancho de la calzada (delimitan 3 carriles)
                     try {
                         val dashWidthExpr = Expression.interpolate(
                             Expression.linear(), Expression.zoom(),
@@ -873,23 +875,11 @@ fun NavigationMap(
                             Expression.literal(18.0), Expression.literal(9.8),
                             Expression.literal(20.0), Expression.literal(24.5)
                         )
-                        val laneDashColorExpr = if (isDayStyle) {
-                            Expression.match(
-                                Expression.get("class"),
-                                Expression.literal("motorway"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
-                                Expression.literal("trunk"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
-                                Expression.literal("primary"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
-                                Expression.literal("secondary"), Expression.color(android.graphics.Color.parseColor("#FFFDF7")),
-                                Expression.color(android.graphics.Color.parseColor("#CBD5E1"))
-                            )
-                        } else {
-                            Expression.color(android.graphics.Color.parseColor(dashColor))
-                        }
 
                         val leftLaneDashLayer = lineLayer("custom-roads-lane-dashes-left", "composite") {
                             sourceLayer("road")
                             minZoom(14.5)
-                            lineColor(laneDashColorExpr)
+                            lineColor(dashColor)
                             lineOpacity(if (isDayStyle) 0.85 else 0.90)
                             lineDasharray(listOf(2.4, 2.8))
                             lineWidth(dashWidthExpr)
@@ -900,7 +890,7 @@ fun NavigationMap(
                         val rightLaneDashLayer = lineLayer("custom-roads-lane-dashes-right", "composite") {
                             sourceLayer("road")
                             minZoom(14.5)
-                            lineColor(laneDashColorExpr)
+                            lineColor(dashColor)
                             lineOpacity(if (isDayStyle) 0.85 else 0.90)
                             lineDasharray(listOf(2.4, 2.8))
                             lineWidth(dashWidthExpr)
@@ -917,38 +907,60 @@ fun NavigationMap(
                         }
                     } catch (_: Exception) {}
 
-                    // Edificios 3D únicamente en modo NEON (debajo de las calles)
-                    if (style == "NEON") {
-                        try {
-                            loadedStyle.addLayerBelow(fillExtrusionLayer("3d-buildings", "composite") {
-                                sourceLayer("building")
-                                filter(Expression.eq(Expression.get("extrude"), Expression.literal("true")))
-                                minZoom(15.0)
-                                fillExtrusionColor("#090514")
-                                fillExtrusionHeight(Expression.product(Expression.get("height"), Expression.literal(1.8)))
-                                fillExtrusionBase(Expression.product(Expression.get("min_height"), Expression.literal(1.8)))
-                                fillExtrusionOpacity(0.75)
-                            }, "custom-roads-casing")
-                        } catch (_: Exception) {}
-                    }
+                    // 4. Edificios 3D sutiles con relieve arquitectónico (en Modo Día, Noche y Neon, debajo de las calles)
+                    try {
+                        val buildingColorHex = when (style) {
+                            "NEON" -> "#090514"
+                            "DARK" -> "#151D48"
+                            else   -> "#B4C1D4" // Bloques 3D translúcidos gris-azulado suave como en la imagen de propuesta
+                        }
+                        val buildingOpacity = when (style) {
+                            "NEON" -> 0.76
+                            "DARK" -> 0.64
+                            else   -> 0.56
+                        }
+                        val heightScale = if (style == "LIGHT") 1.35 else 1.65
+                        loadedStyle.addLayerBelow(fillExtrusionLayer("3d-buildings", "composite") {
+                            sourceLayer("building")
+                            minZoom(14.5)
+                            fillExtrusionColor(buildingColorHex)
+                            fillExtrusionHeight(
+                                Expression.interpolate(
+                                    Expression.linear(), Expression.zoom(),
+                                    Expression.literal(14.5), Expression.literal(0.0),
+                                    Expression.literal(15.6), Expression.product(
+                                        Expression.coalesce(Expression.get("height"), Expression.literal(12.0)),
+                                        Expression.literal(heightScale)
+                                    )
+                                )
+                            )
+                            fillExtrusionBase(
+                                Expression.product(
+                                    Expression.coalesce(Expression.get("min_height"), Expression.literal(0.0)),
+                                    Expression.literal(heightScale)
+                                )
+                            )
+                            fillExtrusionOpacity(buildingOpacity)
+                        }, "custom-roads-casing")
+                    } catch (_: Exception) {}
 
                 } catch (e: Exception) {}
             }
 
-            // ── Capas de Ruta Visuales (Alfombra luminosa de carril 3D) ──────
+            // ── Capas de Ruta Visuales (Trazado Azul Vibrante con Halo) ──────
             loadedStyle.addLayer(lineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID) {
-                lineColor("#00E676")
+                lineColor(routeCasingHex)
                 lineWidth(
                     Expression.interpolate(
                         Expression.linear(), Expression.zoom(),
                         Expression.literal(13.0), Expression.literal(12.0),
-                        Expression.literal(17.5), Expression.literal(32.0),
-                        Expression.literal(20.0), Expression.literal(62.0)
+                        Expression.literal(17.5), Expression.literal(30.0),
+                        Expression.literal(20.0), Expression.literal(58.0)
                     )
                 )
                 lineCap(LineCap.ROUND)
                 lineJoin(LineJoin.ROUND)
-                lineOpacity(0.34)
+                lineOpacity(0.42)
             })
             loadedStyle.addLayer(lineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID) {
                 lineColor(routeColorHex)
@@ -956,13 +968,13 @@ fun NavigationMap(
                     Expression.interpolate(
                         Expression.linear(), Expression.zoom(),
                         Expression.literal(13.0), Expression.literal(7.0),
-                        Expression.literal(17.5), Expression.literal(20.0),
-                        Expression.literal(20.0), Expression.literal(42.0)
+                        Expression.literal(17.5), Expression.literal(18.0),
+                        Expression.literal(20.0), Expression.literal(38.0)
                     )
                 )
                 lineCap(LineCap.ROUND)
                 lineJoin(LineJoin.ROUND)
-                lineOpacity(0.95)
+                lineOpacity(0.96)
             })
             loadedStyle.addLayer(lineLayer(HISTORY_LAYER_ID, HISTORY_SOURCE_ID) {
                 lineColor("#4CAF50")
@@ -977,18 +989,27 @@ fun NavigationMap(
                 lineJoin(LineJoin.ROUND)
             })
 
-            // ── Efectos Especiales (Faros Delanteros y Luces Traseras SOBRE la calle y ruta) ──
-            if (isNightMode) {
-                try {
-                    if (loadedStyle.styleLayerExists(CAR_HEADLIGHTS_LAYER_ID)) {
-                        loadedStyle.removeStyleLayer(CAR_HEADLIGHTS_LAYER_ID)
-                    }
-                    if (loadedStyle.styleLayerExists(CAR_TAILLIGHTS_LAYER_ID)) {
-                        loadedStyle.removeStyleLayer(CAR_TAILLIGHTS_LAYER_ID)
-                    }
-                    try { loadedStyle.removeStyleImage("car-headlights-glow") } catch (_: Exception) {}
-                    try { loadedStyle.removeStyleImage("car-taillights-glow") } catch (_: Exception) {}
+            // ── Sombra de Contacto 3D Realista (Día y Noche) + Faros/Luces Traseras (Noche) ──
+            try {
+                listOf(CAR_SHADOW_LAYER_ID, CAR_HEADLIGHTS_LAYER_ID, CAR_TAILLIGHTS_LAYER_ID).forEach { id ->
+                    if (loadedStyle.styleLayerExists(id)) loadedStyle.removeStyleLayer(id)
+                }
+                try { loadedStyle.removeStyleImage("car-contact-shadow") } catch (_: Exception) {}
+                try { loadedStyle.removeStyleImage("car-headlights-glow") } catch (_: Exception) {}
+                try { loadedStyle.removeStyleImage("car-taillights-glow") } catch (_: Exception) {}
 
+                loadedStyle.addImage("car-contact-shadow", drawCarContactShadowGlow(isNightMode))
+                loadedStyle.addLayer(com.mapbox.maps.extension.style.layers.generated.symbolLayer(CAR_SHADOW_LAYER_ID, CAR_HEADLIGHTS_SOURCE_ID) {
+                    iconImage("car-contact-shadow")
+                    iconPitchAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment.MAP)
+                    iconRotationAlignment(com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment.MAP)
+                    iconRotate(Expression.get("bearing"))
+                    iconAllowOverlap(true)
+                    iconIgnorePlacement(true)
+                    iconSize(Expression.get("iconSize"))
+                })
+
+                if (isNightMode) {
                     loadedStyle.addImage("car-headlights-glow", drawHeadlightsGlow())
                     loadedStyle.addImage("car-taillights-glow", drawTaillightsGlow())
 
@@ -1011,8 +1032,8 @@ fun NavigationMap(
                         iconIgnorePlacement(true)
                         iconSize(Expression.get("iconSize"))
                     })
-                } catch (e: Exception) {}
-            }
+                }
+            } catch (e: Exception) {}
 
             // LocationComponent — puck del vehículo
             val locPlugin = mapView.location
@@ -1475,12 +1496,18 @@ fun NavigationMap(
     val refreshGlowOnMap: () -> Unit = {
         mapView.mapboxMap.getStyle { style ->
             try {
-                val headBmp = drawHeadlightsGlow()
-                val tailBmp = drawTaillightsGlow()
-                try { style.removeStyleImage("car-headlights-glow") } catch (_: Exception) {}
-                try { style.removeStyleImage("car-taillights-glow") } catch (_: Exception) {}
-                style.addImage("car-headlights-glow", headBmp)
-                style.addImage("car-taillights-glow", tailBmp)
+                val isNightNow = (currentStyle == "DARK" || currentStyle == "NEON")
+                val shadowBmp = drawCarContactShadowGlow(isNightNow)
+                try { style.removeStyleImage("car-contact-shadow") } catch (_: Exception) {}
+                style.addImage("car-contact-shadow", shadowBmp)
+                if (isNightNow) {
+                    val headBmp = drawHeadlightsGlow()
+                    val tailBmp = drawTaillightsGlow()
+                    try { style.removeStyleImage("car-headlights-glow") } catch (_: Exception) {}
+                    try { style.removeStyleImage("car-taillights-glow") } catch (_: Exception) {}
+                    style.addImage("car-headlights-glow", headBmp)
+                    style.addImage("car-taillights-glow", tailBmp)
+                }
                 mapView.location.updateSettings {
                     locationPuck = getVehiclePuck(
                         context,
@@ -1490,7 +1517,7 @@ fun NavigationMap(
                         AppSettings.vehicle3DScale.value,
                         isAerialMode = isAerialExploreMode,
                         trackingMode = AppSettings.mapTrackingMode.value,
-                        isNightStyle = (currentStyle == "DARK" || currentStyle == "NEON")
+                        isNightStyle = isNightNow
                     )
                 }
                 pushGlowFeatureToMap(force = true)
@@ -1520,6 +1547,10 @@ fun NavigationMap(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 mapView.apply {
+                    try {
+                        scalebar.enabled = false
+                        compass.enabled = false
+                    } catch (_: Exception) {}
                     try {
                         mapView.mapboxMap.setBounds(
                             com.mapbox.maps.CameraBoundsOptions.Builder()
@@ -1696,15 +1727,14 @@ fun NavigationMap(
             )
         }
 
-        // ── Contenedor de controles HUD sobre el Mapa (encuadrado en la zona izquierda del mapa) ──
-        val isDayHud = currentStyle == "LIGHT"
-        val hudSurfaceBg = if (isDayHud) Color.White.copy(alpha = 0.94f) else Color(0xFF0E1638).copy(alpha = 0.92f)
-        val hudPanelBg = if (isDayHud) Color(0xFFF8FAFC).copy(alpha = 0.97f) else Color(0xFF0B112E).copy(alpha = 0.96f)
-        val hudItemBg = if (isDayHud) Color(0xFFEEF2F8) else Color(0xFF151E4A).copy(alpha = 0.88f)
-        val hudTextPrimary = if (isDayHud) Color(0xFF0F172A) else Color.White
-        val hudTextSecondary = if (isDayHud) Color(0xFF475569) else Color.White.copy(alpha = 0.68f)
-        val hudAccent = if (isDayHud) Color(AppSettings.uiColor.value) else Color(0xFF38F2A6)
-        val hudBorderIdle = if (isDayHud) Color(0xFFCBD5E1) else Color.White.copy(alpha = 0.24f)
+        // ── Contenedor de controles HUD sobre el Mapa (Diseño Dark Frosted Glassmorphism Unificado sin superposiciones) ──
+        val hudSurfaceBg = Color(0xFF151F33).copy(alpha = 0.90f)
+        val hudPanelBg = Color(0xFF101829).copy(alpha = 0.96f)
+        val hudItemBg = Color(0xFF1A253D).copy(alpha = 0.92f)
+        val hudTextPrimary = Color.White
+        val hudTextSecondary = Color(0xFFCBD5E1)
+        val hudAccent = Color(0xFFF59E0B) // Ámbar deportivo de alta gama
+        val hudBorderIdle = Color.White.copy(alpha = 0.22f)
 
         Box(
             modifier = Modifier
@@ -1715,26 +1745,305 @@ fun NavigationMap(
                     bottom = bottomOverlayPadding
                 )
         ) {
-            // ── ZONA SUPERIOR ADAPTABLE (Horizontal: centro del mapa izquierdo; Vertical: a la derecha del reloj) ──
+            // ── BARRA SUPERIOR UNIFICADA (Una sola fila a la derecha del reloj digital: CERO botones encimados) ──
             val nextStep = activeRouteSteps.firstOrNull()
             Column(
-                modifier = if (isPortrait) {
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 56.dp, start = 14.dp, end = 14.dp)
-                        .fillMaxWidth()
-                } else {
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(
-                            top = 10.dp,
-                            start = if (endOverlayPadding > 0.dp) 202.dp else 230.dp,
-                            end = if (endOverlayPadding > 0.dp) 182.dp else 215.dp
-                        )
-                },
-                horizontalAlignment = if (isPortrait) Alignment.End else Alignment.CenterHorizontally
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .padding(
+                        top = 10.dp,
+                        start = if (isPortrait) 192.dp else 218.dp,
+                        end = 10.dp
+                    ),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 1. Banner Turn-by-Turn estilo Cockpit ("↱ 200 m / Calle 26")
+                // FILA 1: Buscador con peso flexible (weight 1f) + Botones circulares alineados a la derecha sin solaparse jamás
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    // 1A. Cápsula de Búsqueda Glassmorphic con botón integrado de Favoritos/Objetivo
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                        shape = RoundedCornerShape(50),
+                        color = hudSurfaceBg,
+                        border = BorderStroke(
+                            1.2.dp,
+                            if (isSearchFocused) hudAccent else hudBorderIdle
+                        ),
+                        shadowElevation = 10.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = hudAccent,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(7.dp))
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = if (isPortrait) "Buscar..." else "¿A dónde vamos?",
+                                        color = hudTextSecondary.copy(alpha = 0.85f),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = {
+                                        searchQuery = it
+                                        NavigationState.notifyUserInteraction()
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { focusState ->
+                                            isSearchFocused = focusState.isFocused
+                                            NavigationState.notifyUserInteraction()
+                                        },
+                                    textStyle = androidx.compose.ui.text.TextStyle(
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = hudTextPrimary
+                                    ),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            isSearching = true
+                                            showFavorites = false
+                                            coroutineScope.launch {
+                                                searchResults = searchPlaces(
+                                                    searchQuery,
+                                                    NavigationState.currentLocation.value
+                                                )
+                                                isSearching = false
+                                            }
+                                        }
+                                        focusManager.clearFocus()
+                                    })
+                                )
+                            }
+                            if (isSearching) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .padding(end = 6.dp)
+                                        .size(15.dp),
+                                    strokeWidth = 2.dp,
+                                    color = hudAccent
+                                )
+                            } else if (searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { searchQuery = ""; searchResults = emptyList() },
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Limpiar",
+                                        tint = hudTextPrimary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+
+                            // Botón circular integrado en el extremo derecho del buscador (Favoritos / Destinos)
+                            Surface(
+                                onClick = {
+                                    showFavorites = !showFavorites
+                                    searchResults = emptyList()
+                                },
+                                shape = CircleShape,
+                                color = if (showFavorites) hudAccent else Color(0xFF26344E),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (showFavorites) Icons.Default.Favorite else Icons.Default.GpsFixed,
+                                        contentDescription = "Favoritos y Destinos",
+                                        tint = if (showFavorites) Color(0xFF0F172A) else Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 1B. Botón Circular: Explorar Vista Aérea 2D / Recentrar Seguimiento 3D
+                    val isOffCenterOrAerial = isAerialExploreMode || !isFollowingLocation
+                    Surface(
+                        onClick = {
+                            if (isAerialExploreMode || !isFollowingLocation) {
+                                returnTo3DChaseView()
+                            } else {
+                                activateAerialExplore()
+                            }
+                        },
+                        shape = CircleShape,
+                        color = if (isOffCenterOrAerial) Color(0xFF007AFF) else hudSurfaceBg,
+                        border = BorderStroke(1.2.dp, if (isOffCenterOrAerial) Color.White else hudBorderIdle),
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = when {
+                                    !isFollowingLocation && !isAerialExploreMode -> Icons.Default.MyLocation
+                                    isAerialExploreMode -> Icons.Default.DirectionsCar
+                                    else -> Icons.Default.Explore
+                                },
+                                contentDescription = "Alternar Vista Aérea / Centrar",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // 1C. Botón Circular: Ajuste de Luces y Escala 3D
+                    Surface(
+                        onClick = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
+                        shape = CircleShape,
+                        color = if (showGlowTuning) hudAccent else hudSurfaceBg,
+                        border = BorderStroke(1.2.dp, hudBorderIdle),
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (showGlowTuning) Icons.Default.Close else Icons.Default.Lightbulb,
+                                contentDescription = "Ajuste de luces 3D",
+                                tint = if (showGlowTuning) Color(0xFF0F172A) else Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // 1D. Cápsula de Clima en Vivo (ej. "☁️ 28°C")
+                    Box {
+                        val weatherEmoji = when (effectiveWeatherEffect) {
+                            "RAIN"   -> "🌧️"
+                            "STORM"  -> "⛈️"
+                            "WIND"   -> "💨"
+                            "SNOW"   -> "❄️"
+                            "CLOUDS" -> "☁️"
+                            "OFF"    -> "🚫"
+                            else     -> "⛅"
+                        }
+                        Surface(
+                            onClick = { showWeatherSelector = !showWeatherSelector },
+                            shape = RoundedCornerShape(50),
+                            color = hudSurfaceBg,
+                            border = BorderStroke(
+                                1.2.dp,
+                                if (selectedWeatherMode != "AUTO") hudAccent else hudBorderIdle
+                            ),
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.height(38.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(text = weatherEmoji, fontSize = 13.sp)
+                                Text(
+                                    text = "${weatherSnapshot.currentTempC}°C",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showWeatherSelector,
+                            onDismissRequest = { showWeatherSelector = false },
+                            modifier = Modifier.background(Color(0xFF101829))
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("🛰️ Automático (GPS: ${weatherSnapshot.currentLabel})", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("AUTO"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🌧️ Lluvia", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("RAIN"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("💨 Viento Aerodinámico", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("WIND"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("⛈️ Tormenta Eléctrica", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("STORM"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("☀️ Despejado (Sol / Estrellas)", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("CLEAR"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("☁️ Nubes / Bruma", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("CLOUDS"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("❄️ Nieve", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("SNOW"); showWeatherSelector = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🚫 Desactivar Clima", color = Color.White) },
+                                onClick = { AppSettings.setMapWeatherMode("OFF"); showWeatherSelector = false }
+                            )
+                        }
+                    }
+
+                    // 1E. Botón Circular: Estilo de Mapa (Día / Noche / Neon / Satélite)
+                    Box {
+                        Surface(
+                            onClick = { showStyleSelector = !showStyleSelector },
+                            shape = CircleShape,
+                            color = hudSurfaceBg,
+                            border = BorderStroke(1.2.dp, hudBorderIdle),
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = when (currentStyle) {
+                                        "SATELLITE" -> Icons.Default.Public
+                                        "NEON"      -> Icons.Default.Bolt
+                                        "DARK"      -> Icons.Default.DarkMode
+                                        else        -> Icons.Default.LightMode
+                                    },
+                                    contentDescription = "Estilo Mapa",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showStyleSelector,
+                            onDismissRequest = { showStyleSelector = false },
+                            modifier = Modifier.background(Color(0xFF101829))
+                        ) {
+                            DropdownMenuItem(text = { Text("Modo Día 3D", color = Color.White) },   leadingIcon = { Icon(Icons.Default.LightMode, null, tint = Color(0xFFF59E0B)) }, onClick = { AppSettings.setMapStyle("LIGHT");     showStyleSelector = false })
+                            DropdownMenuItem(text = { Text("Noche Cockpit", color = Color.White) }, leadingIcon = { Icon(Icons.Default.DarkMode, null, tint = Color(0xFF60A5FA)) },  onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
+                            DropdownMenuItem(text = { Text("Neon Electric", color = Color.White) }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00E5FF)) },      onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
+                            DropdownMenuItem(text = { Text("Satélite", color = Color.White) },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF10B981)) },    onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
+                        }
+                    }
+                }
+
+                // FILA 2A: Banner Turn-by-Turn estilo Cockpit cuando hay una ruta activa
                 AnimatedVisibility(
                     visible = NavigationState.isRouteActive.value,
                     enter = slideInVertically(
@@ -1742,7 +2051,7 @@ fun NavigationMap(
                         animationSpec = spring(dampingRatio = 0.72f, stiffness = 360f)
                     ) + fadeIn(),
                     exit = slideOutVertically { -it } + fadeOut(),
-                    modifier = if (isPortrait) Modifier.padding(top = 52.dp).align(Alignment.CenterHorizontally) else Modifier
+                    modifier = Modifier.padding(top = 8.dp)
                 ) {
                     val distDisplay = when {
                         nextStep != null && nextStep.distance >= 1000 ->
@@ -1758,15 +2067,12 @@ fun NavigationMap(
 
                     Surface(
                         shape = RoundedCornerShape(22.dp),
-                        color = if (isDayHud) Color.White.copy(alpha = 0.96f) else Color(0xFF1A256E).copy(alpha = 0.95f),
+                        color = hudPanelBg,
                         shadowElevation = 14.dp,
-                        border = BorderStroke(
-                            1.5.dp,
-                            if (isDayHud) hudAccent.copy(alpha = 0.45f) else Color(0xFF4A66FF).copy(alpha = 0.60f)
-                        ),
-                        modifier = Modifier.widthIn(min = 200.dp, max = 310.dp)
+                        border = BorderStroke(1.4.dp, Color(0xFF3898FF).copy(alpha = 0.65f)),
+                        modifier = Modifier.widthIn(min = 210.dp, max = 330.dp)
                     ) {
-                        Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.fillMaxWidth()
@@ -1782,26 +2088,26 @@ fun NavigationMap(
                                             Icons.Default.TurnRight
                                         },
                                         contentDescription = null,
-                                        tint = hudAccent,
-                                        modifier = Modifier.size(36.dp)
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(34.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Row(verticalAlignment = Alignment.Bottom) {
                                         Text(
                                             text = distDisplay.first,
-                                            fontSize = 32.sp,
+                                            fontSize = 30.sp,
                                             fontWeight = FontWeight.Black,
-                                            color = hudTextPrimary,
-                                            lineHeight = 34.sp
+                                            color = Color.White,
+                                            lineHeight = 32.sp
                                         )
                                         if (distDisplay.second.isNotEmpty()) {
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = distDisplay.second,
-                                                fontSize = 17.sp,
+                                                fontSize = 16.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = hudTextSecondary,
-                                                modifier = Modifier.padding(bottom = 4.dp)
+                                                modifier = Modifier.padding(bottom = 3.dp)
                                             )
                                         }
                                     }
@@ -1809,9 +2115,9 @@ fun NavigationMap(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = streetDisplay,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = hudTextPrimary.copy(alpha = 0.92f),
+                                    color = Color.White.copy(alpha = 0.92f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1841,400 +2147,253 @@ fun NavigationMap(
                     }
                 }
 
-                // 2. Barra de búsqueda y Favoritos (Adaptada a Modo Día y Modo Noche)
+                // FILA 2B: Panel Flotante Glassmorphic para Favoritos y Resultados de Búsqueda
                 AnimatedVisibility(
-                    visible = !NavigationState.isRouteActive.value,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
+                    visible = searchResults.isNotEmpty() || showFavorites,
+                    enter = scaleIn(
+                        initialScale = 0.92f,
+                        animationSpec = spring(dampingRatio = 0.72f, stiffness = 400f)
+                    ) + fadeIn(tween(180)) + expandVertically(),
+                    exit = scaleOut(targetScale = 0.92f) + fadeOut(tween(140)) + shrinkVertically()
                 ) {
-                    Column(
-                        horizontalAlignment = if (isPortrait) Alignment.End else Alignment.CenterHorizontally,
-                        modifier = if (isPortrait) Modifier.fillMaxWidth() else Modifier.widthIn(max = 330.dp)
+                    val list = remember(showFavorites, searchResults, favoritesVersion) {
+                        if (showFavorites) favManager.getFavorites() else searchResults
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .heightIn(max = 250.dp),
+                        shape = RoundedCornerShape(22.dp),
+                        color = hudPanelBg,
+                        border = BorderStroke(
+                            1.2.dp,
+                            Brush.linearGradient(
+                                listOf(
+                                    hudAccent.copy(alpha = 0.55f),
+                                    Color(0xFF3898FF).copy(alpha = 0.45f)
+                                )
+                            )
+                        ),
+                        shadowElevation = 16.dp
                     ) {
-                        val favHeartScale by animateFloatAsState(
-                            targetValue = if (showFavorites) 1.12f else 1f,
-                            animationSpec = spring(dampingRatio = 0.5f, stiffness = 450f),
-                            label = "favHeartScale"
-                        )
-
-                        Row(
-                            modifier = if (isPortrait) Modifier.padding(start = 178.dp).fillMaxWidth() else Modifier,
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(40.dp),
-                                shape = RoundedCornerShape(20.dp),
-                                color = hudSurfaceBg,
-                                border = BorderStroke(
-                                    1.2.dp,
-                                    if (isSearchFocused) hudAccent else hudBorderIdle
-                                ),
-                                shadowElevation = if (isDayHud) 6.dp else 10.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        null,
-                                        tint = hudAccent,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (searchQuery.isEmpty()) {
-                                            Text(
-                                                if (isPortrait) "Buscar..." else "¿A dónde vamos?",
-                                                color = hudTextSecondary,
-                                                fontSize = 12.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        androidx.compose.foundation.text.BasicTextField(
-                                            value = searchQuery,
-                                            onValueChange = {
-                                                searchQuery = it
-                                                NavigationState.notifyUserInteraction()
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .onFocusChanged { focusState ->
-                                                    isSearchFocused = focusState.isFocused
-                                                    NavigationState.notifyUserInteraction()
-                                                },
-                                            textStyle = androidx.compose.ui.text.TextStyle(
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = hudTextPrimary
-                                            ),
-                                            singleLine = true,
-                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                            keyboardActions = KeyboardActions(onSearch = {
-                                                if (searchQuery.isNotEmpty()) {
-                                                    isSearching = true
-                                                    showFavorites = false
-                                                    coroutineScope.launch {
-                                                        searchResults = searchPlaces(
-                                                            searchQuery,
-                                                            NavigationState.currentLocation.value
-                                                        )
-                                                        isSearching = false
-                                                    }
-                                                }
-                                                focusManager.clearFocus()
-                                            })
-                                        )
-                                    }
-                                    if (isSearching) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(15.dp),
-                                            strokeWidth = 2.dp,
-                                            color = hudAccent
-                                        )
-                                    } else if (searchQuery.isNotEmpty()) {
-                                        IconButton(
-                                            onClick = { searchQuery = ""; searchResults = emptyList() },
-                                            modifier = Modifier.size(22.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                null,
-                                                tint = hudTextPrimary,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Botón de Favoritos con rebote elástico
-                            Surface(
-                                onClick = {
-                                    showFavorites = !showFavorites
-                                    searchResults = emptyList()
-                                },
-                                shape = CircleShape,
-                                color = if (showFavorites) hudAccent.copy(alpha = 0.18f) else hudSurfaceBg,
-                                border = BorderStroke(
-                                    1.3.dp,
-                                    if (showFavorites) hudAccent else hudBorderIdle
-                                ),
-                                shadowElevation = if (isDayHud) 6.dp else 8.dp,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .scale(favHeartScale)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        if (showFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Favoritos",
-                                        tint = if (showFavorites) hudAccent else hudTextPrimary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Panel Flotante Glassmorphic para Favoritos y Resultados de Búsqueda
-                        AnimatedVisibility(
-                            visible = searchResults.isNotEmpty() || showFavorites,
-                            enter = scaleIn(
-                                initialScale = 0.92f,
-                                animationSpec = spring(dampingRatio = 0.72f, stiffness = 400f)
-                            ) + fadeIn(tween(180)) + expandVertically(),
-                            exit = scaleOut(targetScale = 0.92f) + fadeOut(tween(140)) + shrinkVertically()
-                        ) {
-                            val list = remember(showFavorites, searchResults, favoritesVersion) {
-                                if (showFavorites) favManager.getFavorites() else searchResults
-                            }
-                            Surface(
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = if (isPortrait) 14.dp else 8.dp)
-                                    .heightIn(max = 260.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                color = hudPanelBg,
-                                border = BorderStroke(
-                                    1.2.dp,
-                                    Brush.linearGradient(
-                                        listOf(
-                                            hudAccent.copy(alpha = 0.55f),
-                                            Color(0xFF4A78FF).copy(alpha = 0.45f)
-                                        )
-                                    )
-                                ),
-                                shadowElevation = 16.dp
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    // Cabecera del panel
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = if (showFavorites) "★ TUS DESTINOS FAVORITOS" else "RESULTADOS ENCONTRADOS",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Black,
-                                            letterSpacing = 0.8.sp,
-                                            color = hudAccent
-                                        )
-                                        // Botón rápido para guardar ubicación actual como favorito
-                                        if (showFavorites) {
-                                            Surface(
-                                                onClick = {
-                                                    val loc = NavigationState.currentLocation.value
-                                                    if (loc != null && loc.latitude != 0.0) {
-                                                        val pt = Point.fromLngLat(loc.longitude, loc.latitude)
-                                                        favoriteLocationToSave = pt
-                                                        favoriteNameToSave = ""
-                                                        favoriteAddressToSave = "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}"
-                                                        selectedIconType = "Star"
-                                                        isSavingFavorite = true
-                                                        showSaveFavoriteDialog = true
-                                                        showFavorites = false
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(50),
-                                                color = hudAccent.copy(alpha = 0.14f),
-                                                border = BorderStroke(1.dp, hudAccent.copy(alpha = 0.45f))
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(Icons.Default.AddLocationAlt, null, tint = hudAccent, modifier = Modifier.size(13.dp))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Guardar Aquí", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = hudTextPrimary)
-                                                }
+                                Text(
+                                    text = if (showFavorites) "★ TUS DESTINOS FAVORITOS" else "RESULTADOS ENCONTRADOS",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.8.sp,
+                                    color = hudAccent
+                                )
+                                if (showFavorites) {
+                                    Surface(
+                                        onClick = {
+                                            val loc = NavigationState.currentLocation.value
+                                            if (loc != null && loc.latitude != 0.0) {
+                                                val pt = Point.fromLngLat(loc.longitude, loc.latitude)
+                                                favoriteLocationToSave = pt
+                                                favoriteNameToSave = ""
+                                                favoriteAddressToSave = "${String.format("%.5f", pt.latitude())}, ${String.format("%.5f", pt.longitude())}"
+                                                selectedIconType = "Star"
+                                                isSavingFavorite = true
+                                                showSaveFavoriteDialog = true
+                                                showFavorites = false
                                             }
+                                        },
+                                        shape = RoundedCornerShape(50),
+                                        color = hudAccent.copy(alpha = 0.18f),
+                                        border = BorderStroke(1.dp, hudAccent.copy(alpha = 0.50f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.AddLocationAlt, null, tint = hudAccent, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Guardar Aquí", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                         }
                                     }
+                                }
+                            }
 
-                                    if (list.isEmpty()) {
-                                        Box(
+                            if (list.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 20.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Default.FavoriteBorder,
+                                            null,
+                                            tint = hudTextSecondary.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            "Mantén presionado el mapa para marcar o guardar favoritos",
+                                            fontSize = 11.sp,
+                                            color = hudTextSecondary
+                                        )
+                                    }
+                                }
+                            } else {
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(list) { place ->
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = hudItemBg,
+                                            border = BorderStroke(1.dp, hudBorderIdle.copy(alpha = 0.35f)),
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(vertical = 22.dp),
-                                            contentAlignment = Alignment.Center
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable {
+                                                    val destPt = Point.fromLngLat(place.lon, place.lat)
+                                                    selectedDestination = destPt
+                                                    selectedDestinationTitle = place.name
+                                                    favoriteLocationToSave = destPt
+                                                    favoriteAddressToSave = place.address
+                                                    isFollowingLocation = false
+                                                    isPlacingDestination = true
+                                                    autoCenterJob?.cancel()
+
+                                                    destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                                    val pm = pointAnnotMgr
+                                                        ?: mapView.annotations.createPointAnnotationManager()
+                                                            .also { pointAnnotMgr = it }
+                                                    val iconBmp = drawCustomPin(uiColor)
+                                                    destAnnotation = pm.create(
+                                                        PointAnnotationOptions()
+                                                            .withPoint(destPt)
+                                                            .withIconImage(iconBmp)
+                                                    )
+
+                                                    mapView.viewport.idle()
+                                                    mapView.camera.easeTo(
+                                                        cameraOptions {
+                                                            center(destPt)
+                                                            zoom(16.8)
+                                                            pitch(40.0)
+                                                        },
+                                                        MapAnimationOptions.mapAnimationOptions { duration(720) }
+                                                    )
+
+                                                    searchResults = emptyList()
+                                                    showFavorites = false
+                                                    focusManager.clearFocus()
+                                                }
                                         ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Icon(
-                                                    Icons.Default.FavoriteBorder,
-                                                    null,
-                                                    tint = hudTextSecondary.copy(alpha = 0.5f),
-                                                    modifier = Modifier.size(28.dp)
-                                                )
-                                                Spacer(modifier = Modifier.height(6.dp))
-                                                Text(
-                                                    "Mantén presionado el mapa para marcar o guardar favoritos",
-                                                    fontSize = 11.sp,
-                                                    color = hudTextSecondary
-                                                )
-                                            }
-                                        }
-                                    } else {
-                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            items(list) { place ->
-                                                Surface(
-                                                    shape = RoundedCornerShape(14.dp),
-                                                    color = hudItemBg,
-                                                    border = BorderStroke(1.dp, hudBorderIdle.copy(alpha = 0.35f)),
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
                                                     modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(14.dp))
-                                                        .clickable {
-                                                            val destPt = Point.fromLngLat(place.lon, place.lat)
-                                                            selectedDestination = destPt
-                                                            selectedDestinationTitle = place.name
-                                                            favoriteLocationToSave = destPt
-                                                            favoriteAddressToSave = place.address
-                                                            isFollowingLocation = false
-                                                            isPlacingDestination = true
-                                                            autoCenterJob?.cancel()
-
-                                                            destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                                                            val pm = pointAnnotMgr
-                                                                ?: mapView.annotations.createPointAnnotationManager()
-                                                                    .also { pointAnnotMgr = it }
-                                                            val iconBmp = drawCustomPin(uiColor)
-                                                            destAnnotation = pm.create(
-                                                                PointAnnotationOptions()
-                                                                    .withPoint(destPt)
-                                                                    .withIconImage(iconBmp)
+                                                        .size(32.dp)
+                                                        .background(hudAccent.copy(alpha = 0.18f), CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        when (place.iconType) {
+                                                            "Home" -> Icons.Default.Home
+                                                            "Work" -> Icons.Default.Work
+                                                            else -> Icons.Default.Star
+                                                        },
+                                                        null,
+                                                        tint = hudAccent,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        place.name,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = Color.White,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        fontSize = 13.sp
+                                                    )
+                                                    Text(
+                                                        place.address.ifEmpty { "Ubicación guardada" },
+                                                        color = hudTextSecondary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+                                                if (place.distanceKm > 0) {
+                                                    Text(
+                                                        text = if (place.distanceKm < 1)
+                                                            "${(place.distanceKm * 1000).toInt()} m"
+                                                        else
+                                                            String.format("%.1f km", place.distanceKm),
+                                                        fontSize = 11.sp,
+                                                        color = hudAccent,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(end = 6.dp)
+                                                    )
+                                                }
+                                                Surface(
+                                                    onClick = {
+                                                        val destPt = Point.fromLngLat(place.lon, place.lat)
+                                                        isAerialExploreMode = false
+                                                        selectedDestination = destPt
+                                                        selectedDestinationTitle = place.name
+                                                        destAnnotation?.let { pointAnnotMgr?.delete(it) }
+                                                        val pm = pointAnnotMgr
+                                                            ?: mapView.annotations.createPointAnnotationManager()
+                                                                .also { pointAnnotMgr = it }
+                                                        val iconBmp = drawCustomPin(uiColor)
+                                                        destAnnotation = pm.create(
+                                                            PointAnnotationOptions()
+                                                                .withPoint(destPt)
+                                                                .withIconImage(iconBmp)
+                                                        )
+                                                        searchResults = emptyList()
+                                                        showFavorites = false
+                                                        focusManager.clearFocus()
+                                                        NavigationState.currentLocation.value?.let { loc ->
+                                                            calculateRoute(
+                                                                Point.fromLngLat(loc.longitude, loc.latitude),
+                                                                destPt
                                                             )
-
-                                                            mapView.viewport.idle()
-                                                            mapView.camera.easeTo(
-                                                                cameraOptions {
-                                                                    center(destPt)
-                                                                    zoom(16.8)
-                                                                    pitch(40.0)
-                                                                },
-                                                                MapAnimationOptions.mapAnimationOptions { duration(720) }
-                                                            )
-
-                                                            searchResults = emptyList()
-                                                            showFavorites = false
-                                                            focusManager.clearFocus()
                                                         }
+                                                    },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = Color(0xFF007AFF)
                                                 ) {
                                                     Row(
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(34.dp)
-                                                                .background(
-                                                                    hudAccent.copy(alpha = 0.16f),
-                                                                    CircleShape
-                                                                ),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Icon(
-                                                                when (place.iconType) {
-                                                                    "Home" -> Icons.Default.Home
-                                                                    "Work" -> Icons.Default.Work
-                                                                    else -> Icons.Default.Star
-                                                                },
-                                                                null,
-                                                                tint = hudAccent,
-                                                                modifier = Modifier.size(18.dp)
-                                                            )
-                                                        }
-                                                        Spacer(modifier = Modifier.width(10.dp))
-                                                        Column(modifier = Modifier.weight(1f)) {
-                                                            Text(
-                                                                place.name,
-                                                                fontWeight = FontWeight.ExtraBold,
-                                                                color = hudTextPrimary,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                                fontSize = 13.sp
-                                                            )
-                                                            Text(
-                                                                place.address.ifEmpty { "Ubicación guardada" },
-                                                                color = hudTextSecondary,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                                fontSize = 11.sp
-                                                            )
-                                                        }
-                                                        if (place.distanceKm > 0) {
-                                                            Text(
-                                                                text = if (place.distanceKm < 1)
-                                                                    "${(place.distanceKm * 1000).toInt()} m"
-                                                                else
-                                                                    String.format("%.1f km", place.distanceKm),
-                                                                fontSize = 11.sp,
-                                                                color = hudAccent,
-                                                                fontWeight = FontWeight.Bold,
-                                                                modifier = Modifier.padding(end = 6.dp)
-                                                            )
-                                                        }
-                                                        // Botón directo "IR" con 1 toque
-                                                        Surface(
-                                                            onClick = {
-                                                                val destPt = Point.fromLngLat(place.lon, place.lat)
-                                                                isAerialExploreMode = false
-                                                                selectedDestination = destPt
-                                                                selectedDestinationTitle = place.name
-                                                                destAnnotation?.let { pointAnnotMgr?.delete(it) }
-                                                                val pm = pointAnnotMgr
-                                                                    ?: mapView.annotations.createPointAnnotationManager()
-                                                                        .also { pointAnnotMgr = it }
-                                                                val iconBmp = drawCustomPin(uiColor)
-                                                                destAnnotation = pm.create(
-                                                                    PointAnnotationOptions()
-                                                                        .withPoint(destPt)
-                                                                        .withIconImage(iconBmp)
-                                                                )
-                                                                searchResults = emptyList()
-                                                                showFavorites = false
-                                                                focusManager.clearFocus()
-                                                                NavigationState.currentLocation.value?.let { loc ->
-                                                                    calculateRoute(
-                                                                        Point.fromLngLat(loc.longitude, loc.latitude),
-                                                                        destPt
-                                                                    )
-                                                                }
-                                                            },
-                                                            shape = RoundedCornerShape(10.dp),
-                                                            color = Color(0xFF10B981)
-                                                        ) {
-                                                            Row(
-                                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                                                                verticalAlignment = Alignment.CenterVertically
-                                                            ) {
-                                                                Icon(Icons.Default.Navigation, null, tint = Color.White, modifier = Modifier.size(13.dp))
-                                                                Spacer(modifier = Modifier.width(3.dp))
-                                                                Text("IR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
-                                                            }
-                                                        }
-                                                        if (showFavorites) {
-                                                            IconButton(
-                                                                onClick = {
-                                                                    favManager.removeFavorite(place.name)
-                                                                    favoritesVersion++
-                                                                },
-                                                                modifier = Modifier.size(28.dp)
-                                                            ) {
-                                                                Icon(
-                                                                    Icons.Default.DeleteOutline,
-                                                                    contentDescription = "Eliminar favorito",
-                                                                    tint = hudTextSecondary,
-                                                                    modifier = Modifier.size(16.dp)
-                                                                )
-                                                            }
-                                                        }
+                                                        Icon(Icons.Default.Navigation, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                                        Spacer(modifier = Modifier.width(3.dp))
+                                                        Text("IR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+                                                    }
+                                                }
+                                                if (showFavorites) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            favManager.removeFavorite(place.name)
+                                                            favoritesVersion++
+                                                        },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.DeleteOutline,
+                                                            contentDescription = "Eliminar favorito",
+                                                            tint = hudTextSecondary,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
                                                     }
                                                 }
                                             }
@@ -2246,7 +2405,7 @@ fun NavigationMap(
                     }
                 }
 
-                // 3. Tarjeta Glassmorphic Animada al marcar un Punto en el Mapa (con pulso neón + Guardar Favorito + Ruta 3D)
+                // FILA 2C: Tarjeta Glassmorphic Animada al marcar un Punto en el Mapa
                 AnimatedVisibility(
                     visible = selectedDestination != null && !NavigationState.isRouteActive.value,
                     enter = scaleIn(
@@ -2282,21 +2441,15 @@ fun NavigationMap(
                     )
 
                     Surface(
-                        modifier = if (isPortrait) {
-                            Modifier
-                                .padding(top = 14.dp)
-                                .fillMaxWidth()
-                        } else {
-                            Modifier
-                                .padding(top = 8.dp)
-                                .widthIn(min = 310.dp, max = 420.dp)
-                        },
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .fillMaxWidth(),
                         shape = RoundedCornerShape(22.dp),
                         color = hudPanelBg,
                         border = BorderStroke(
                             1.4.dp,
                             Brush.linearGradient(
-                                listOf(hudAccent, Color(0xFF4B7BFF))
+                                listOf(hudAccent, Color(0xFF3898FF))
                             )
                         ),
                         shadowElevation = 16.dp
@@ -2305,12 +2458,11 @@ fun NavigationMap(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Icono de destino con pulso radar animado
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
+                                    .size(36.dp)
                                     .scale(pulseScale)
-                                    .background(hudAccent.copy(alpha = 0.16f), CircleShape)
+                                    .background(hudAccent.copy(alpha = 0.18f), CircleShape)
                                     .border(1.dp, hudAccent.copy(alpha = 0.65f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -2318,7 +2470,7 @@ fun NavigationMap(
                                     Icons.Default.Place,
                                     contentDescription = null,
                                     tint = hudAccent,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
@@ -2328,7 +2480,7 @@ fun NavigationMap(
                                 Text(
                                     text = selectedDestinationTitle.ifBlank { "Punto seleccionado" },
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = hudTextPrimary,
+                                    color = Color.White,
                                     fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -2344,7 +2496,6 @@ fun NavigationMap(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Botón para Guardar este punto en Favoritos con animación
                             IconButton(
                                 onClick = {
                                     destPt?.let { pt ->
@@ -2358,7 +2509,7 @@ fun NavigationMap(
                                 },
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(if (isDayHud) Color(0xFFFFF8E1) else Color(0xFF1A265C), CircleShape)
+                                    .background(Color(0xFF1F2B46), CircleShape)
                             ) {
                                 Icon(
                                     Icons.Default.StarBorder,
@@ -2370,7 +2521,6 @@ fun NavigationMap(
 
                             Spacer(modifier = Modifier.width(6.dp))
 
-                            // Botón Cancelar punto
                             IconButton(
                                 onClick = {
                                     selectedDestination = null
@@ -2385,14 +2535,13 @@ fun NavigationMap(
                                 },
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(if (isDayHud) Color(0xFFFFEBEE) else Color(0xFF2A1832), CircleShape)
+                                    .background(Color(0xFF2D1B2E), CircleShape)
                             ) {
                                 Icon(Icons.Default.Close, "Cancelar", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
                             }
 
                             Spacer(modifier = Modifier.width(6.dp))
 
-                            // Botón Iniciar Ruta
                             Button(
                                 onClick = {
                                     NavigationState.currentLocation.value?.let { loc ->
@@ -2405,7 +2554,7 @@ fun NavigationMap(
                                     }
                                 },
                                 shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF)),
                                 modifier = Modifier.height(36.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp)
                             ) {
@@ -2414,197 +2563,6 @@ fun NavigationMap(
                                 Text("IR", fontWeight = FontWeight.Black, color = Color.White, fontSize = 12.sp)
                             }
                         }
-                    }
-                }
-            }
-
-            // ── CONTROLES RÁPIDOS DE MAPA (Esquina Superior Derecha del área del mapa) ──
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 10.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Botón Principal: Alternar Vista Aérea Temporal (2D Explorar) <-> Seguimiento Activo
-                Surface(
-                    onClick = {
-                        if (isAerialExploreMode) {
-                            returnTo3DChaseView()
-                        } else {
-                            activateAerialExplore()
-                        }
-                    },
-                    shape = RoundedCornerShape(50),
-                    color = if (isAerialExploreMode) hudAccent else hudSurfaceBg,
-                    border = BorderStroke(
-                        1.2.dp,
-                        if (isAerialExploreMode) Color.White else hudBorderIdle
-                    ),
-                    shadowElevation = if (isDayHud) 5.dp else 8.dp,
-                    modifier = Modifier.height(38.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isAerialExploreMode) Icons.Default.DirectionsCar else Icons.Default.Explore,
-                            contentDescription = "Alternar Vista Aérea / Seguimiento",
-                            tint = if (isAerialExploreMode) Color.White else hudAccent,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Text(
-                            text = if (isAerialExploreMode) "SEGUIR" else "EXPLORAR",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (isAerialExploreMode) Color.White else hudTextPrimary
-                        )
-                    }
-                }
-
-                // Botón recentrar — vuelve inmediatamente al seguimiento activo
-                AnimatedVisibility(visible = !isFollowingLocation && !isAerialExploreMode) {
-                    SmallFloatingActionButton(
-                        onClick = returnTo3DChaseView,
-                        containerColor = Color(0xFF10B981),
-                        contentColor = Color.White,
-                        shape = CircleShape,
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(Icons.Default.MyLocation, "Centrar", modifier = Modifier.size(19.dp))
-                    }
-                }
-
-                // Botón ajuste de luces del vehículo 3D
-                Surface(
-                    onClick = { NavigationState.showGlowTuning.value = !NavigationState.showGlowTuning.value },
-                    shape = CircleShape,
-                    color = if (showGlowTuning) hudAccent else hudSurfaceBg,
-                    border = BorderStroke(1.dp, hudBorderIdle),
-                    shadowElevation = if (isDayHud) 5.dp else 8.dp,
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (showGlowTuning) Icons.Default.Close else Icons.Default.Highlight,
-                            contentDescription = "Ajuste de luces y escala",
-                            tint = if (showGlowTuning) Color.White else hudTextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // Selector de Animación Climática en el Mapa (Clima GPS en vivo o manual)
-                Box {
-                    val weatherEmoji = when (effectiveWeatherEffect) {
-                        "RAIN"   -> "🌧️"
-                        "STORM"  -> "⛈️"
-                        "WIND"   -> "💨"
-                        "SNOW"   -> "❄️"
-                        "CLOUDS" -> "☁️"
-                        "OFF"    -> "🚫"
-                        else     -> if (currentStyle == "LIGHT") "☀️" else "✨"
-                    }
-                    Surface(
-                        onClick = { showWeatherSelector = !showWeatherSelector },
-                        shape = RoundedCornerShape(50),
-                        color = hudSurfaceBg,
-                        border = BorderStroke(
-                            1.dp,
-                            if (selectedWeatherMode != "AUTO") hudAccent else hudBorderIdle
-                        ),
-                        shadowElevation = if (isDayHud) 5.dp else 6.dp,
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(text = weatherEmoji, fontSize = 13.sp)
-                            Text(
-                                text = "${weatherSnapshot.currentTempC}°",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Black,
-                                color = hudTextPrimary
-                            )
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = showWeatherSelector,
-                        onDismissRequest = { showWeatherSelector = false },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("🛰️ Automático (GPS: ${weatherSnapshot.currentLabel})") },
-                            onClick = { AppSettings.setMapWeatherMode("AUTO"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🌧️ Lluvia") },
-                            onClick = { AppSettings.setMapWeatherMode("RAIN"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("💨 Viento Aerodinámico") },
-                            onClick = { AppSettings.setMapWeatherMode("WIND"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("⛈️ Tormenta Eléctrica") },
-                            onClick = { AppSettings.setMapWeatherMode("STORM"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("☀️/✨ Despejado (Sol / Estrellas)") },
-                            onClick = { AppSettings.setMapWeatherMode("CLEAR"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("☁️ Nubes / Bruma") },
-                            onClick = { AppSettings.setMapWeatherMode("CLOUDS"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("❄️ Nieve") },
-                            onClick = { AppSettings.setMapWeatherMode("SNOW"); showWeatherSelector = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("🚫 Desactivar Clima") },
-                            onClick = { AppSettings.setMapWeatherMode("OFF"); showWeatherSelector = false }
-                        )
-                    }
-                }
-
-                // Selector de estilo de mapa
-                Box {
-                    Surface(
-                        onClick = { showStyleSelector = !showStyleSelector },
-                        shape = CircleShape,
-                        color = hudSurfaceBg,
-                        border = BorderStroke(1.dp, hudBorderIdle),
-                        shadowElevation = if (isDayHud) 5.dp else 8.dp,
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = when (currentStyle) {
-                                    "SATELLITE" -> Icons.Default.Public
-                                    "NEON"      -> Icons.Default.Bolt
-                                    "DARK"      -> Icons.Default.DarkMode
-                                    else        -> Icons.Default.LightMode
-                                },
-                                contentDescription = "Estilo Mapa",
-                                tint = hudTextPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = showStyleSelector,
-                        onDismissRequest = { showStyleSelector = false },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
-                    ) {
-                        DropdownMenuItem(text = { Text("Modo Día") },      leadingIcon = { Icon(Icons.Default.LightMode, null, tint = Color(0xFFF59E0B)) }, onClick = { AppSettings.setMapStyle("LIGHT");     showStyleSelector = false })
-                        DropdownMenuItem(text = { Text("Noche Cockpit") }, leadingIcon = { Icon(Icons.Default.DarkMode, null, tint = Color(0xFF60A5FA)) },  onClick = { AppSettings.setMapStyle("DARK");      showStyleSelector = false })
-                        DropdownMenuItem(text = { Text("Neon Electric") }, leadingIcon = { Icon(Icons.Default.Bolt, null, tint = Color(0xFF00E5FF)) },      onClick = { AppSettings.setMapStyle("NEON");      showStyleSelector = false })
-                        DropdownMenuItem(text = { Text("Satélite") },      leadingIcon = { Icon(Icons.Default.Public, null, tint = Color(0xFF10B981)) },    onClick = { AppSettings.setMapStyle("SATELLITE"); showStyleSelector = false })
                     }
                 }
             }
@@ -3703,6 +3661,63 @@ fun drawHeadlightsGlow(
     val reflColor = android.graphics.Color.argb(95, 255, 240, 195)
     paint.shader = RadialGradient(cx, (headY + headReach) * 0.5f, 68f, reflColor, transparent, Shader.TileMode.CLAMP)
     canvas.drawCircle(cx, (headY + headReach) * 0.5f, 68f, paint)
+
+    return bitmap
+}
+
+/**
+ * Sombra de contacto proyectada bajo el chasis y neumáticos del modelo 3D (con reflejo ambiental suave)
+ * para que el auto tenga volumen y presencia realista sobre el asfalto en Modo Día y Modo Noche.
+ */
+fun drawCarContactShadowGlow(
+    isNight: Boolean,
+    carHalfW: Float = AppSettings.glowCarHalfW.value,
+    headY: Float = AppSettings.glowHeadY.value,
+    tailY: Float = AppSettings.glowTailY.value
+): Bitmap {
+    val w = 512
+    val h = 512
+    val cx = w / 2f
+    val cy = (headY + tailY) * 0.5f + 4f
+    val rx = (carHalfW * 1.38f).coerceIn(22f, 64f)
+    val ry = ((tailY - headY) * 0.85f).coerceIn(26f, 76f)
+
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // Sombra suave desplazada ligeramente hacia abajo/izquierda (perspectiva solar en 3ra persona)
+    val shadowCx = cx - rx * 0.24f
+    val shadowCy = cy + ry * 0.14f
+    val coreAlpha = if (isNight) 185 else 155
+    val midAlpha = if (isNight) 95 else 75
+
+    canvas.save()
+    canvas.scale(1f, ry / rx, shadowCx, shadowCy)
+    paint.shader = RadialGradient(
+        shadowCx, shadowCy, rx * 1.45f,
+        intArrayOf(
+            android.graphics.Color.argb(coreAlpha, 10, 16, 28),
+            android.graphics.Color.argb(midAlpha, 15, 23, 42),
+            android.graphics.Color.TRANSPARENT
+        ),
+        floatArrayOf(0f, 0.58f, 1f),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(shadowCx, shadowCy, rx * 1.45f, paint)
+    canvas.restore()
+
+    // Reflejo cálido sutil de la carrocería amarilla sobre el borde del asfalto
+    paint.shader = RadialGradient(
+        cx, cy + ry * 0.35f, rx * 1.15f,
+        intArrayOf(
+            android.graphics.Color.argb(if (isNight) 38 else 46, 255, 208, 40),
+            android.graphics.Color.TRANSPARENT
+        ),
+        floatArrayOf(0f, 1f),
+        Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(cx, cy + ry * 0.35f, rx * 1.15f, paint)
 
     return bitmap
 }

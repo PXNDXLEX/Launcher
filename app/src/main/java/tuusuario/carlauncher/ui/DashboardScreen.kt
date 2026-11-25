@@ -2162,9 +2162,37 @@ fun RouteMapFloatingDialog(onDismiss: () -> Unit) {
 @Composable
 fun DashcamPreviewOverlay() {
     val preview = DashcamManager.activePreview.value ?: return
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
-    var offsetX by remember { mutableStateOf(36f) }
-    var offsetY by remember { mutableStateOf(96f) }
+    // Se posiciona por defecto DEBAJO del botón GRABAR (top = 148.dp) para jamás cubrir el botón de detener grabación
+    val initialX = with(density) { 14.dp.toPx() }
+    val initialY = with(density) { 148.dp.toPx() }
+    var offsetX by remember { mutableStateOf(initialX) }
+    var offsetY by remember { mutableStateOf(initialY) }
+    var isMinimized by remember { mutableStateOf(false) }
+
+    if (isMinimized) {
+        Surface(
+            onClick = { isMinimized = false },
+            shape = RoundedCornerShape(50),
+            color = Color(0xFF141C2E).copy(alpha = 0.94f),
+            border = BorderStroke(1.2.dp, Color(0xFFFF405C).copy(alpha = 0.8f)),
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                .height(32.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.Visibility, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Text("VER CÁMARA", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        return
+    }
 
     Card(
         modifier = Modifier
@@ -2176,10 +2204,11 @@ fun DashcamPreviewOverlay() {
                     offsetY += dragAmount.y
                 }
             }
-            .width(210.dp)
-            .height(150.dp),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(10.dp)
+            .width(196.dp)
+            .height(136.dp),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.24f)),
+        elevation = CardDefaults.cardElevation(12.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
@@ -2192,17 +2221,60 @@ fun DashcamPreviewOverlay() {
                     }
                 }
             )
+
+            // Barra superior de la cámara con indicador REC, botón directo DETENER y botón Minimizar
             Row(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .background(Color(0xFFE53935).copy(alpha = 0.9f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .background(Color(0xFF0B101E).copy(alpha = 0.78f))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(modifier = Modifier.size(7.dp).background(Color.White, CircleShape))
-                Spacer(modifier = Modifier.width(5.dp))
-                Text("REC", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier
+                        .background(Color(0xFFE53935), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.size(6.dp).background(Color.White, CircleShape))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("REC", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Botón directo para detener grabación desde la misma ventana de cámara
+                    Surface(
+                        onClick = { DashcamManager.stopRecording() },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFF1744)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Stop, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text("PARAR", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+
+                    // Botón para ocultar vista previa sin detener grabación
+                    Surface(
+                        onClick = { isMinimized = true },
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.18f),
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Remove, "Minimizar cámara", tint = Color.White, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
             }
         }
     }
